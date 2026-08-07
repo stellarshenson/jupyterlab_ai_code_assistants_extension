@@ -14,6 +14,29 @@ The default configuration will produce video for failing tests and an HTML repor
 
 > There is a UI mode that you may like; see [that video](https://www.youtube.com/watch?v=jF0yA-JLQW0).
 
+## Dedicated server environment
+
+The suite starts its server from `ui-tests/.venv`, never from the environment you develop in. The venv holds JupyterLab and this extension and nothing else, so the retired standalone extensions cannot dock a second panel and skew the "one panel per provider" assertions, and no test can touch a live JupyterLab.
+
+Create it once, from the repository root, after `make install` has built the labextension assets:
+
+```sh
+python3 -m venv ui-tests/.venv
+ui-tests/.venv/bin/pip install "jupyterlab>=4,<5" . jupyterlab-colourful-tab-extension
+```
+
+`jupyterlab-colourful-tab-extension` is not optional here despite the `IColourfulTabs` token being optional in the plugin: `package.json` declares it a non-bundled singleton shared package, so its module must be supplied by an installed extension or this extension's plugin fails to load and docks no panels at all.
+
+Verify the isolation:
+
+```sh
+ui-tests/.venv/bin/jupyter labextension list
+```
+
+`jupyterlab_ai_code_assistants_extension` must be listed `OK`, and `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension` must be absent. Never uninstall anything from your own environment to achieve that - a fresh venv gives it for free.
+
+Everything the running server reads or writes is redirected into `ui-tests/.scratch`: the HOME each provider resolves its store from, this extension's state directory, Jupyter's config, data and runtime directories, and a directory of stub assistant binaries at the front of `PATH`. The scratch tree is swept before the server starts (in `webServer.command`) and again in `global-teardown.js`.
+
 ## Run the tests
 
 > All commands are assumed to be executed from the root directory
@@ -42,8 +65,10 @@ cd ..
 
 ```sh
 cd ./ui-tests
-jlpm playwright test
+JLAB_TEST_PORT=8899 jlpm playwright test > run.log 2>&1; echo exit:$?
 ```
+
+`JLAB_TEST_PORT` moves the test server off 8888, which a live JupyterLab or JupyterHub usually holds; it reaches the `baseURL`, the server command and `jupyter_server_test_config.py` alike. Redirect the output rather than piping through `tee` - a pipe reports the exit status of `tee`, so a suite whose server never started would read as a pass.
 
 Test results will be shown in the terminal. In case of any test failures, the test report
 will be opened in your browser at the end of the tests execution; see

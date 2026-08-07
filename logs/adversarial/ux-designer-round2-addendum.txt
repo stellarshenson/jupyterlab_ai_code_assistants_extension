@@ -1,0 +1,49 @@
+
+=== ROUND 2 - PINNED RE-CONFIRMATION (supersedes the TASK's whole-repo scope) ===
+
+Your round-1 report is logs/adversarial/ux-designer-round1.txt (15 findings, DO-NOT-SHIP). All were
+triaged; the confirmed set has been fixed. Current state: Jest 61/61, pytest 131/131, Galata 16/16,
+eslint 0 errors. Your round-2 job:
+
+1. For EACH fix below, verify it actually closes your round-1 finding - cite the file:line of the
+   fix. Per-finding verdict: CLOSED or STILL-OPEN (with what the user still perceives).
+2. Inspect ONLY the touched files (below) for regressions the fixes themselves introduced.
+3. DO NOT re-litigate the DECLINED items - each carries its ruling. Re-raising one without new
+   evidence counts against you.
+4. NO fresh whole-repo sweep. New findings admissible only in code changed since round 1.
+
+FIXES APPLIED (all in src/core/panel.ts, popup.ts, terminals.ts, icons.ts, modes.ts (new),
+style/base.css unless noted):
+- Session rows: role="button", tabindex=0, Enter/Space open, ContextMenu key + Shift+F10 open the
+  context menu at the row rect; caret aria-hidden
+- One-shot action errors: _showActionError (no false "retrying" copy) wired to favourite rollback,
+  project removal, native-flag branch launch
+- Tooltip absolute time: "Last activity: YYYY-MM-DD HH:MM (3d ago)"; mo/y buckets added to relative time
+- Reduced motion: prefers-reduced-motion CSS block stills the three spin surfaces (static, 0.5
+  opacity) and the 500ms spin floor is skipped in code
+- Status dot aria-label; error strip role="status"; filter inputs aria-label (panel + popup)
+- Empty states: "No matches." vs "Empty." distinguished; empty-panel hint line added
+- Unsafe-variant commands carry a warning glyph (new warningIcon, Material warning triangle)
+- Launch-mode precedence extracted to src/core/modes.ts resolveLaunchMode: an enum set off-default
+  beats any boolean; boolean fires only when every enum is at default; force still wins (4 Jest cases)
+- Branch popup: rows focusable, Enter switches; min-width min(360px, 90vw)
+- Popup delete: two-step arming when deleteToTrash === false (first click arms "Confirm delete N"
+  error-fill, disarms after 4s or selection change, second click executes) - no nested dialog
+- Launch spinner dialog gained a Cancel button (dismisses scrim only; comment states it does not
+  abort the request)
+- 24x24 hit boxes on iconButton and searchClear (glyph sizes unchanged)
+
+DECLINED (rulings - do not re-raise):
+- bg-chip rename: kept for parity with the original claude extension's naming
+- LabIcon carets replacing text carets: rejected as oversized for the defect
+- Widening the one-shot error copy split beyond the three triaged sites (_branchByNativeCommand,
+  _branchByServerCopy, _cleanupParallel, _newSession still use "retrying" copy): escalated to the
+  product owner, awaiting their ruling - out of your scope this round
+
+TOUCHED FILES (regression scope): src/core/panel.ts, src/core/popup.ts, src/core/terminals.ts,
+src/core/icons.ts, src/core/modes.ts, src/core/types.ts, src/core/colour.ts, src/core/registry.ts,
+src/index.ts, src/providers/claude.ts, src/providers/gemini.ts, style/base.css,
+src/__tests__/launch-mode.spec.ts
+
+VERDICT: SHIP if every fix is CLOSED and no fix-introduced regression exists; otherwise
+DO-NOT-SHIP listing ONLY still-open or regression items.

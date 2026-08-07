@@ -1,0 +1,29 @@
+
+=== ROUND 3 - PINNED RE-CONFIRMATION (supersedes the TASK's whole-repo scope) ===
+
+Your round-2 report (logs/adversarial/ux-designer-round2.txt) closed 14 of 15 round-1 findings
+and raised exactly 2 MINOR one-line findings. Both are now fixed. Current state: Jest 61/61,
+pytest 132/132, Galata 16/16, version 0.1.14. Your round-3 job is ONLY:
+
+1. Verify each fix below closes your round-2 finding - cite file:line. Per-finding verdict:
+   CLOSED or STILL-OPEN.
+2. Inspect ONLY the batch-3 touched files (below) for NEW UX/a11y regressions these two fixes
+   introduced.
+3. NO fresh sweep, no re-litigation of anything already CLOSED in round 2 or previously
+   declined (bg-chip name, LabIcon carets, error-copy widening - all ruled).
+
+FIXES APPLIED:
+1. Launch-mode settings copy: src/providers/gemini.ts approvalMode description reworded to the
+   implemented precedence (non-default value takes precedence over the YOLO switch; only the
+   forced YOLO menu action overrides it). schema/plugin.json regenerated through the build
+   chain and verified to carry the new wording - judge the rendered settings text there.
+2. Popup switch rows: src/core/popup.ts branch rows now carry role="button" and the same
+   Space-key branch the panel rows use (Space triggers switch, scroll suppressed via
+   preventDefault); Enter behaviour unchanged.
+
+TOUCHED FILES (regression scope): src/providers/gemini.ts, src/core/popup.ts,
+schema/plugin.json (generated). (Batch 3 also touched python store/provider delete internals -
+server-side only, no UI surface; out of your scope.)
+
+VERDICT: SHIP if both are CLOSED and no new UX regression; otherwise DO-NOT-SHIP listing ONLY
+still-open or regression items.

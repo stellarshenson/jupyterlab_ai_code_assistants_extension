@@ -1,0 +1,40 @@
+All verification complete. Final report:
+
+## Verdict
+`VERDICT: SHIP` - all 19 rulings closed as applied or as narrowed, no functional regression in the touched files; the two residuals below are taste-tier wording/constant notes, stated per triage discipline, not blockers. Recommendations, if taken, leave the system net **smaller** (one inline, one clause deletion).
+
+## Per-ruling verdicts
+
+- **A1 CLOSED** - `panel.ts:1074` sends `include_extras: '1'`; grep finds zero `include_bg` and zero `branchQuery` in `src/` or the Python tree; every store signature is `list_branches(encoded_path, include_extras)` (`store.py:239`, `claude.py:776`, `codex.py:490`, `kimi.py:381`, `gemini.py:604`)
+- **A2 CLOSED** - `SessionStore.owns_pid` default comm match at `store.py:333-343`; gemini overrides at `gemini.py:832-845` requiring `gemini` in the argv; `_tree_assistant` dispatches through `provider.store.owns_pid(pid)` at `routes.py:139`. One implementation, one override, as ruled
+- **A3 CLOSED (as narrowed)** - claude's store emits `"colour"` from the transcript tail (`claude.py:743`); `_effective_colour` receives the row's own value (`routes.py:313-314`); no per-row glob remains. `default_colour` survives with two real callers - `TerminalHandler` (`routes.py:759`) and `BranchHandler`'s inherit for server-copy forks (`routes.py:557`) - plus kimi's derived override (`kimi.py:690`). The keep is earning its place
+- **A4 CLOSED** - zero `scope` query handling, zero `cleanup()` in routes, store, providers, or tests; the panel's cleanup dialog deletes explicit ids via `DELETE {session_ids}` (`panel.ts:660-672`)
+- **A5 CLOSED** - `IDisposalReport = {removed_count, removed_ids}` (`types.ts:172-174`), actually emitted at `routes.py:359`; `IRemoveResponse`/`ICleanupResponse`/`IDeleteSessionsResponse` are aliases, each with a live call site in `panel.ts`; `IForkResponse` is `{session_id}` only (`types.ts:209-211`), matching `routes.py:562`. `forked_from` and `failed_count` gone
+- **A6 CLOSED** - `SERVER_MINTED_FORKS = frozenset({"server-copy"})` with a corrected frontend-mints comment (`registry.py:44-51`); `ClaudeStore.fork` deleted (only kimi/gemini carry `fork`); `inherit_colour` gated behind `colour_source != "native"` (`routes.py:552-557`) with the rationale documented in the handler docstring
+- **A7 CLOSED** - `rowBadges`, `menuItems`, `IMenuContribution`, `SHARED_ICONS`, `shieldIcon`, `derivedColour`, `launchExtras`, `on_launched`, python `has_remote_control`: zero occurrences. TS `hasRemoteControl` kept and genuinely read (`panel.ts:1400,1441` gate the remote-control dot); the parity test asserts only the cross-runtime fields (`test_descriptor_parity.py:84-87`), so the TS-only flag is not a parity hole
+- **A8 CLOSED** - all four stores dispose per item under `try/except OSError` with a logged skip and the id withheld from the answer (`claude.py:901-910`, `kimi.py:505-513`, `gemini.py:725-732`, codex per its docstring discipline); `_log = logging.getLogger(__name__)` in all four providers plus core modules. The rider closed harder than asked: `dispose_path` now RAISES on a failed trash move rather than silently permanent-deleting (`store.py:187-205`), and `send2trash>=1.8.0` is declared (`pyproject.toml:36`)
+- **A9 CLOSED** - conditional two-step arming in `popup.ts:69-73`: permanent deletion arms first and executes on the second click, trash goes straight through, and `disarm()` (`popup.ts:167-170`) drops the armed count whenever the selection changes
+- **A10 CLOSED** - `process_comm`, `process_cmdline`, `cmdline_args`, `flag_value`, `git_branch`, `now_iso_z` live once in `core/store.py:104-163`; def-level grep finds no private copy in any provider
+- **A11 CLOSED (as ruled)** - codex `state_file` is home-relative (`codex.py:735`); claude's `~/.claude` hardcode stands per the declined half (the retired extension never honoured `CLAUDE_CONFIG_DIR`). Residual note below
+- **A12 CLOSED** - `YOLO_MODE = "yoloMode"` at `kimi.py:82`, used at 673, 703, 714; no bare literal remains
+- **A13 CLOSED** - top-level `routes.py` gone; `__init__.py:10` imports `core.routes` directly
+- **A14 CLOSED** - `generate-schema.mjs:98-108` reads the compiled barrel and throws when export count ≠ globbed module count, with an honest comment naming the second-registry hazard
+- **A15 CLOSED** - `GeminiStore` has no ctor param; kimi's kept as allowed, with a call-time-resolution comment justifying it (`kimi.py:229-235`)
+- **A16 CLOSED** - `_confined_chat_file` confines the `/proc`-advertised path under `root/tmp` via `resolve().relative_to()` before `read_chat_meta` touches it (`gemini.py:847-879`)
+- **A17 CLOSED** - one `LOG_PREFIX` exported at `registry.ts:5`, imported by `index.ts:20` and `panel.ts:33`; no re-spelled literal anywhere in `src/`
+- **A18 CLOSED** - the false "passed to every launch" is gone; the new description states both real conditions. Residual ambiguity noted below
+- **A19 CLOSED, addition judged PASS** - scaffold spec deleted, `@types/react`/`@types/react-addons-linked-state-mixin`/`yjs` gone from devDependencies. The added `overrides {webpack, chalk}` + `chalk` resolution: the duplication across `resolutions`/`overrides` is forced by two real package managers (both `yarn.lock` and `package-lock.json` are live in this repo), each block pins the same two versions, and the isolated `python -m build` exit 0 is the requirement it traces to. Minimal machinery for a real landmine; `lib0` staying resolutions-only is evidence-backed (the npm path builds without it). No finding
+
+## Residual notes (taste, non-blocking)
+
+- **MINOR (taste) codex legacy filename half-follows the A11 convention** - claude and kimi use plain home-relative literals (`claude.py:1058`, `kimi.py:709`); codex uses `f"~/.codex/{LEGACY_STATE_FILENAME}"` where `LEGACY_STATE_FILENAME` (`codex.py:62`) has exactly this one user. A single-use constant interpolated into the convention's literal is a leftover of the fix, not a second source of truth. If touched again, inline it - net minus two lines. Not worth a round on its own
+- **MINOR (taste) gemini `approvalMode` description implies a precedence `modes.ts` inverted** - "when no boolean launch mode overrides it" (`gemini.ts:71`, `schema/plugin.json:75`) is strictly true only for the forced menu action; the settings YOLO switch never overrides a non-default ladder - `resolveLaunchMode` gives the enum precedence, asserted by `launch-mode.spec.ts` ("a non-default enum beats a boolean that is on"). The sentence is not false, and the misreading fails in the safe direction (user expects wide-open, gets read-only plan), but a settings reader cannot tell the menu action from the switch. If reworded: one clause - "a non-default ladder takes precedence over the YOLO switch; only the YOLO menu action overrides it" - then schema regen via the build chain. Correctness bar does not force it
+
+## Regression sweep of touched files
+
+- `modes.ts` (new) - clean: single responsibility, no JupyterLab imports, one exported function, its own spec documenting the safety rationale for enum-over-boolean; `panel.ts:699-700` is its only caller, which is fine for a rule worth testing in isolation
+- No helper-fold stragglers: the A10 consolidation left no private copy behind (def-level grep across all providers)
+- No dead types from the A4 deletion: all three `IDisposalReport` aliases have live `panel.ts` call sites
+- Parity test consistent with the A7 capability deletion - it asserts only the fields both runtimes still declare
+
+Two consecutive clean verdicts is the documented bar; this is verdict one at SHIP. Not logging to journal: review-only sweep, no artefacts modified.

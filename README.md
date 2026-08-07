@@ -15,7 +15,7 @@ One extension for every AI code assistant in JupyterLab. Replaces the separate `
 
 ## Features
 
-- **One install, every assistant** - Claude Code, Codex and Kimi supported from a single package instead of three
+- **One install, every assistant** - Claude Code, Codex, Kimi and Gemini supported from a single package
 - **Individual right-panel per assistant** - each assistant keeps its own side panel with Favorites, Recent and All projects
 - **Joint settings page** - one settings section covering all assistants, replacing three separate ones
 - **Per-assistant toggles** - switch any assistant's support on or off in settings; all are enabled by default

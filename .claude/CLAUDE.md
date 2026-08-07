@@ -54,7 +54,18 @@ Skills live at `/home/lab/.claude/skills/` (global, available in every project).
 
 JupyterLab 4 extension that consolidates the individual `jupyterlab_*_code_extension` extensions into a single package: one joint capability layer, one shared settings page, and an individual right-toolbar panel per code assistant. Settings decide which assistants are active (default - all enabled).
 
-**Assistants consolidated**: `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension`, `jupyterlab_kimi_code_extension` (siblings under `/home/lab/workspace/private/jupyterlab/`), which serve as the reference implementations for panel behaviour, session handling, and settings shape.
+**Purpose is retirement, not coexistence.** This extension replaces the three standalone extensions, which are then retired. That makes feature parity, settings and favourites migration, and duplicate-panel conflict detection first-class requirements, not nice-to-haves. The `stellars_jupyterlab_extensions` metapackage must be repointed here and the standalone READMEs marked superseded.
+
+**Architecture is a provider registry.** Assistant-specific behaviour lives in one TS module plus one Python module per assistant, registered through a barrel. Core code never names an assistant - divergences are capability flags on the descriptor (`forkStrategy`, `colourSource`, `launchModes`, `hasRemoteControl`). Adding or removing an assistant touches no core file. Assistants toggle live from settings, with no JupyterLab reload.
+
+**Assistants consolidated** (siblings under `/home/lab/workspace/private/jupyterlab/`):
+
+- **`jupyterlab_claude_code_extension`** (v1.2.73) - **the base**. Most mature of the three and the reference implementation for panel behaviour, session handling, and settings shape. Port from this one; the others contribute only their divergences
+- **`jupyterlab_codex_extension`** (v0.6.12) - derivative. No `colour.ts`, no `cli.py`; adds the approval-bypass launch mode
+- **`jupyterlab_kimi_code_extension`** (v0.7.8) - derivative. Adds `label.ts` and server-side session forking (Kimi has no fork CLI flag); tab colour is derived from session id rather than user-set
+- **Gemini** - fourth provider, no standalone extension to port. Gemini CLI (`@google/gemini-cli`, installed via `lab-utils install-ai-assistant/google-gemini-cli`). Store: `~/.gemini/projects.json` registry maps project root to short id, chats under `~/.gemini/tmp/<shortId>/chats/*.json`. No fork flag (server-side fork like Kimi), no colour command, `--yolo` / `--approval-mode` launch modes, `--session-id` for new and `--session-file` for resume
+
+All three share the same shape - `icons.ts` / `index.ts` / `request.ts` / `types.ts` / `widget.ts` over `routes.py` / `sessions.py`, ~3000 TS lines each - which is what makes one common core viable. Take Claude's architecture, generalise it behind a per-assistant provider, and fold the two derivatives in as provider variants rather than parallel copies.
 
 **Stack**: TypeScript frontend (`src/`) against `@jupyterlab/application` 4.x, Python `jupyter_server` extension (`jupyterlab_ai_code_assistants_extension/routes.py`), settings schema in `schema/plugin.json`, Jest unit tests, Playwright UI tests in `ui-tests/`. Scaffolded from the `jupyterlab/extension-template` copier template (`.copier-answers.yml`) - do not hand-edit that file.
 

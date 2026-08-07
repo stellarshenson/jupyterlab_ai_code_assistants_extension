@@ -1,8 +1,93 @@
 {
-  "jupyter.lab.shortcuts": [],
-  "title": "jupyterlab_ai_code_assistants_extension",
-  "description": "jupyterlab_ai_code_assistants_extension settings.",
+  "title": "AI Code Assistants",
+  "description": "One settings section for every AI code assistant panel. Generated from the provider registry by `jlpm generate:schema` - edit the provider descriptors, not this file.",
   "type": "object",
-  "properties": {},
-  "additionalProperties": false
+  "jupyter.lab.setting-icon": "jupyterlab_ai_code_assistants_extension:assistants",
+  "jupyter.lab.setting-icon-label": "AI Code Assistants",
+  "properties": {
+    "presentationMode": {
+      "type": "string",
+      "title": "Presentation mode",
+      "description": "How session rows are labelled, in every assistant's panel. `name` (default) shows the session name the assistant records for the project; the initial name is the project folder name, then the path is walked up to disambiguate when two projects share a folder name. `path` shows the project path relative to the JupyterLab notebook root (absolute if outside it).",
+      "enum": ["name", "path"],
+      "default": "name"
+    },
+    "recentLimit": {
+      "type": "integer",
+      "title": "Recent items count",
+      "description": "Number of sessions listed in the Recent section, sorted by last activity (descending). The section displays up to 10 rows and scrolls for the rest.",
+      "default": 10,
+      "minimum": 1,
+      "maximum": 100
+    },
+    "colouredTabs": {
+      "type": "boolean",
+      "title": "Coloured terminal tabs",
+      "description": "When enabled (default), a terminal running an assistant has its dock tab tinted with that conversation's colour. Turning it off clears the tint and stops it being applied. Requires `jupyterlab_colourful_tab_extension`; without it there is no tint either way.",
+      "default": true
+    },
+    "sidebar": {
+      "type": "string",
+      "title": "Sidebar position",
+      "description": "Which JupyterLab sidebar to dock the assistant panels to. `right` (default) keeps them clear of the file browser. `left` puts them next to it.",
+      "enum": ["left", "right"],
+      "default": "right"
+    },
+    "providers.claude.enabled": {
+      "type": "boolean",
+      "title": "Claude Code: enabled",
+      "description": "Show the Claude Code Sessions panel. A panel appears only when this is on AND the `claude` binary is on PATH.",
+      "default": true
+    },
+    "providers.claude.dangerouslySkipPermissions": {
+      "type": "boolean",
+      "title": "Claude Code: Dangerously skip permissions",
+      "description": "When enabled, newly spawned and resumed sessions are launched with `--dangerously-skip-permissions`. Bypasses every Claude Code permission prompt - only enable in sandboxes you trust.",
+      "default": false
+    },
+    "providers.codex.enabled": {
+      "type": "boolean",
+      "title": "Codex: enabled",
+      "description": "Show the Codex Sessions panel. A panel appears only when this is on AND the `codex` binary is on PATH.",
+      "default": true
+    },
+    "providers.codex.dangerouslyBypassApprovalsAndSandbox": {
+      "type": "boolean",
+      "title": "Codex: Bypass Codex approvals and sandbox",
+      "description": "When enabled, newly spawned and resumed sessions are launched with `--dangerously-bypass-approvals-and-sandbox`. Bypasses every Codex approval prompt and sandbox - only enable in environments you trust.",
+      "default": false
+    },
+    "providers.gemini.enabled": {
+      "type": "boolean",
+      "title": "Gemini: enabled",
+      "description": "Show the Gemini Sessions panel. A panel appears only when this is on AND the `gemini` binary is on PATH.",
+      "default": true
+    },
+    "providers.gemini.yoloMode": {
+      "type": "boolean",
+      "title": "Gemini: YOLO mode",
+      "description": "When enabled, newly spawned and resumed sessions are launched with `--yolo`. Gemini auto-approves every tool call without asking - only enable in workspaces you trust.",
+      "default": false
+    },
+    "providers.gemini.approvalMode": {
+      "type": "string",
+      "title": "Gemini: Approval mode",
+      "description": "Approval ladder passed as `--approval-mode` when set to a value other than the default. A non-default value here takes precedence over the YOLO switch; only the forced YOLO menu action overrides it. `default` prompts for approval, `auto_edit` auto-approves edit tools, `yolo` auto-approves every tool, `plan` is read-only.",
+      "default": "default",
+      "enum": ["default", "auto_edit", "yolo", "plan"]
+    },
+    "providers.kimi.enabled": {
+      "type": "boolean",
+      "title": "Kimi: enabled",
+      "description": "Show the Kimi Code Sessions panel. A panel appears only when this is on AND the `kimi` binary is on PATH.",
+      "default": true
+    },
+    "providers.kimi.yoloMode": {
+      "type": "boolean",
+      "title": "Kimi: YOLO mode",
+      "description": "When enabled, newly spawned and resumed sessions are launched with `--yolo`. Kimi auto-approves regular tool calls without asking - only enable in workspaces you trust.",
+      "default": false
+    }
+  },
+  "additionalProperties": true
 }

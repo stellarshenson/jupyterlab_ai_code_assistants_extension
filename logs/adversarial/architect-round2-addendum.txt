@@ -1,0 +1,62 @@
+
+=== ROUND 2 - PINNED RE-CONFIRMATION (supersedes the TASK's whole-repo scope) ===
+
+Your round-1 report is logs/adversarial/architect-round1.txt (19 findings A1-A19, DO-NOT-SHIP).
+All were triaged and applied except the two narrowed rulings below, each backed by a grep-found
+real user. Net production-code delta of the batch: -103 lines, two files deleted. Current state:
+Jest 61/61, pytest 131/131, Galata 16/16, eslint 0 errors, isolated python -m build exit 0.
+Your round-2 job:
+
+1. For EACH ruling below, verify the applied change closes your finding - cite file:line.
+   Per-finding verdict: CLOSED or STILL-OPEN (with the surviving occurrence).
+2. Inspect ONLY the touched files for regressions or NEW inconsistencies the fixes introduced
+   (e.g. a helper folded into core/store.py but one provider still carrying a private copy).
+3. DO NOT re-litigate the two NARROWED rulings - each names its real user. Re-raising one without
+   disproving that user counts against you.
+4. NO fresh whole-repo sweep. New findings admissible only in code changed since round 1.
+
+RULINGS APPLIED:
+- A1: include_extras param in panel.ts; claude branchQuery hook + branchQuery seam deleted
+- A2 (= bug-hunter 1): SessionStore.owns_pid hook, gemini cmdline override, one implementation
+- A3 NARROWED: stores emit `colour` directly, _effective_colour uses the row's own value, per-row
+  default_colour glob DELETED - but ClaudeStore.default_colour method KEPT: real user is
+  TerminalHandler, which resolves the colour of whatever conversation a probed terminal runs,
+  including ones no listed row represents. Deleting it would untint claude branch terminals.
+- A4: scope:"parallel" branch, SessionStore.cleanup + all overrides + tests deleted (grep: no
+  client sends scope)
+- A5: never-emitted wire fields gone; IDisposalReport = {removed_count, removed_ids} (the one real
+  shape, now actually emitted); IRemoveResponse aliased; IForkResponse.forked_from deleted
+- A6: 'native-flag' out of SERVER_MINTED_FORKS, ClaudeStore.fork deleted, registry comment fixed,
+  BranchHandler guards inherit_colour with the native refusal
+- A7: rowBadges, menuItems + IMenuContribution + SHARED_ICONS (and shieldIcon, its only user),
+  derivedColour, launchExtras, python on_launched, Capabilities.has_remote_control - all deleted
+  after per-seam grep (the remote-control dot reads the SESSION field, confirmed)
+- A8: all four stores on per-item try+count disposal; getLogger loggers in claude/kimi/gemini
+- A9: resolved in the earlier UX batch (conditional two-step arming delete)
+- A10: flag-value parser, git_branch, now_iso_z, process_comm folded into core/store.py as shared
+  helpers (process_comm/process_cmdline/cmdline_args/flag_value/git_branch/now_iso_z)
+- A11 HALF-APPLIED: codex state_file de-baked to the home-relative literal convention. Claude's
+  CLAUDE_CONFIG_DIR half DECLINED: the retired jupyterlab_claude_code_extension writes its sidecar
+  at Path.home()/".claude" (sessions.py:46,251) and never reads CLAUDE_CONFIG_DIR - honouring the
+  env var would point migration at a file that never exists.
+- A12: kimi YOLO_MODE named constant, both sites
+- A13: top-level routes.py shim deleted (__init__.py imports core.routes directly, verified)
+- A14: generate-schema.mjs asserts module count == barrel export count
+- A15: GeminiStore.__init__(root) deleted; kimi's kept (test-used, as you allowed)
+- A16: gemini parse_session_id confines the /proc-advertised --session-file path under root/tmp
+  via resolve().relative_to() (_confined_chat_file)
+- A17: one LOG_PREFIX exported from registry.ts, imported by panel.ts and index.ts
+- A18: gemini approvalMode description reworded; schema regenerated via the build chain
+- A19: 1+1 scaffold spec deleted; @types/react, @types/react-addons-linked-state-mixin, yjs
+  devDeps removed; lib0 + webpack resolutions kept; ADDITIONALLY chalk pinned 4.1.2 in resolutions
+  and a real npm overrides block added {webpack 5.106.0, chalk 4.1.2} (isolated-build landmine on
+  Node 26; python -m build now exit 0) - judge this addition on your own axes.
+
+TOUCHED FILES (regression scope): jupyterlab_ai_code_assistants_extension/core/store.py,
+core/routes.py, core/registry.py, providers/*.py, tests/, pyproject.toml, src/core/types.ts,
+panel.ts, popup.ts, terminals.ts, colour.ts, icons.ts, registry.ts, modes.ts (new, launch-mode
+resolver from the UX batch), src/index.ts, src/providers/claude.ts, src/providers/gemini.ts,
+scripts/generate-schema.mjs, package.json, style/base.css, src/__tests__/
+
+VERDICT: SHIP if every ruling is CLOSED (narrowed ones judged as ruled) and no fix-introduced
+inconsistency exists; otherwise DO-NOT-SHIP listing ONLY still-open or regression items.

@@ -23,7 +23,17 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "jupyter_server>=2.13.0,<3"
+    "jupyter_server>=2.13.0,<3",
+    # Companion labextension providing the IColourfulTabs token. Declared as a
+    # non-bundled webpack singleton (package.json sharedPackages), so it must be
+    # present at runtime or the whole extension fails to load with "Shared
+    # module jupyterlab_colourful_tab_extension doesn't exist in shared scope".
+    # 1.0.19 is the npm floor; PyPI's nearest release is 1.0.20.
+    "jupyterlab_colourful_tab_extension>=1.0.19",
+    # The move-to-trash half of every destructive action. jupyter_server pulls
+    # it in transitively today, but a delete that promised the user a
+    # recoverable outcome must not depend on somebody else's dependency graph.
+    "send2trash>=1.8.0",
 ]
 dynamic = ["version", "description", "authors", "urls", "keywords"]
 

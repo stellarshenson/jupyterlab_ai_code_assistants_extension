@@ -1,0 +1,38 @@
+
+=== ROUND 3 - PINNED RE-CONFIRMATION (supersedes the TASK's whole-repo scope) ===
+
+Your round-2 report (logs/adversarial/bug-hunter-round2.txt) closed all 7 round-1 findings and
+raised exactly 2 MINOR fix-introduced regressions. Both are now fixed. Current state: Jest 61/61,
+pytest 132/132, Galata 16/16, eslint 0 errors, version 0.1.14. Your round-3 job is ONLY:
+
+1. Verify each fix below closes your round-2 finding - re-trace the failure scenario, test at
+   runtime where a test settles it. Per-finding verdict: CLOSED or STILL-OPEN.
+2. Inspect ONLY the batch-3 touched files (below) for NEW failure scenarios these two fixes
+   introduced.
+3. NO fresh sweep, no re-litigation of anything already CLOSED in your round-2 report or of the
+   declined items (codex LEGACY_STATE_FILENAME inline; _mode_tokens =value stripping - both
+   ruled taste/coverage-gap, out of scope).
+
+FIXES APPLIED:
+1. Whole-project delete honesty: SessionStore.remove contract now returns list[str] | None (ids
+   actually disposed; None on failure) instead of bool. codex returns the list _dispose already
+   computed (refused threads stay out); claude/gemini read project_session_ids before their
+   atomic directory disposal and answer all on success / None on failure; kimi answers its own
+   enumerated index+dir id set (same semantics, avoids a second scan). core/routes.py remove
+   branch drops the pre-read `known` list - drop_colours gets exactly the store's answer, which
+   is also emitted as removed_ids. removed_count semantics unchanged. New route-level test
+   test_a_refused_thread_keeps_its_colour_when_the_project_goes (codex CLI refuses one thread;
+   survivor keeps its tint, removed_ids names only the gone one).
+2. Gemini argv match: owns_pid now splits the cmdline via cmdline_args and claims only when an
+   argv element's BASENAME is `gemini` or `gemini.js`; the bare substring test is gone. Test
+   pair extended: node with a gemini-substring project path (/home/lab/projects/my-gemini-app/
+   server.js) is NOT claimed; the installed bundle path still claims.
+
+TOUCHED FILES (regression scope): jupyterlab_ai_code_assistants_extension/core/store.py,
+core/routes.py, providers/claude.py, providers/codex.py, providers/kimi.py, providers/gemini.py,
+tests/test_colour_store.py, tests/test_provider_stores.py, tests/test_store_isolation.py,
+tests/test_registry.py, src/providers/gemini.ts, src/core/popup.ts, schema/plugin.json
+(generated).
+
+VERDICT: SHIP if both are CLOSED and no new failure scenario; otherwise DO-NOT-SHIP listing
+ONLY still-open or regression items.

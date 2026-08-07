@@ -1,3 +1,8 @@
 {
-  "extends": "./tsconfig"
+  "extends": "./tsconfig",
+  "compilerOptions": {
+    // `node` on top of the base config's `jest`: the core-neutrality spec
+    // reads `src/core/` off disk, which needs the fs and path typings.
+    "types": ["jest", "node"]
+  }
 }

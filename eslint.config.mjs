@@ -64,5 +64,16 @@ export default defineConfig([
       'prefer-arrow-callback': 'error'
     }
   },
+  {
+    // Build-time scripts (the settings-schema generator) run under plain Node,
+    // not in the browser bundle, so they get Node's globals rather than the
+    // browser ones the TypeScript sources are checked against.
+    files: ['**/*.mjs'],
+    languageOptions: {
+      globals: {
+        ...globals.node
+      }
+    }
+  },
   prettierRecommended
 ]);

@@ -7,7 +7,7 @@ except ImportError:
     import warnings
     warnings.warn("Importing 'jupyterlab_ai_code_assistants_extension' outside a proper installation.")
     __version__ = "dev"
-from .routes import setup_route_handlers
+from .core.routes import setup_route_handlers
 
 
 def _jupyter_labextension_paths():

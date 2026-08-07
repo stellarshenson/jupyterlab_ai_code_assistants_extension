@@ -1,15 +1,15 @@
 {
     "name": "jupyterlab_ai_code_assistants_extension",
-    "version": "0.1.0",
+    "version": "0.6.14",
     "description": "Jupyterlab extension to replace individual jupyterlab_*_code_extension and integrate into one, that offers joint capability, joint settings page and individual right toolbar panels per code assistant, with the ability in settings to decide which code assistant support is on (default - all are enabled)",
     "keywords": [
         "jupyter",
         "jupyterlab",
         "jupyterlab-extension"
     ],
-    "homepage": "",
+    "homepage": "https://github.com/stellarshenson/jupyterlab_ai_code_assistants_extension",
     "bugs": {
-        "url": "/issues"
+        "url": "https://github.com/stellarshenson/jupyterlab_ai_code_assistants_extension/issues"
     },
     "license": "BSD-3-Clause",
     "author": {
@@ -27,11 +27,11 @@
     "style": "style/index.css",
     "repository": {
         "type": "git",
-        "url": ".git"
+        "url": "https://github.com/stellarshenson/jupyterlab_ai_code_assistants_extension.git"
     },
     "scripts": {
-        "build": "jlpm build:lib && jlpm build:labextension:dev",
-        "build:prod": "jlpm clean && jlpm build:lib:prod && jlpm build:labextension",
+        "build": "jlpm build:lib && jlpm generate:schema && jlpm build:labextension:dev",
+        "build:prod": "jlpm clean && jlpm build:lib:prod && jlpm generate:schema && jlpm build:labextension",
         "build:labextension": "jupyter-builder build .",
         "build:labextension:dev": "jupyter-builder build --development True .",
         "build:lib": "tsc --sourceMap",
@@ -43,6 +43,7 @@
         "clean:all": "jlpm clean:lib && jlpm clean:labextension && jlpm clean:lintcache",
         "eslint": "jlpm eslint:check --fix",
         "eslint:check": "eslint . --cache",
+        "generate:schema": "node scripts/generate-schema.mjs && prettier --write schema/plugin.json",
         "install:extension": "jlpm build",
         "lint": "jlpm stylelint && jlpm prettier && jlpm eslint",
         "lint:check": "jlpm stylelint:check && jlpm prettier:check && jlpm eslint:check",
@@ -58,9 +59,19 @@
     },
     "dependencies": {
         "@jupyterlab/application": "^4.0.0",
+        "@jupyterlab/apputils": "^4.0.0",
         "@jupyterlab/coreutils": "^6.0.0",
+        "@jupyterlab/filebrowser": "^4.0.0",
         "@jupyterlab/services": "^7.0.0",
-        "@jupyterlab/settingregistry": "^4.0.0"
+        "@jupyterlab/settingregistry": "^4.0.0",
+        "@jupyterlab/terminal": "^4.0.0",
+        "@jupyterlab/ui-components": "^4.0.0",
+        "@lumino/commands": "^2.0.0",
+        "@lumino/coreutils": "^2.0.0",
+        "@lumino/disposable": "^2.0.0",
+        "@lumino/messaging": "^2.0.0",
+        "@lumino/widgets": "^2.0.0",
+        "jupyterlab_colourful_tab_extension": "^1.0.19"
     },
     "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -69,8 +80,6 @@
         "@jupyterlab/testutils": "^4.0.0",
         "@types/jest": "^29.2.0",
         "@types/json-schema": "^7.0.11",
-        "@types/react": "^18.0.26",
-        "@types/react-addons-linked-state-mixin": "^0.14.22",
         "eslint": "^9.0.0",
         "eslint-config-prettier": "^9.0.0",
         "eslint-plugin-prettier": "^5.0.0",
@@ -86,12 +95,16 @@
         "stylelint-csstree-validator": "^3.0.0",
         "stylelint-prettier": "^4.0.0",
         "typescript": "~5.5.4",
-        "typescript-eslint": "^8.0.0",
-        "yjs": "^13.5.0"
+        "typescript-eslint": "^8.0.0"
     },
     "resolutions": {
         "lib0": "0.2.111",
-        "webpack": "5.106.0"
+        "webpack": "5.106.0",
+        "chalk": "4.1.2"
+    },
+    "overrides": {
+        "webpack": "5.106.0",
+        "chalk": "4.1.2"
     },
     "sideEffects": [
         "style/*.css",
@@ -114,7 +127,13 @@
         },
         "extension": true,
         "outputDir": "jupyterlab_ai_code_assistants_extension/labextension",
-        "schemaDir": "schema"
+        "schemaDir": "schema",
+        "sharedPackages": {
+            "jupyterlab_colourful_tab_extension": {
+                "bundled": false,
+                "singleton": true
+            }
+        }
     },
     "prettier": {
         "singleQuote": true,

@@ -281,12 +281,14 @@ This extension retires the three standalone extensions. A user upgrading must no
 - [x] **Migration is idempotent** - running twice changes nothing the second time and never overwrites a value the user has since set here
   - log: 2026-08-07 criterion added (v0.1.0)
   - log: 2026-08-07 closed - post-fix conformance review (wf_a4376a8b-03e) verdict with file:line evidence; make install + 125 pytest + 59 Jest + 16/16 Galata green at v0.1.7
-- [ ] **Metapackage updated** - `stellars_jupyterlab_extensions` depends on this extension and drops the three standalone ones
+- [x] **Metapackage updated** - `stellars_jupyterlab_extensions` depends on this extension and drops the three standalone ones
   - log: 2026-08-07 criterion added (v0.1.0)
   - log: 2026-08-07 deferred until this package is published - the metapackage cannot depend on an unpublished package; execute at release
-- [ ] **Standalone repos marked** - each retired extension's README states it is superseded, naming this package
+  - log: 2026-08-08 closed: stellars_jupyterlab_extensions 1.1.5 published: claude/codex deps replaced with jupyterlab_ai_code_assistants_extension, README bullet updated, pushed
+- [x] **Standalone repos marked** - each retired extension's README states it is superseded, naming this package
   - log: 2026-08-07 criterion added (v0.1.0)
   - log: 2026-08-07 deferred until release alongside the metapackage repoint - marking READMEs superseded before the replacement is installable would strand users
+  - log: 2026-08-08 closed: superseded notice added atop README of claude/codex/kimi standalone repos, committed and pushed
 - [x] **Edge: nothing to migrate** - a fresh install with no prior extension runs migration as a silent no-op
   - log: 2026-08-07 criterion added (v0.1.0)
   - log: 2026-08-07 closed - post-fix conformance review (wf_a4376a8b-03e) verdict with file:line evidence; make install + 125 pytest + 59 Jest + 16/16 Galata green at v0.1.7

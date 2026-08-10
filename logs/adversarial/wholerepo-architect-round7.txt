@@ -1,0 +1,396 @@
+ADVERSARIAL REVIEW - architect lens - whole repository at 212aeb8 (v1.0.8)
+Mode 2, tools ON.
+
+Baselines re-measured, not trusted:
+  pytest                     163 passed (8.30s)
+  npx jest                   119 passed / 7 suites
+  npx eslint . --no-cache    0 errors, 43 warnings
+  npx prettier --check       clean
+  npx tsc --noEmit           NOT RUN, deliberately - DEF-79 records that this
+                             command refreshes tsconfig.tsbuildinfo and thereby
+                             disarms the lib/-freshness guard the parity tests
+                             rest on. No finding below depends on it.
+  schema/plugin.json         regenerated from lib/providers into a /tmp copy of
+                             scripts/generate-schema.mjs and diffed against the
+                             committed file: IN SYNC.
+
+Ledger handling: the exclusion was lifted mid-run. Findings below are reported
+on their own evidence; where one overlaps an existing entry the id is named and
+the delta stated. Two entries' recorded mechanisms are contradicted by measured
+evidence and are reported as findings in their own right (DEF-66 in finding 4,
+DEF-82 in finding 7).
+
+VERDICT: SHIP (8 findings) - no CRITICAL, so the coupling rule gives SHIP; the
+code architecture and the registry invariant hold, but the release lane and the
+cross-runtime descriptor binding are unfinished and two ledger entries record a
+mechanism that is not the one in the tree. Recommendations leave the system net
+SMALLER: five deletions/corrections, two one-line additions, one "leave it".
+
+
+=========================== FINDINGS, most severe first ======================
+
+1. [MAJOR] The published sdist carries .claude/, logs/adversarial/ and
+   docs/defects.md.  FACT - read out of the built artefact. No ledger entry.
+
+   pyproject.toml:73-75
+       [tool.hatch.build.targets.sdist]
+       artifacts = [".../labextension"]
+       exclude = [".github", "binder"]
+
+   Hatchling ships everything else that is not VCS-ignored. Verified against the
+   last real build, dist/jupyterlab_ai_code_assistants_extension-1.0.0.tar.gz:
+
+       .claude/CLAUDE.md
+       .claude/JOURNAL.md
+       .claude/workflows/implement-ai-code-assistants.js
+       docs/defects.md                        (the live open-defect register)
+       docs/acc-crit-...md                    (52 KB)
+       logs/README.md
+       logs/adversarial/HARVEST.md
+       logs/adversarial/*-prompt.txt          (the adversary prompts themselves)
+       logs/adversarial/*-round[1-4]*.txt     (24 review reports)
+       logs/adversarial/fix-batch-*-orders.md
+
+   That tarball is what `python -m build` produces under the current config, so
+   `make publish` at 1.0.9 uploads the same set to PyPI. The tree has grown
+   since: `.claude/plans/` (4 files) and six more `.claude/workflows/` scripts
+   now exist and would ride along too. npm is unaffected - package.json `files`
+   restricts that side to lib/style/src/schema.
+
+   Not a disclosure defect (the repo is public, so these files are already
+   readable on GitHub); it is a packaging defect - a Python sdist whose payload
+   is majority internal process artefacts, permanently, on an index that does
+   not let you take a release back.
+
+   REMEDY, diff scale (REMOVES, adds nothing): extend the one `exclude` list in
+   pyproject.toml:75 -
+       exclude = [".github", "binder", ".claude", "docs", "logs", "ui-tests",
+                  "tmp", "graphify-out"]
+   Leaves `src/` alone - the sdist legitimately needs it to rebuild. Touches one
+   line, one file.
+
+
+2. [MAJOR] Two release lanes, neither exercised at 1.0.8, and the CHANGELOG is
+   nine versions behind.  FACT for the artefacts, SUSPICION for the CI
+   consequence. No ledger entry.
+
+   Facts:
+     - package.json:3            "version": "1.0.8"
+     - CHANGELOG.md:7            newest entry `## [0.6.17] - 2026-08-08`
+     - `git tag` returns ZERO tags in this repository
+     - Makefile:79-83 `publish:` = npm publish + twine upload + a commit of
+       package.json/package-lock.json. It writes no CHANGELOG entry and creates
+       no tag. This is the lane actually used - HEAD~2 is
+       "chore: post-publish 0.6.17 package metadata".
+     - .github/workflows/{check,prep,publish}-release.yml wire the jupyter-
+       releaser lane, which bumps with `hatch version` (pyproject.toml:96),
+       writes the CHANGELOG between the `<!-- <START NEW CHANGELOG ENTRY> -->`
+       markers (CHANGELOG.md:3-5, both present and empty) and tags.
+     - RELEASE.md:16-22 documents a third path (`hatch version <new-version>`,
+       "By default this will create a tag").
+
+   Consequence at release: whichever lane runs, the shipped sdist and the npm
+   tarball carry a CHANGELOG whose newest entry is 0.6.17 - describing neither
+   the 1.0.0 consolidation nor the 74-defect campaign this repo just finished.
+   SUSPICION, untested: `prep-release` with `since_last_stable` has no stable
+   tag to diff against, because there are none.
+
+   REMEDY, diff scale: pick one lane, delete the other's advertisement.
+   Smallest terminal version - if `make publish` stays, hand-write the
+   1.0.0..1.0.8 CHANGELOG entry once and delete the three releaser workflows
+   plus RELEASE.md's releaser section; if the releaser lane stays, delete the
+   Makefile `publish:` target. WIDER option, stated as an opportunity not a
+   mandate: keeping both is how the CHANGELOG went nine versions stale - each
+   lane assumes the other wrote it. Do NOT add changelog generation to the
+   Makefile; that is a new moving part for a problem deletion already solves.
+
+
+3. [MAJOR] The two-runtime descriptor is bound on 5 fields of 11; the unbound
+   ones fail silently.  FACT - measured. No ledger entry.
+
+   tests/test_descriptor_parity.py:263-284 compares id set, cliBinary,
+   forkStrategy, colourSource, launchModes (values included) and legacyPluginId.
+   Its own docstring states the rule it applies: a field carrying "two different
+   jobs off one string" gets compared.
+
+   NOT compared, each of that same shape:
+     - mintsNewSessionId   src/providers/claude.ts:53, codex.ts:50,
+                           kimi.ts:131, gemini.ts:56 - TS-only, no Python field.
+     - namingStrategy      claude.ts:52, codex.ts:47, kimi.ts:130,
+                           gemini.ts:53 - TS-only.
+     - hasRemoteControl / hasBgAgents / hasLiveProcess
+                           claude.ts:65-70, codex.ts:62-66, kimi.ts:143-145,
+                           gemini.ts:79-81 - TS-only.
+     - label               present in BOTH runtimes (claude.ts:35 and
+                           providers/claude.py DESCRIPTOR label=...) and read on
+                           both sides - TS for the settings titles
+                           (scripts/generate-schema.mjs:60) and the panel,
+                           Python for `/status` (core/routes.py:334), which
+                           ui-tests/tests/panels.spec.ts:62 asserts against.
+
+   Measured - `mintsNewSessionId` agrees with behaviour only by hand:
+
+       claude   id_in_argv=True    ['/usr/bin/claude','--session-id',<uuid>]
+       gemini   id_in_argv=True    ['/usr/bin/gemini','--session-id',<uuid>]
+       codex    id_in_argv=False   ['/usr/bin/codex']
+       kimi     id_in_argv=False   ['/usr/bin/kimi']
+
+   Nothing asserts it. The only test touching the launch contract,
+   tests/test_registry.py:166-183, passes `new_session_id=None` and asserts
+   `argv[0]`. Flip kimi.ts:131 to true and the frontend mints a uuid, the server
+   accepts it, `KimiStore.launch_argv` drops it, the terminal is never
+   identifiable from its argv and `findForSession` never matches - the exact
+   symptom set DEF-50 was filed for (duplicate terminals, no tint), with a green
+   suite throughout. The three `has*` flags gate whether the panel RENDERS
+   `remote_control`, `bg_id` and `live`; they match their Python emitters today
+   (claude emits the first two, codex the third, kimi/gemini none) and a drift
+   costs a badge that silently never appears.
+
+   REMEDY, diff scale, proportionate half only (ADDS ~8 lines inside a test that
+   already holds both descriptor sets; no new descriptor field, no new state):
+     (a) test_descriptor_parity.py:269 - one more line,
+         `assert t["label"] == d.label`;
+     (b) a behavioural check for mintsNewSessionId - call
+         `store.launch_argv(cli, new_session_id=X)` and assert `X in argv` iff
+         the TS descriptor claims true. Six lines, and it binds the flag to what
+         it promises rather than to a mirrored constant.
+   LEAVE the three `has*` flags and `namingStrategy` unbound: binding them means
+   ADDING five fields to Python's `Capabilities` whose only purpose is to be
+   compared - machinery protecting machinery. Log that decision.
+
+
+4. [MINOR] `core/state.py` has two swallowed OSErrors and no logger - and
+   DEF-66's recorded premise says that module does not exist.  FACT.
+
+   jupyterlab_ai_code_assistants_extension/core/state.py:135-136 and :152-153
+
+       def write_pin(...):     ...  except OSError: pass      # :136
+       def clear_pin(...):     ...  except OSError: pass      # :153
+
+   `state.py` declares no logger at all. Logger census over the whole Python
+   tree - `logging.getLogger(__name__)` at core/migrate.py:30, core/registry.py:29,
+   core/colour_store.py:34, providers/claude.py:48, codex.py:53, gemini.py:79,
+   kimi.py:52; absent in core/state.py, core/store.py, core/routes.py.
+   `store.py` is not an outlier (its `load_json` swallow is the documented
+   "file missing" contract, hit on every poll - logging it would be noise) and
+   `routes.py` inherits `self.log` from APIHandler and has no swallowed failure
+   path. `state.py` is the one true outlier.
+
+   LEDGER CONTRADICTION: DEF-66 is titled "`colour_store.py` is the one core
+   module with a failure path and no logger" and was closed on that basis. It is
+   not the one - the module next door has two such paths and no logger, and the
+   sweep did not reach it. The entry's recorded mechanism is wrong.
+
+   This case is worse than the one that was fixed: a pin that fails to write
+   means a fork or a switch silently loses its current-conversation marker and
+   the row snaps back by recency - DEF-2 / DEF-9 / DEF-11 territory - with no
+   server-side trace of the cause.
+
+   REMEDY, diff scale (ADDS 3 lines): `_log = logging.getLogger(__name__)` in
+   the shape the other three core modules use, and `_log.warning(...)` naming
+   provider, path and errno replacing `pass` at both sites. Leave the swallow
+   itself - best-effort is correct here and is documented in the docstring.
+
+
+5. [MINOR] The saved-settings file is parsed 4-5 times per request, in the one
+   file that states the read-once rule.  FACT - counted with an instrumented
+   `load_jsonc`. No ledger entry.
+
+   core/routes.py:204-241. `_user_settings()` globs the settings folder and runs
+   `load_jsonc` (two regex substitutions over the whole file) on every call.
+   `_provider_enabled` calls it; `_enabled_providers()` calls `_provider_enabled`
+   once per registered provider.
+
+   Instrumented count of `load_jsonc` invocations:
+       StatusHandler.get     -> 4   (one per provider, routes.py:330-338)
+       TerminalHandler.get   -> 5   (resolve() gate at :277, plus
+                                     _tree_assistant -> _enabled_providers at
+                                     :165-169)
+
+   Twelve lines below, the sessions listing does the opposite and says so:
+       routes.py:373  stored = colour_store.load_colours(provider.id)
+                      "# Read once for the whole listing, not once per row."
+   Four panels each run a 30 s colour loop (src/core/terminals.ts:27) probing
+   every open terminal, so the multiplier is panels x terminals x 5.
+
+   REMEDY, diff scale (REMOVES 3 of the 5 reads; ADDS no cache and no state):
+   give `_provider_enabled` an optional `settings: dict | None` parameter and
+   have `_enabled_providers()` read `_user_settings()` once and pass it down.
+   Per request only - a memo across requests would need invalidation and would
+   reintroduce the staleness the per-request read exists to avoid.
+
+
+6. [MINOR] The shared-settings defaults are stated twice, in two languages.
+   FACT. Overlaps DEF-85 and DEF-86; goes further than both.
+
+   scripts/generate-schema.mjs SHARED block      vs the frontend's own constant
+     :28    presentationMode default 'name'  <-> src/core/panel.ts:100
+                                                 DEFAULT_PRESENTATION_MODE
+     :36    recentLimit default 10           <-> src/core/panel.ts:90
+                                                 DEFAULT_RECENT_LIMIT
+     :36-37 minimum 1 / maximum 100          <-> src/core/panel.ts:91-92
+                                                 MIN_/MAX_RECENT_LIMIT
+     :44    colouredTabs default true        <-> src/index.ts:179  `!== false`
+     :52    sidebar default 'right'          <-> src/index.ts:32
+                                                 DEFAULT_SIDEBAR
+
+   DELTA over the ledger: DEF-85 records only the 1/100 bounds pair; the four
+   DEFAULTS are unrecorded. DEF-86 records MIN_/MAX_RECENT_LIMIT as exports with
+   no importer. Neither entry names the structural cause, which is the actual
+   defect: the constants are parked in `panel.ts`, the one module that imports
+   JupyterLab and therefore cannot be imported by the plain-Node generator, so
+   the generator has no choice but to restate them. Verified that a
+   JupyterLab-free compiled module IS importable by the generator:
+   `node -e "import('./lib/core/modes.js')"` loads cleanly.
+
+   REMEDY, diff scale (ADDS one ~12-line import-free `src/core/settings.ts`;
+   REMOVES six duplicated literals and closes DEF-85 and DEF-86 as a by-product
+   - the two orphan exports become the generator's source): move the four
+   defaults and the two bounds there and import from panel.ts, index.ts and
+   `lib/core/settings.js` in the generator.
+   Consequence today is small - the schema always supplies a composite value, so
+   the TS fallback fires only when the settings registry itself failed - so
+   "leave it and log the cause" is a defensible call if the wave has no room.
+   Do NOT close it by inlining the generator's numbers at their call sites; that
+   hides the dial rather than naming it.
+
+
+7. [MINOR] Two written claims about this system that the code contradicts.
+   FACT (both). One is a ledger entry.
+
+   (a) src/core/types.ts:161-162
+           /** Enabled AND binary present - the only state that docks a panel. */
+           available: boolean;
+       core/routes.py:337
+           "available": cli_path is not None,
+       The enabled half is never folded in server-side; src/index.ts:241-244 ANDs
+       it separately from the settings registry, so behaviour is right and the
+       comment is legacy fiction. A maintainer trusting it would drop the
+       frontend's own AND and disable nothing.
+
+   (b) DEF-82 records "`MigrateHandler.post` is the one route that does its work
+       on the IOLoop ... every other handler in `routes.py` hands its filesystem
+       work to `run_in_executor` (seven call sites)". The seven call sites are
+       real (routes.py:368, 412, 424, 458, 486, 654, 775) but they sit in five
+       async handler bodies. There are SEVEN synchronous handler bodies, and six
+       of them touch the filesystem on the IOLoop:
+           StatusHandler.get      :323  (4 settings-file parses + 4 shutil.which)
+           FavouriteHandler.post  :506  (state read + atomic write with fsync)
+           ColoursHandler.get     :555  (colour-store read)
+           ColoursHandler.post    :562  (read + atomic write with fsync)
+           ColoursHandler.delete  :591  (read + atomic write with fsync)
+           TerminalHandler.get    :851  (declared deliberate in its docstring)
+       So MigrateHandler is not the one, and the entry's deferral rationale -
+       "logged for consistency's sake alone" - rests on a uniqueness claim that
+       is false. The deferral may still be right; the reason recorded for it is
+       not.
+
+   REMEDY, diff scale (REMOVES): (a) correct the types.ts comment to "the
+   assistant's binary is on the server's PATH" - one line, no code change;
+   (b) correct DEF-82's recorded mechanism to "one of seven synchronous
+   handlers", which either keeps the deferral on honest grounds or reclassifies
+   it as a whole-file question. Do not convert the six handlers to executors on
+   the strength of this - none has been measured to matter, and six conversions
+   to remove a false sentence is a remedy larger than the defect.
+
+
+8. [MINOR] `namingStrategy` is a three-valued union of which the core reads two
+   states.  FACT - over-engineering, not taste. No ledger entry.
+
+   src/core/types.ts:29-35 declares `'launch-flag' | 'server-side' | 'none'`
+   with a documented paragraph per member. The single reader in the entire core
+   is src/core/panel.ts:907:
+
+       if (this._descriptor.namingStrategy !== 'none') {
+
+   Where the name then goes is decided by `forkStrategy` twenty lines later
+   (panel.ts:930-940): `server-copy` puts it in the branch POST, `native-flag`
+   in the launch payload. Nothing anywhere distinguishes `'launch-flag'` from
+   `'server-side'`. Declare `namingStrategy: 'launch-flag'` on a `server-copy`
+   provider and the name is routed by forkStrategy regardless - silently, and
+   with no parity test to catch it (finding 3).
+
+   What stated requirement breaks if the union is deleted? None.
+
+   REMEDY, diff scale (REMOVES ~15 lines): replace the union with
+   `promptsForBranchName: boolean` on the descriptor, delete the
+   `NamingStrategy` type and its doc block, and delete `NAMING_STRATEGIES` from
+   src/__tests__/registry.spec.ts:68. One line changes in each of four provider
+   modules. Keep each provider's own comment about where its name ends up - that
+   is the documentation the union was standing in for, and prose cannot be
+   mis-declared.
+
+
+======================== CONVENTION CENSUS =================================
+
+Python logging      `logging.getLogger(__name__)` - core/migrate.py:30,
+                    core/registry.py:29, core/colour_store.py:34,
+                    providers/{claude:48, codex:53, gemini:79, kimi:52}.
+                    CANONICAL. One outlier: core/state.py (finding 4).
+                    Non-outliers by design: core/store.py (documented degrade
+                    contract), core/routes.py (APIHandler's self.log).
+
+TS logging          `console.{log,warn,error}` prefixed with LOG_PREFIX
+                    (src/core/registry.ts:8). One documented exception, the
+                    copier template's activation line (src/index.ts:71),
+                    asserted verbatim by the Galata smoke test. Consistent.
+
+Colour vocabulary   TS: src/core/colour.ts:22 TAB_COLOUR_IDS (core).
+                    PY: providers/kimi.py:79 _TAB_COLOUR_IDS (provider).
+                    Asymmetric placement, and a core test reaches into a
+                    provider for it (tests/test_descriptor_parity.py:29, :293,
+                    :308). LEAVE IT AND LOG IT: kimi is the only
+                    `colour_source: 'derived'` provider, core Python does not
+                    need the list (colour_store.is_colour deliberately does not
+                    validate against a vocabulary, colour_store.py:37-40), and
+                    hoisting it into core to serve one caller is speculative
+                    structure by my own rule. Log so a SECOND derived provider
+                    moves it rather than importing from a sibling provider -
+                    that import would breach the store-isolation invariant
+                    core/store.py:1-7 states.
+
+Provider id charset core/registry.py:33 `_ID_CHARS` = a-z0-9- ;
+                    core/routes.py:929 route pattern `([a-z0-9-]+)`. Agree.
+
+Settings keys       Flat dotted `providers.<id>.<key>` in schema/plugin.json,
+                    src/index.ts:159/:242 and core/routes.py:214-223, with
+                    tests/test_routes.py:145-160 READING the schema rather than
+                    restating it. Consistent - and the pattern findings 3 and 6
+                    are asking the other cross-runtime values to copy.
+
+API namespace       'jupyterlab-ai-code-assistants-extension' at
+                    src/core/request.ts:8, core/routes.py:26 and
+                    ui-tests/tests/shared.ts:19. Three copies across three
+                    runtimes with no binding, but it is a protocol constant that
+                    has never moved and a mismatch fails every request on first
+                    load. Simplicity beats symmetry: fine as is.
+
+
+======================== WHAT IS ALREADY CONSISTENT ========================
+
+* The core-neutrality invariant holds, and its guard grows with the roster.
+  src/__tests__/core-neutrality.spec.ts derives its name list from the registry
+  (:51-67) instead of freezing an alternation, and proves the derivation with a
+  synthetic fifth provider (:164-182). Independently grepped: no assistant name
+  in src/core/ or src/index.ts outside comments, and none in
+  jupyterlab_ai_code_assistants_extension/core/ outside two docstrings.
+
+* A fifth provider genuinely touches no core file - tested, not accepted.
+  Python discovery is pkgutil over the providers package (core/registry.py:145-173)
+  and is proven against a swapped package (test_registry.py:219+). The settings
+  schema is globbed from lib/providers with a barrel cross-check
+  (scripts/generate-schema.mjs:82-108); I regenerated it into a scratch tree and
+  diffed - byte-identical to the committed schema/plugin.json. The only
+  hand-maintained roster left is VENDOR_ALIASES (core-neutrality.spec.ts:25),
+  and that file says so in its own docstring.
+
+* The wire shapes are honest. After DEF-12/DEF-19/DEF-23 there is no
+  never-emitted response field left, and the destructive routes all answer with
+  the ids actually disposed of rather than a count. The one emitted-and-unread
+  field is `cli_path` (routes.py:336 / types.ts:160), which is a diagnostic on a
+  status endpoint reusing a `shutil.which` result computed on the line above -
+  keep it.
+
+* Path-traversal gating is single-sourced and reasoned: `store.is_safe_segment`
+  (store.py:188) for every store's path joins, `state._is_pin` (state.py:97) for
+  anything read back out of a state file.

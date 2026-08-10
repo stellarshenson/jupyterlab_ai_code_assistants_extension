@@ -169,11 +169,22 @@ test('DEF-54 and DEF-40 - an approval-bypassing new-session button is marked, an
   );
   expect(warnFill).not.toBe(neutralFill);
 
-  // ...and at the size of its siblings, not smaller.
+  // ...and at the size of its siblings, not smaller. Measured against a LIVE
+  // sibling rather than a constant: `.jp-AiAssistantsPanel-iconButton svg` is
+  // pinned to 14px in base.css, so an absolute `>= 14` floor is satisfied by
+  // the very 13x13 glyph this defect was about - the assertion could not fail,
+  // and its own comment said "siblings" while the code compared to a number.
   const box = await newButton.locator('svg').boundingBox();
+  const siblingBox = await page
+    .locator(`${PANEL} .jp-AiAssistantsPanel-header`)
+    .locator('.jp-AiAssistantsPanel-iconButton')
+    .nth(1)
+    .locator('svg')
+    .boundingBox();
   expect(box).not.toBeNull();
-  expect(box!.width).toBeGreaterThanOrEqual(14);
-  expect(box!.height).toBeGreaterThanOrEqual(14);
+  expect(siblingBox).not.toBeNull();
+  expect(box!.width).toBeGreaterThanOrEqual(siblingBox!.width);
+  expect(box!.height).toBeGreaterThanOrEqual(siblingBox!.height);
 
   await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', false);
 });

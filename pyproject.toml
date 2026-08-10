@@ -58,7 +58,7 @@ fields = ["description", "authors", "urls", "keywords"]
 
 [tool.hatch.build.targets.sdist]
 artifacts = ["jupyterlab_ai_code_assistants_extension/labextension"]
-exclude = [".github", "binder"]
+exclude = [".github", "binder", ".claude", "logs", "docs/defects.md"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "jupyterlab_ai_code_assistants_extension/labextension" = "share/jupyter/labextensions/jupyterlab_ai_code_assistants_extension"

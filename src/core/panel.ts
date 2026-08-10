@@ -774,6 +774,18 @@ export class AssistantSessionsPanel extends Widget {
       // it - so cleaning up is deleting exactly those ids.
       const listed = await this._fetchBranches(session);
       const ids = listed.branches.map(b => b.session_id);
+      if (ids.length === 0) {
+        // The menu item is gated on a row up to one poll old, so by the time
+        // the refetch lands another tab may have cleaned the project already.
+        // Every store REFUSES an empty id list, so sending it turned "nothing
+        // to do" into `remove_failed` under a dialog that had just promised
+        // to remove N.
+        bar.remove();
+        message.textContent = 'Nothing left to clean up.';
+        this._branchCache = null;
+        await this._fetch();
+        return;
+      }
       const data = await requestProvider<ICleanupResponse>(
         this._descriptor.id,
         'sessions',
@@ -2556,7 +2568,20 @@ export class AssistantSessionsPanel extends Widget {
       if (this._contextMenu.isAttached) {
         return;
       }
-      this._fetch().catch(err => this._showError(err));
+      // Skip a tick while the previous one is unanswered. The poll fires
+      // every 30s and a request is bounded at 60s, so against a hung server
+      // this enqueued two for every one that could drain - and the colour
+      // store serialises, so the backlog left `isPending` true for its whole
+      // length, withholding the release affordance and making a fork await
+      // the queue rather than its parent's colour.
+      if (this._polling !== null) {
+        return;
+      }
+      this._polling = this._fetch()
+        .catch(err => this._showError(err))
+        .finally(() => {
+          this._polling = null;
+        });
     }, POLL_INTERVAL_MS);
   }
 
@@ -2613,6 +2638,9 @@ export class AssistantSessionsPanel extends Widget {
   private _activeSession: ISession | null = null;
   private _activeRowEl: HTMLElement | null = null;
   private _pollHandle: number | null = null;
+  /** The poll's own in-flight tick. Only the poll reads it - an explicit
+   * Refresh must always issue, however long the last poll is taking. */
+  private _polling: Promise<void> | null = null;
   private _presentationMode: PresentationMode = DEFAULT_PRESENTATION_MODE;
   private _recentLimit: number = DEFAULT_RECENT_LIMIT;
   private _modes: Record<string, boolean | string> = {};

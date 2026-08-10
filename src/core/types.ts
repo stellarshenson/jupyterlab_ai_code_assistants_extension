@@ -158,7 +158,12 @@ export interface IProviderStatus {
   /** The `providers.<id>.enabled` setting as the server last read it. */
   enabled: boolean;
   cli_path: string | null;
-  /** Enabled AND binary present - the only state that docks a panel. */
+  /**
+   * Binary present. NOT the enabled half - the server sends `cli_path is not
+   * None` alone (`core/routes.py`), and `src/index.ts` ANDs `enabled` in
+   * separately when it decides whether to dock a panel. The comment used to
+   * claim both, which is a maintainer's licence to drop the second test.
+   */
   available: boolean;
 }
 

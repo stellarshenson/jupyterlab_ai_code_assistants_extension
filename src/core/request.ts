@@ -134,7 +134,16 @@ export async function requestAPI<T>(
   }
 
   if (!response.ok) {
-    throw new ServerConnection.ResponseError(response, data.message || data);
+    // `data.error` before `data`: every refusal this extension authors is
+    // `{"error": "<code>"}` (14 sites in `core/routes.py`, none of which
+    // writes `message`), so falling through to the object itself stringified
+    // it and the user read the literal `[object Object]`. Tornado's own 500s
+    // carry `message` and were never affected, which is why it survived - the
+    // messages that broke were exactly the ones this server chose to send.
+    throw new ServerConnection.ResponseError(
+      response,
+      data?.message ?? data?.error ?? data
+    );
   }
 
   return data;

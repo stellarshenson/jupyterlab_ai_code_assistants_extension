@@ -757,8 +757,16 @@ class LaunchHandler(_ProviderHandler):
         # Pre-flight the conversation while the caller can still be told about
         # it: past ``terminal_manager.create`` the pty is live and a failure
         # would orphan a terminal the frontend never attaches.
+        loop = asyncio.get_running_loop()
         if session_id and isinstance(encoded_path, str) and encoded_path:
-            known = provider.store.project_session_ids(encoded_path)
+            # In the executor for the same reason `launch_argv` below is: this
+            # walks every conversation file in the project, so it is linear in
+            # the project's bytes and was blocking the whole event loop on
+            # every row click - measured at 191 ms against a 20-conversation
+            # Gemini store, with a canary coroutine on the same loop.
+            known = await loop.run_in_executor(
+                None, provider.store.project_session_ids, encoded_path
+            )
             if known and session_id not in known:
                 self.set_status(404)
                 self.finish(json.dumps({"error": "session_not_found"}))
@@ -770,7 +778,6 @@ class LaunchHandler(_ProviderHandler):
             self.finish(json.dumps({"error": "terminal_service_unavailable"}))
             return
 
-        loop = asyncio.get_running_loop()
         try:
             argv = await loop.run_in_executor(
                 None,

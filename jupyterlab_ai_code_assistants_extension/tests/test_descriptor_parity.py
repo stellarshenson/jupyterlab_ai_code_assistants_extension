@@ -68,7 +68,8 @@ const { readdirSync } = require('fs');
           ? (x.values ?? []).map(v => x.id + '=' + v)
           : [x.id]
       ),
-      legacyPluginId: d.legacyPluginId ?? null
+      legacyPluginId: d.legacyPluginId ?? null,
+      label: d.label
     });
   }
   console.log(JSON.stringify(out));
@@ -266,6 +267,12 @@ def test_descriptor_fields_agree_across_runtimes():
         d = provider.descriptor
         c = d.capabilities
         t = ts[pid]
+        # The display name exists in BOTH runtimes and is READ in both - the
+        # schema generator and the panel use the TypeScript one, `routes.py`
+        # sends the Python one on every listing, and `ui-tests` asserts the
+        # rendered tab against it. Two copies of one user-visible string with
+        # nothing binding them is the same shape as `legacyPluginId` below.
+        assert t["label"] == d.label, pid
         assert t["cliBinary"] == d.cli_binary, pid
         assert t["forkStrategy"] == c.fork_strategy, pid
         assert t["colourSource"] == c.colour_source, pid

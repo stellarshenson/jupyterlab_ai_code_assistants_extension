@@ -1,6 +1,6 @@
 import { expect, test } from '@jupyterlab/galata';
 
-import { panelId, waitForApplication } from './shared';
+import { openPanelTab, panelId, waitForApplication } from './shared';
 
 /**
  * Feature-parity evidence against the extension this one retires.
@@ -56,7 +56,7 @@ test('should emit an activation console message', async ({ page }) => {
 
 test('plus button opens the new-session menu', async ({ page }) => {
   await page.goto();
-  await page.sidebar.openTab(panelId('claude'));
+  await openPanelTab(page, 'claude');
 
   const panel = page.locator(PANEL);
   await expect(panel).toBeVisible();
@@ -79,7 +79,7 @@ test('new-session menu item opens a terminal in the current folder', async ({
   page
 }) => {
   await page.goto();
-  await page.sidebar.openTab(panelId('claude'));
+  await openPanelTab(page, 'claude');
 
   const panel = page.locator(PANEL);
   await panel.locator(NEW_BUTTON).click();
@@ -108,7 +108,7 @@ test('new-session menu item opens a terminal in the current folder', async ({
 /** Right-click the seeded "branchy" row and return its context menu. */
 async function openBranchyMenu(page: any) {
   await page.goto();
-  await page.sidebar.openTab(panelId('claude'));
+  await openPanelTab(page, 'claude');
   const panel = page.locator(PANEL);
   await expect(panel).toBeVisible();
   const row = panel

@@ -1,0 +1,203 @@
+VERDICT: DO-NOT-SHIP (10 findings) - the round-3 mode-naming fixes are defeated panel-wide by one panel-level read, and a branch that runs with --dangerously-skip-permissions says nothing at all.
+
+HOW THIS WAS TESTED (so you can tell fact from inspection)
+A live JupyterLab was driven with Playwright/Galata on port 8899 against the CURRENT worktree
+build (`jupyterlab_ai_code_assistants_extension/labextension`, 08:31 today), NOT the copy
+installed in `ui-tests/.venv` (07:53, stale - it still contains the deleted string
+'No favorites yet'). The fresh build was served by pointing `LabServerApp.extra_labextensions_path`
+at a scratch symlink; extra paths are searched first and first-wins, so it shadows the venv copy.
+Nothing in the repo was modified. Harness, specs, logs and screenshots:
+  /tmp/claude-1000/-home-lab-workspace-private-jupyterlab-jupyterlab-ai-code-assistants-extension/0257fef0-9212-4c10-ab11-3a300a3b5938/scratchpad/ux4/
+    conf.py, playwright.config.js, tests/ux*.spec.ts, run1.log,
+    shot-menu-plain-modeon.png, shot-menu-bg-modeon.png, shot-branch-submenu.png,
+    shot-branch-dialog.png, shot-long-name.png, shot-menu-dark.png, shot-panel.png
+The fixture seeds three Claude projects and a live background agent (a `claude agents --json`
+stub returning kind=background with a live pid), which the standard fixture cannot produce -
+that state is what most of these findings live in. Port 8888 was never touched.
+
+CLOSURES VERIFIED
+- DEF-35 - HOLDS in the case it was written for. Rendered: with
+  `providers.claude.dangerouslySkipPermissions` on, the flattened top-level item reads
+  `Branch Session (Skip Permissions)` and wears `branchIcon` (16x16). With the mode off, the
+  submenu form is intact: `Branch Session` -> `Normal` / `Skip Permissions`.
+  Judgement on the trade: see finding 4 - words for the mode is right, keeping `branchIcon`
+  is not.
+- DEF-36 - HOLDS on hover and on focus (rendered: title becomes
+  `New Claude Code session in the current folder (Skip Permissions)`). The build-time title
+  does NOT (finding 7), and both go silent after a background-agent right-click (finding 1).
+- 'No favorites yet.' deletion - CORRECT, no state is left without copy. The favourites
+  section renders only when a favourite exists or a filter is active, so with a blank filter
+  it cannot be empty, and with a filter it reads 'No matches.' Its twin is now dead
+  (finding 8).
+- `reconcileColours` logging - HOLDS. `src/core/terminals.ts:388-391` console.warns with the
+  provider-tagged prefix and the error, then rearms in `finally`.
+
+RE-RAISED FROM ROUND 3
+1. "the row tooltip reads `_activeSession` rather than its own row" - RE-RAISED, proven. The
+   line is `src/core/panel.ts:1751`, reached from `_buildRowTooltip` at `:1606`. See finding 1.
+2. "the caution triangle renders in body grey at 13x13" - RE-RAISED, proven by rendered
+   sample in both themes. See finding 5.
+
+FINDINGS
+
+1. [MAJOR][FACT - executed] One background-agent right-click switches OFF mode-naming for the
+   whole panel, while the launches keep the mode.
+   `_variantSuffix()` (panel.ts:1756) and `_variantIcon()` (:1776) both go through
+   `_resolvedVariant()` (:1738), which at :1751 reads a PANEL field -
+   `this._descriptor.hasBgAgents && !!this._activeSession?.bg_id` - and answers null. That
+   suppression is correct for exactly one caller, the `resume` command, where an attach really
+   does drop the flag. It is wrong for the other four: `_buildRowTooltip` (:1606), the `+`
+   button title (:318 and :324), the `new-session` command (:2009-2011) and the
+   `branch-session` command (:1986-1993). `_activeSession` is set on any right-click and
+   deliberately never cleared (:2064-2068), so it is whatever row was last right-clicked.
+   Rendered/executed with skip-permissions ON:
+     - before any right-click, the agent-free `plain` row tooltip carries
+       `Launch mode: Skip Permissions`; the `branchy` row, which holds a live agent and whose
+       click ATTACHES, also carries it (false positive);
+     - after right-clicking `branchy` and pressing Escape, the `plain` row tooltip loses the
+       `Launch mode:` line entirely, and the `+` button title drops back to
+       `New Claude Code session in the current folder` (false negative);
+     - clicking `+` in that state POSTs
+       {"project_path":...,"new_session_id":...,"mode":"dangerouslySkipPermissions"};
+     - on the agent row itself the menu reads a bare `Branch Session` with the neutral branch
+       glyph (shot-menu-bg-modeon.png), and choosing it POSTs
+       {"session_id":"branch-2","fork_session_id":...,"name":"probe-fork",
+        "mode":"dangerouslySkipPermissions"}.
+   So the one state where the extension launches an approval-free session with no naming
+   anywhere on screen is reachable by a right-click and a click. The recorded DEF-35 note
+   ("the guard asymmetry ... is left alone - the visible symptom is the finding") priced this
+   as invisible; it is not.
+   Fix: make attach-suppression a parameter of the caller, not a panel-wide read - keep
+   `_resolvedVariant()` pure (settings only) and have the `resume` command alone apply the
+   `joining` test to the row it is labelling. Everything else then names the mode it actually
+   sends.
+
+2. [MAJOR][FACT - rendered] The branch count and the `bg` chip are clipped out of existence on
+   long project names.
+   Both markers are appended INSIDE `.jp-AiAssistantsPanel-name` (panel.ts:1471 and :1481),
+   which is `overflow:hidden; text-overflow:ellipsis` (base.css:316-323). Rendered at sidebar
+   width (panel 250px): `customer-portal-frontend-experiments-2026` holds 2 conversations and
+   a live background agent, and its row shows neither marker - measured, the badge box lands
+   at x=1083 against a clip edge at x=913 - while the short-named `branchy` row beside it shows
+   both (shot-long-name.png). The lost chip is the one that says a click JOINS a running agent
+   instead of resuming, so the row's click means something different from what it looks like,
+   and only on the rows whose names are long. The repo already knows this lesson: base.css:668
+   documents the popup's fix - "a marker inside the ellipsised span would be clipped on
+   exactly the long-titled rows it matters for".
+   Fix: copy the popup's own structure - make the name cell a flex line with a
+   `flex: 0 1 auto` ellipsised text span and the markers as `flex: 0 0 auto` siblings.
+
+3. [MAJOR][FACT - executed] The extension's menus draw no submenu affordance at all.
+   `_menu()` (panel.ts:2072-2076) builds `new Menu(...)` from `@lumino/widgets`, whose default
+   renderer emits an EMPTY `div.lm-Menu-itemSubmenuIcon`. Measured on the live menu:
+   `Open Branched Conversation (2)`, `Switch and Manage Sessions (2)` and `Branch Session`
+   all report submenuIcon innerHTML "" and computed background-image "none". A/B against
+   JupyterLab's own File menu in the same session: `New`, `Open Recent`, `Workspaces` each
+   carry a caret svg. So in this extension a submenu is visually indistinguishable from a
+   command - and round 3 made that worse by giving the submenu and the flattened command the
+   same first two words, so `Branch Session` (hover for two choices) and
+   `Branch Session (Skip Permissions)` (acts immediately) differ only by a parenthetical.
+   Fix: `MenuSvg` from `@jupyterlab/ui-components` instead of `@lumino/widgets`' `Menu` - it is
+   JupyterLab's own renderer (`renderSubmenu` draws the caret) and will likely also retire the
+   icon-alignment patch at base.css:522-532.
+
+4. [MAJOR][FACT - rendered] The DEF-35 fix traded the danger glyph away, and the same menu now
+   marks one approval-free launch and not the other.
+   Asked for a judgement: naming the mode in WORDS is right - the suffix is what assistive tech
+   reads and it survives the icon column entirely. But the conclusion drawn from it is
+   backwards. Once the label says `Branch Session (Skip Permissions)`, the verb is carried by
+   the words, and the single icon slot is free for the job it does everywhere else in that
+   menu. Instead `icon: () => this._visibleVariantCount() === 0 ? branchIcon : this._variantIcon()`
+   (panel.ts:1992-1993) spends it on redundancy. Rendered, mode ON, one menu, two items that
+   build equally approval-free launches: `Resume (Skip Permissions)` wears the caution triangle,
+   `Branch Session (Skip Permissions)` wears a neutral branch glyph identical in weight and
+   colour to `Show in File Browser` and `Remove from Claude Code` (shot-menu-plain-modeon.png).
+   Before round 3 that item DID carry the triangle. In a column where every other unsafe launch
+   is marked, unmarked reads as safe - a false negative on the item that both forks history and
+   runs without approval, sitting one separator above Remove.
+   Fix: keep the suffix, restore `_variantIcon()` (falling back to `branchIcon` only when no
+   mode is in force). The branch identity is already in the words.
+
+5. [MINOR][FACT - rendered, both themes] The caution triangle is the smallest icon in the menu
+   and the same grey as the neutral ones.
+   `warningIcon` is authored at 13x13 (icons.ts:54) while every other menu glyph is 16x16, and
+   it carries `class="jp-icon3"` with no override anywhere in style/base.css. Sampled from the
+   live menu: light theme - triangle fill rgb(97,97,97) at 13x13, `Show in File Browser`
+   rgb(97,97,97) at 16x16, `Add to Favorites` rgb(97,97,97) at 16x16, `Remove from Claude Code`
+   rgb(97,97,97) at 16x16. Dark theme - triangle rgb(189,189,189) at 13x13, the same three at
+   rgb(189,189,189) 16x16. So the only danger cue in the product is 19% smaller than its
+   neighbours and colour-identical to a folder icon, which also makes the marking
+   colour-only-by-absence rather than by signal.
+   Fix: 16x16 to match the column, and drive its fill from a warning token
+   (`--jp-warn-color1`) rather than `jp-icon3` - a muted amber at menu scale is noticeable
+   without reading as an error.
+
+6. [MINOR][FACT - executed] Ok on an empty branch name is a silent no-op.
+   `_branchSession` (panel.ts:851-860) returns without a word when the value is blank, and the
+   dialog's Ok is not disabled. Executed: opened Branch Session, pressed Ok with the field
+   empty - dialog closed, zero POSTs, zero notifications, inline error still hidden. The
+   placeholder is the parent's name rendered as grey text in the field
+   (shot-branch-dialog.png), which is the standard "this is the default, press Ok" idiom, so
+   the most likely blank-field submit is a user who thinks they accepted the default.
+   Fix: either disable Ok while the field is blank, or make the placeholder real - default the
+   name to the parent's when the field is left empty.
+
+7. [MINOR][FACT - executed] DEF-36's static title never carries the mode.
+   The closure note says "a screen reader reads the accessible name without hovering, so the
+   static one had to carry it too". It cannot: `_buildShell` sets that title in the constructor
+   (panel.ts:324) while `_modes` is still `{}` - `applySharedSettings` -> `setModes` runs after
+   construction (src/index.ts:176-177) and re-titles nothing. Executed: with the setting saved
+   and the page reloaded, the untouched button reads
+   `New Claude Code session in the current folder`; only after `.focus()` does it become
+   `... (Skip Permissions)`. Hover and focus users are covered; a browse-mode screen-reader
+   read is not.
+   Fix: re-run `nameNewButton()` at the end of `setModes`.
+
+8. [MINOR][FACT - code, closure-adjacent] `'Empty.'` is now dead copy for exactly the reason
+   `'No favorites yet.'` was deleted.
+   panel.ts:1400-1406 chooses between `'No matches.'` and `'Empty.'` on `this._filter.trim()`.
+   Reaching `'Empty.'` needs an empty section with a blank filter. `_render` returns early when
+   there are no sessions at all (:1296); with a blank filter `filtered` is every session, so
+   `recent` and `all` are non-empty, and the favourites section is only rendered when a
+   favourite exists (:1327), in which case it holds them all. Round 3 removed one half of a
+   dead pair and left the other two lines away.
+   Fix: drop the conditional, keep `'No matches.'`.
+
+9. [MINOR][FACT - rendered] Recent and All render the identical list whenever the project count
+   is at or under the recent limit.
+   Rendered with three projects: `RECENT (3)` and `ALL (3)`, same three rows, same order
+   modulo sort (shot-long-name.png) - half the panel is a second copy of the other half, and
+   that is the default state for anyone with fewer than ten projects. Favourites already sets
+   the precedent for a conditionally rendered section.
+   Fix: skip Recent when `recent.length === all.length`.
+
+10. [MINOR][FACT - rendered] In the destructive group, only one of the two destructive items is
+   marked. `Clean Up Parallel Sessions (2)` registers no icon (panel.ts:1932-1942) while
+   `Remove from Claude Code` carries the trash glyph, so the pair the separator exists to
+   protect reads as one dangerous item and one ordinary one. Fix: give cleanup an icon in the
+   same family, or drop the icon from Remove - either is consistent; the mix is not.
+
+METHODOLOGY DIMENSIONS THAT PASS CLEANLY
+- Focus management: the row focus/scroll restore across a 30s poll (panel.ts:1275-1365) is
+  genuinely careful, keyed on section AND row so the duplicate copies of a project do not
+  steal focus; dialogs are properly scrimmed; the popup scrims its own body during a delete.
+- Motion comfort: one 0.9s/0.7s linear spin, no pulses, no infinite envelope on an action, and
+  a reduced-motion fallback that keeps the feedback (static dimmed ring) instead of removing
+  it. The 500ms refresh floor is the right call and is documented as such.
+- Attention without alarm: the inline error strip is per panel, `role="status"`, never modal;
+  the popup's delete button is an outline that only fills when armed. Calibrated well.
+- Consistency of the time column, tabular numerals, and the 4.5em width fix: correct, and the
+  reasoning recorded in base.css:874-888 is the right kind of reasoning.
+- Contrast: the deliberate color2-over-color3 choices and the 0.8 star opacity are argued from
+  measured ratios, and the stale dim was correctly narrowed to the name only.
+
+WHAT WORKS
+- The provider-neutral core genuinely holds: nothing in panel.ts names an assistant, and the
+  bg-agent divergence enters through two hooks and two flags.
+- The menu-generation guard (panel.ts:2140-2232) is the most careful piece of UI code here - a
+  superseded right-click touches nothing, and the budget/fallback story is correct.
+- Copy quality across dialogs is high: `Remove ... This drops the entire project history and
+  every conversation it holds - moved to trash. This cannot be undone.` names the outcome, the
+  disposal verb and the irreversibility in one sentence.
+- The manage-sessions popup gets truncation, live regions and the armed-delete two-step right;
+  it is the model the row rendering should be copying (finding 2).

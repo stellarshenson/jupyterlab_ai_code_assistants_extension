@@ -1,0 +1,349 @@
+ARCHITECT ADVERSARY - WHOLE REPO - ROUND 5 (CONFIRMING)
+jupyterlab_ai_code_assistants_extension v1.0.0, uncommitted tree
+lens: architecture, consistency, hardcodings, config drift, separation of
+concerns, over-engineering; the provider registry must never let core code
+name an assistant.
+
+VERDICT: SHIP
+
+Every closure listed in the seed holds under execution. Nothing the fix batch
+touched is broken. Six findings follow; none of them is a live runtime defect
+at v1.0.0 - they are guard gaps, drift hazards and one lint-gate break. One of
+them falsifies an acceptance criterion the project has marked closed, which is
+why it leads.
+
+
+================================================================================
+BASELINES RE-MEASURED
+================================================================================
+
+pytest                    150 passed, 38 warnings, 2.49s          - MATCHES
+npx jest                  82 passed, 5 suites                     - MATCHES
+npx tsc --noEmit          exit 0                                  - MATCHES
+npx eslint . --no-cache   0 errors, 54 warnings                   - MATCHES
+npx stylelint             exit 0, clean                           - MATCHES
+prettier --check          FAILS on .claude/workflows/
+                          confirming-round-v1.0.0.js              - DOES NOT MATCH
+Galata                    not run (not permitted this agent)
+
+The prettier discrepancy is finding 4 below.
+
+
+================================================================================
+CLOSURE VERIFICATION
+================================================================================
+
+DEF-32 - probe route reads terminal_manager.terminals, not get_terminal
+  HOLDS. routes.py:822 reads `terminal_manager.terminals.get(terminal_name)`
+  off the attribute with no getattr default, 404s on a miss. I confirmed the
+  hazard the fix avoids is real in the installed stack:
+    python -c "inspect.getsource(jupyter_server_terminals.terminalmanager
+               .TerminalManager.get_terminal)"
+  prints "Get or create a terminal by name" and, on a miss, calls
+  self.new_terminal() and registers it. terminado's NamedTermManager.get_terminal
+  is byte-identical. The registry read is the correct call.
+
+DEF-33 - _INIT_WAITER marks its own pty 1x1 and polls; SIGWINCH trap, baseline
+         read and server-side setwinsize deleted
+  HOLDS, and I re-measured it rather than reading it. Source state: routes.py:53
+  is `stty rows 1 cols 1 ...; for i in $(seq 1 50); do read r c < <(stty size ...)`,
+  no `trap`, no `WINCH` anywhere in the file, and routes.py:746 carries a comment
+  in place of the deleted resize.
+
+  Executed under a real pty (pty.fork, terminado's 24x80 stamped first, the
+  "client" resize injected at 0.6s):
+    resize path   - execs at 0.63s, child reports "40 120"
+    no-client path- execs at 5.16s, child reports "1 1"
+  The first is the behaviour DEF-33 was filed for. The second is DEF-47, already
+  open, and reproduces exactly as that entry describes.
+
+DEF-34 - closed with DEF-33's deletion
+  HOLDS. No subscript of `model` survives; the dict-or-object resolution at
+  routes.py:754 is the only reader and handles both shapes.
+
+DEF-35 / DEF-39 - branch item label and icon branch on _visibleVariantCount()
+                  === 0; the mode's glyph wins, branchIcon is the fallback
+  HOLDS. panel.ts:2004-2019. Label: `Branch Session<suffix>` when flattened,
+  `Default<suffix>` or `Normal` inside the submenu. Icon:
+  `this._variantIcon() ?? (this._visibleVariantCount() === 0 ? branchIcon
+  : undefined)` - danger first, branch glyph as fallback.
+
+  Walked the four states by hand against the Codex descriptor:
+    bypass ON  -> variant hides, count 0, flattened, "Branch Session (Bypass
+                  Approvals)" + warningIcon
+    bypass OFF -> count 1, submenu titled "Branch Session" + branchIcon, inner
+                  items "Normal" (no icon) and "Bypass Approvals" (warning)
+  Both are what DEF-35 and DEF-39 asked for, and neither regresses the other.
+
+DEF-36 / DEF-38 - the + button title appends _variantSuffix() and is re-run
+                  from setModes
+  HOLDS. panel.ts:318 writes the suffix; panel.ts:328-329 stores the closure and
+  calls it once at build; panel.ts:266 re-runs it at the end of setModes. Hover,
+  focus and the never-hovered accessible name all carry the mode.
+
+DEF-37 - _resolvedVariant() is settings-only; the background-agent attach test
+         moved to _resumeVariant(), read by the resume command alone
+  HOLDS. panel.ts:1744 is settings-only. panel.ts:1764 is the new helper, and
+  grep shows exactly two readers - the `resume` command's label (1816) and its
+  icon (1820). The + button, new-session, branch-session and _variantSuffix all
+  go through _resolvedVariant. The row tooltip at 1612 also reads
+  _resolvedVariant, which is DEF-46, correctly still open.
+
+DEF-40 - warning icon is 16x16 jp-icon-warn0
+  HOLDS. icons.ts:60-61. Confirmed the class is live in the installed stack:
+  node_modules/@jupyterlab/ui-components/style/icons.css:143 declares
+  `.jp-icon-warn0[fill]`, and the path carries a fill attribute, so the
+  selector matches and the theme drives the colour.
+
+yarn.lock stale mkdirp entry, 'Empty.' / 'No favorites yet.' deletions,
+duplicate acc-crit log lines, ISession.colour docs
+  HOLDS. `git diff yarn.lock` is the single mkdirp removal. Neither dead string
+  survives in src/. docs/acc-crit has 130 closed criteria, 0 open. types.ts:129
+  now states the override half is resolved for every provider, not native only.
+
+DELETED TESTS - CHECKED, BOTH JUSTIFIED
+  src/__tests__/registry.spec.ts lost a 48-line `descriptor filtering` block. It
+  defined its own `enabledAndAvailable` predicate inline and asserted against
+  that, never against index.ts - a tautology. Removal loses nothing.
+  ui-tests/.../jupyterlab_ai_code_assistants_extension.spec.ts lost the "N of M
+  panels docked" console assertion. panels.spec.ts covers the same gate harder:
+  line 33 cross-checks the server roster against AVAILABLE, line 42 asserts the
+  docked count, lines 98-122 assert the count falls and recovers when a provider
+  is toggled. Removal loses nothing.
+
+
+================================================================================
+FINDINGS
+================================================================================
+
+1. MAJOR - the core-neutrality guard's assistant list is a hardcoded regex, so
+   the invariant stops being guarded on the next provider and nothing says so
+   src/__tests__/core-neutrality.spec.ts:18
+
+   This spec is the whole enforcement of the architecture's central promise -
+   its own header says "The architecture rests on it ... so the source itself is
+   the assertion". Its input is a literal:
+
+     const ASSISTANT_NAMES = /claude|codex|kimi|gemini|moonshot|anthropic/i;
+
+   The registry it is meant to track is readable from disk two directories away
+   (src/providers/*.ts, or the barrel the schema generator already parses), and
+   this list duplicates it by hand.
+
+   Executed:
+     node -e "const RE=/claude|codex|kimi|gemini|moonshot|anthropic/i;
+              console.log(RE.test(\"if (descriptor.id === 'grok') {}\"))"
+     -> false
+     same with "const x = 'openai';" -> false
+     same with "if (id === 'claude') {}" -> true
+
+   So a fifth provider added tomorrow gets a green core-neutrality suite over a
+   core file that branches on its id. The failure is silent in both directions:
+   the test does not fail, and no other test, lint rule or build step notices
+   the regex is short.
+
+   This falsifies docs/acc-crit-jupyterlab-ai-code-assistants.md:44, "Add a
+   provider - adding an assistant requires exactly one new TS module, one new
+   Python module and one barrel line; no core file is edited", closed
+   2026-08-07 by conformance review. Adding a provider also requires editing
+   this spec, and the cost of forgetting is not a red test - it is the loss of
+   the only guard the architecture has.
+
+   Note also the list is already internally inconsistent: it carries the vendor
+   names `moonshot` and `anthropic` but not `google` or `openai`, while its own
+   comment claims the contents are "every id the registry ships, plus the names
+   of the retired extensions". Present-day id coverage is complete, so this
+   costs nothing today.
+
+   Fix shape: derive the names from the barrel or from readdirSync of
+   src/providers, and assert the derived set is non-empty and covers every
+   registered id - the same self-check the file already applies to coreFiles().
+
+2. MINOR - the only binding between the two descriptor copies discards enum
+   values, which is the drift class its own docstring names
+   jupyterlab_ai_code_assistants_extension/tests/test_descriptor_parity.py:66
+
+   test_descriptor_parity is the sole automated link between src/providers/*.ts
+   and providers/*.py. Its docstring: "A drift here ships a panel that asks its
+   server for behaviour the server does not recognise." Its comparison strips
+   the values before comparing:
+
+     def _mode_tokens(raw):
+         return sorted({token.split("=", 1)[0] for token in raw})
+
+   Executed against the real function:
+     ts tokens                 ['approvalMode', 'yoloMode']
+     py tokens                 ['approvalMode', 'yoloMode']
+     py with 'yolo' and 'plan' dropped server-side
+                               ['approvalMode', 'yoloMode']
+     parity holds with drifted server list?  True
+
+   The concrete uncovered case: schema/plugin.json offers
+   providers.gemini.approvalMode with enum ["default","auto_edit","yolo","plan"]
+   because generate-schema.mjs reads the TS `values` array, while the server
+   accepts exactly the tokens in gemini.py's APPROVAL_MODES tuple. Drop a value
+   from the tuple and the settings editor still offers it, the panel still sends
+   `approvalMode=plan`, and routes.py:708 answers 400 mode_unsupported on every
+   single launch. Parity stays green.
+
+   No drift exists today - both sides list ("default","auto_edit","yolo","plan").
+   The guard is what is thin, not the code.
+
+   Fix shape: dump `launchModes` as id plus values from the Node side and
+   compare the flattened token SETS, which is what the wire actually carries.
+
+3. MINOR - three cross-runtime guards read build artifacts that `make test`
+   never refreshes
+   Makefile:86, tests/test_descriptor_parity.py:24, tests/test_registry.py:191,
+   tests/test_routes.py:152
+
+   `make test` is `jlpm test` then `pytest`. It does not run tsc and does not run
+   generate:schema. Yet:
+
+     test_descriptor_parity  reads REPO/lib/providers/*.js  (tsc output)
+     test_registry           reads REPO/schema/plugin.json  (generator output)
+     test_routes             reads REPO/schema/plugin.json  (generator output)
+
+   All three are the guards that keep the TypeScript descriptor, the Python
+   descriptor and the settings schema agreeing. All three can therefore pass on
+   evidence that predates the source they are meant to be checking: edit a
+   descriptor, run `make test`, get a green suite comparing the Python side
+   against yesterday's compiled JS and yesterday's schema.
+
+   Measured today: lib/providers/*.js mtime 1786345305 against src/providers
+   max 1786315203, and `find src -name '*.ts' -newer lib/providers/gemini.js`
+   returns nothing - so lib is currently fresh and there is no live drift. I
+   also regenerated the schema from a scratch build
+   (npx tsc --outDir <scratch>/lib, then the generator with root redirected)
+   and diffed it against the committed file: identical apart from prettier's
+   array collapsing, which the npm script applies afterwards. So schema and
+   descriptors agree right now too.
+
+   Fix shape: either have `make test` depend on the lib/schema build, or make
+   the two schema-reading tests regenerate into a tmp_path and compare, which
+   also closes the "committed generated file may be stale" hole in one move.
+
+4. MINOR - an untracked workflow script breaks `jlpm lint:check`, the exact
+   command CI runs
+   .claude/workflows/confirming-round-v1.0.0.js
+
+   Measured:
+     npx prettier "**/*{.ts,.tsx,.js,.jsx,.css,.json,.md}" --check
+     [warn] .claude/workflows/confirming-round-v1.0.0.js
+     [warn] Code style issues found in the above file.
+
+   .prettierignore excludes node_modules, lib, package.json, eslint.config.mjs,
+   .venv, tmp and graphify-out - not .claude. So every orchestration script
+   dropped in .claude/workflows falls inside the prettier glob.
+   .github/workflows/build.yml:31 runs `jlpm run lint:check`, whose first leg is
+   prettier:check. The sibling script implement-ai-code-assistants.js is tracked
+   and formatted, which is the precedent that these files do get committed - and
+   the moment this one is, the build job goes red on a file that has nothing to
+   do with the extension.
+
+   Two clean options: format it, or add .claude to .prettierignore. The second
+   is the one that stops this recurring per round.
+
+5. MINOR - the server hardcodes JupyterLab's default user-settings path instead
+   of reading the server's configured settings_dir
+   jupyterlab_ai_code_assistants_extension/core/routes.py:160
+   jupyterlab_ai_code_assistants_extension/core/migrate.py:37
+
+     folder = Path(jupyter_config_dir()) / "lab" / "user-settings" / SETTINGS_PLUGIN_ID
+
+   That is the DEFAULT of LabServerApp.user_settings_dir, not the value. The
+   configured value is already in the tornado settings the handlers hold:
+   jupyterlab_server/handlers.py puts `"settings_dir": extension_app.user_settings_dir`
+   into web_app.settings, so `self.settings["settings_dir"]` is available on
+   every handler here.
+
+   A deployment that relocates user settings - a JupyterHub image putting them
+   on a shared volume, or a plain
+   `jupyter lab --LabServerApp.user_settings_dir=...` - makes _user_settings()
+   read a directory the settings editor never writes. _provider_enabled then
+   answers "enabled" for every provider regardless of the toggle, and
+   _enabled_providers() (the candidate list for _tree_assistant) is likewise
+   blind. Blast radius is small because the frontend gates panels independently
+   and the server-side consequence is only that a disabled provider's routes
+   stay reachable - but the state is silent and there is no log line for it.
+   migrate.py:37 has the same hardcoding, where the cost is a migration that
+   finds nothing and marks itself done anyway.
+
+   Not the same as the round-4 ui-tests finding: jupyter_server_test_config.py
+   does export JUPYTER_CONFIG_DIR into .scratch, so the suite no longer reads a
+   developer's live config. This is the production path.
+
+6. MINOR (SUSPICION) - the per-provider state filenames share one flat namespace
+   with no separator reserved
+   jupyterlab_ai_code_assistants_extension/core/state.py:44
+   jupyterlab_ai_code_assistants_extension/core/colour_store.py:36
+
+     state:   state_dir() / f"{provider_id}.json"
+     colours: state_dir() / f"{provider_id}-colours.json"
+
+   registry._ID_CHARS admits hyphens, so a provider registered as `x-colours`
+   writes its favourites and pins to the same path as provider `x`'s colour
+   store. The two files have different shapes, so each would read the other as
+   malformed and degrade to empty - favourites and pins silently gone for one,
+   tab colours silently gone for the other, with no error on either side.
+
+   Not reachable with the four shipped ids, and I did not construct it - hence
+   SUSPICION. The cheap fix is a subdirectory per provider, or a reserved
+   separator the id charset excludes.
+
+
+================================================================================
+CHECKED AND FOUND SOUND - NOT REPORTED
+================================================================================
+
+* Core neutrality in Python. grep over core/*.py for the six assistant names
+  returns three hits, all inside docstrings/comments (registry.py:87 an example
+  settings key, routes.py:136-137 the shallowest-wins rationale). No branch on
+  an id anywhere in the Python core.
+* Registry contract, both runtimes. Duplicate ids throw at registration (TS
+  registry.ts:29, Python registry.py:165). A provider module missing from the
+  TS barrel throws at build time (generate-schema.mjs:102 asserts barrel export
+  count equals module count). A provider present on one side only is caught by
+  test_descriptor_parity's id-set assertion. Python needs no barrel at all -
+  pkgutil discovery - and one module raising on import is logged and skipped.
+* Capability flags vs the two runtimes. Verified every TS flag against its
+  Python counterpart by reading all four launch_argv implementations:
+  claude native-flag/launch-flag/mints -> consumes fork_session_id and -n name;
+  codex native-command/none/no-mint -> consumes fork_from only, ignores
+  new_session_id and name and says so; gemini server-copy/server-side/mints ->
+  consumes new_session_id via --session-id, name handled by the store's fork;
+  kimi server-copy/server-side/no-mint -> consumes neither. No flag promises a
+  behaviour its server half does not implement.
+* Settings schema is generated, not hand-written, and currently matches the
+  descriptors (see finding 3 for the measurement). The two schema-reading tests
+  bind enabled_setting_key and every legacy settings_map target to the shipped
+  properties, which is the right shape of guard.
+* Live provider toggle. index.ts stop() disposes the panel and its command;
+  start() re-creates. providerIcon() caches by LabIcon name so a re-registration
+  reuses the first icon rather than warning. LayoutRestorer.add overwrites its
+  map entry and does not throw on a repeated name (checked the installed
+  @jupyterlab/application source), so the stop/start cycle is safe.
+* Provider-scoped routes. requestProvider encodes the id into
+  providers/<id>/..., the server's route regex is [a-z0-9-]+, and every handler
+  resolves the provider before touching a store, so one panel cannot read
+  another's session ids. TerminalHandler answers running:false for a terminal
+  owned by a different assistant.
+* The three "add an assistant" test touchpoints beyond the neutrality regex.
+  ui-tests/tests/shared.ts AVAILABLE and jupyter_server_test_config.py STUBBED
+  do not silently degrade: panels.spec.ts:33 cross-checks AVAILABLE against the
+  server's own roster filtered to available, and a new unstubbed provider is
+  simply unavailable, so the assertion still holds. Only the regex degrades.
+* Over-engineering. panel.ts is 2412 lines and does rendering, commands, menus,
+  branching and polling. I read it looking for a split worth demanding and did
+  not find one that is not taste - the strategy dispatch in _branchSession is
+  three named private methods over one shared prologue, the mode resolution is
+  already its own JupyterLab-free module, and terminals.ts and colour.ts are
+  already carved out along real seams. Declined rather than reported.
+
+One latent contract hole I looked at and decided not to file: _branchSession
+prompts for a name whenever namingStrategy !== 'none', then dispatches on
+forkStrategy - and _branchByNativeCommand takes no name parameter. A descriptor
+combining native-command with launch-flag naming would prompt the user and
+discard the answer. No shipped provider does that, the type system cannot
+express the exclusion, and filing a defect against a combination nobody has
+written is manufacturing one.

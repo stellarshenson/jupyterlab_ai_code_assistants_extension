@@ -1,7 +1,10 @@
 import { IProviderDescriptor, IProviderModule } from './types';
 
 /** Console prefix for everything this extension logs. One spelling, so a
- * reader filtering the console on it sees every message the extension wrote. */
+ * reader filtering the console on it sees every message the extension wrote -
+ * with one deliberate exception: the plain activation line in `src/index.ts`
+ * is the copier template's own smoke-test contract, asserted verbatim by
+ * `ui-tests/tests/jupyterlab_ai_code_assistants_extension.spec.ts`. */
 export const LOG_PREFIX = '[jupyterlab_ai_code_assistants_extension]';
 
 /**

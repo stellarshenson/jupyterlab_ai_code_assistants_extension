@@ -61,6 +61,7 @@ class Capabilities:
       the store mints the id), ``native-command`` (the CLI owns both the fork
       verb and the id, reached through a ``fork_from`` launch),
       ``server-copy`` (the store copies the conversation itself) or ``none``
+      (the assistant has no fork at all, which is the default)
     * ``colour_source`` - ``native`` (the assistant owns the conversation's
       colour), ``derived`` (the store computes one from the id) or ``none``
     * ``launch_modes`` - the mode tokens ``launch_argv`` accepts; anything else
@@ -82,7 +83,11 @@ class LegacySource:
     * ``plugin_id`` - the retired package's JupyterLab settings directory name
     * ``state_file`` - its favourites sidecar, as a home-relative path
     * ``settings_map`` - old settings key to the key it becomes here, e.g.
-      ``{"dangerouslySkipPermissions": "providers.<id>.skipPermissions"}``
+      ``{"dangerouslySkipPermissions":
+      "providers.claude.dangerouslySkipPermissions"}``. The target must be a
+      key the shipped schema declares - a value carried to a key nothing reads
+      is lost silently, and the migration marker commits in the same call, so
+      there is no second attempt
     """
 
     plugin_id: str

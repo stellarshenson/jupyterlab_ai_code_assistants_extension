@@ -345,7 +345,15 @@ def _session_state_by_cwd(root: Path) -> dict[str, dict]:
         cwd = data.get("cwd")
         if not isinstance(cwd, str):
             continue
+        # Type-checked like every neighbouring field, and for a blunter
+        # reason: this one is COMPARED and SUBTRACTED below, so a string here -
+        # an ISO timestamp from a future or older CLI, in a directory Claude
+        # never prunes - raises out of the executor and 500s the whole
+        # listing, for every project, on every poll, until the file is found
+        # by hand. A value that is not a number is no timestamp at all.
         updated_at = data.get("updatedAt") or data.get("startedAt") or 0
+        if not isinstance(updated_at, (int, float)) or isinstance(updated_at, bool):
+            updated_at = 0
         previous = by_cwd.get(cwd)
         if previous is not None and previous["updated_at"] >= updated_at:
             continue
@@ -637,17 +645,21 @@ class ClaudeStore(SessionStore):
 
         latest = dict(indexed) if indexed is not None else {
             "sessionId": sid,
-            "summary": "",
-            "firstPrompt": "",
             "messageCount": 0,
-            "created": None,
-            "modified": None,
             "gitBranch": None,
         }
         # The index is distrusted on exactly the two fields it is known to get
         # wrong: an mtime it never refreshed, and an ``originalPath`` that a
         # folder rename left stale.
-        latest["fileMtime"] = max(int(latest.get("fileMtime") or 0), fs_mtime)
+        indexed_mtime = latest.get("fileMtime") or 0
+        if not isinstance(indexed_mtime, (int, float)) or isinstance(
+            indexed_mtime, bool
+        ):
+            # Same blast radius as ``updatedAt``: an unparseable mtime in the
+            # assistant's own index would take the entire listing down rather
+            # than cost this one row its recency.
+            indexed_mtime = 0
+        latest["fileMtime"] = max(int(indexed_mtime), fs_mtime)
         if chosen_cwd:
             latest["projectPath"] = chosen_cwd
         latest["customTitle"] = records.get("custom_title")
@@ -726,11 +738,7 @@ class ClaudeStore(SessionStore):
                 "session_id": session_id,
                 "name": name,
                 "name_source": name_source,
-                "summary": latest.get("summary") or "",
-                "first_prompt": latest.get("firstPrompt") or "",
                 "message_count": latest.get("messageCount") or 0,
-                "created": latest.get("created"),
-                "modified": latest.get("modified"),
                 "file_mtime": latest.get("fileMtime") or 0,
                 "git_branch": latest.get("gitBranch"),
                 "extra_sessions": max(
@@ -1054,8 +1062,8 @@ DESCRIPTOR = ProviderDescriptor(
         # The CLI forks in-process from a flag pair, under an id the FRONTEND
         # mints and carries on the launch - so there is no server-side fork.
         fork_strategy="native-flag",
-        # Claude owns its conversations' colours through ``/color``, so the
-        # extension's write-back store never overrides them.
+        # Claude supplies a conversation's DEFAULT colour through ``/color``;
+        # a colour the user sets on the tab overrides it and is remembered.
         colour_source="native",
         launch_modes=(MODE_SKIP_PERMISSIONS,),
     ),

@@ -4,6 +4,7 @@ import {
   ABSENT,
   AVAILABLE,
   fetchStatus,
+  openPanelTab,
   panelId,
   setProviderEnabled,
   waitForApplication
@@ -57,7 +58,7 @@ test('each panel carries its own provider title', async ({ page }) => {
   const status = await fetchStatus(page);
   const titles: string[] = [];
   for (const id of AVAILABLE) {
-    await page.sidebar.openTab(panelId(id));
+    await openPanelTab(page, id);
     const label = status.providers.find(p => p.id === id)!.label;
     // `textContent`, not `innerText`: the header is styled uppercase, and
     // `innerText` returns the rendered casing rather than the descriptor's.

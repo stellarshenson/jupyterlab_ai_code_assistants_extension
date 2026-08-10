@@ -153,9 +153,7 @@ def test_one_prior_install_migrates_and_the_others_are_skipped(config_dir, tmp_p
     assert migrated["beta"]["favourites"] == []
 
 
-def test_corrupt_prior_settings_are_skipped_and_the_rest_continue(
-    config_dir, tmp_path, caplog
-):
+def test_corrupt_prior_settings_are_skipped_and_the_rest_continue(config_dir, tmp_path):
     broken = fake_provider("alpha", tmp_path / "legacy" / "alpha.json")
     good = fake_provider("beta", tmp_path / "legacy" / "beta.json")
     folder = config_dir / "lab" / "user-settings" / broken.descriptor.legacy.plugin_id

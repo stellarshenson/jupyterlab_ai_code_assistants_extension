@@ -16,7 +16,12 @@ export default defineConfig([
       '.venv',
       'tests',
       '**/__tests__',
-      'ui-tests'
+      'ui-tests',
+      // Scratch trees, ignored by .gitignore and .prettierignore too. Nothing
+      // here is on tsconfig's include list, so any .ts that lands in one is a
+      // parsing error rather than a lint result.
+      'tmp',
+      'graphify-out'
     ]
   },
   js.configs.recommended,
@@ -50,7 +55,15 @@ export default defineConfig([
           }
         }
       ],
-      '@typescript-eslint/no-unused-vars': ['warn', { args: 'none' }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          args: 'after-used',
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_'
+        }
+      ],
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-namespace': 'off',
       '@typescript-eslint/no-use-before-define': 'off',

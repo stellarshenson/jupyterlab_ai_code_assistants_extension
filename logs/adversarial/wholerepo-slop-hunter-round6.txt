@@ -1,0 +1,309 @@
+SLOP-HUNTER - whole-repo confirming round 6 - v1.0.7
+=====================================================
+
+VERDICT: DO-NOT-SHIP. Two MAJOR findings, both FACT, both inside the wave this
+round is measuring. Three MINOR findings behind them. Everything else the round
+was asked to confirm HOLDS, and is listed with the evidence that settles it.
+
+Discipline: no repo file was edited. Every mutation ran in one of two scratch
+copies under the session scratchpad - `mut/` (src + jest config, node_modules
+symlinked) and `fresh/` (the whole tree minus node_modules/ui-tests, mtimes
+preserved by tar). Both reproduce the repo's own baselines exactly, and the
+repo's five touched files were md5-compared against their pre-mutation copies at
+the end (identical). One unavoidable side effect is disclosed under GATES.
+
+
+GATES - all re-measured, none trusted
+--------------------------------------
+pytest                    163 passed, 44 warnings, 8.24s              MATCHES
+npx jest                  119 passed, 7 suites                        MATCHES
+npx tsc --noEmit          exit 0                                      MATCHES
+LEG 1 eslint . --no-cache 0 errors, 43 warnings                       MATCHES
+LEG 2 prettier --check    "All matched files use Prettier code style" MATCHES
+LEG 3 stylelint (no cache) exit 0, no output                          MATCHES
+acc-crit.py check --strict 0 errors, 0 warnings                       MATCHES
+schema/plugin.json        regenerated in scratch, byte-identical      IN SYNC
+Galata                    not run - not my permission this round
+
+The three lint legs were run as separate uncached invocations, never through
+`jlpm lint:check`, which caches all three.
+
+DISCLOSED SIDE EFFECT: running `npx tsc --noEmit` in the repo rewrote
+`tsconfig.tsbuildinfo`'s mtime (12:52 -> 14:28). `lib/` was genuinely fresh at
+the time (newest src 12:51:23, newest lib 12:52:30), so no guard was falsified
+by it, and I verified in `fresh/` that an emit build after a noEmit build
+re-emits everything correctly (the TS 5.5 buildinfo carries the noEmit flag).
+It is also, unfortunately, finding 2.
+
+
+FINDINGS
+========
+
+1. MAJOR (FACT) - DEF-63's settings-dir plumbing is killed by no test; two
+   mutations survive the whole pytest suite
+   jupyterlab_ai_code_assistants_extension/core/routes.py:919,
+   jupyterlab_ai_code_assistants_extension/core/migrate.py:92
+
+   `migrate(providers, settings_dir=None)` falls back to
+   `Path(jupyter_config_dir()) / "lab" / "user-settings"`. The ONE production
+   caller - the migrate POST at routes.py:919 - passes `_user_settings_dir()`
+   instead, which reads LabApp's configurable `user_settings_dir` trait, and the
+   comment above it states the whole point: "migration reads the folder THIS
+   server writes to rather than the default".
+
+   Nothing asserts that. All nine tests in `test_migrate.py` monkeypatch
+   `migrate.jupyter_config_dir` and call `migrate(...)` with no `settings_dir`,
+   so every one of them exercises the FALLBACK. `test_settings_dir.py` proves
+   `routes._user_settings_dir()` resolves the trait correctly, in isolation.
+   No test binds the two ends together.
+
+   Measured, in `fresh/`, full suite each time:
+     M9  routes.py:919 -> `migrate.migrate(registry.providers().values())`
+         (the argument dropped entirely)                    163 passed
+     M10 migrate.py:116 -> `_legacy_settings(legacy.plugin_id, None)`
+         (the parameter ignored inside)                     163 passed
+
+   Both ends of the plumbing can be severed and the suite reports green. Under
+   `--LabApp.user_settings_dir=/custom` (or `JUPYTERLAB_SETTINGS_DIR`) migration
+   would read the wrong folder, find no retired-extension settings, mark itself
+   done, and never look again - the exact silent failure DEF-63 was raised to
+   prevent. The two runtimes' halves are each tested; the join is not.
+
+   What would close it: one test that drives the migrate route (or calls
+   `migrate.migrate(providers, tmp_path)`) with a settings dir DIFFERENT from
+   `jupyter_config_dir()`'s default, and asserts the legacy keys are picked up
+   from it. That test dies under both M9 and M10.
+
+2. MAJOR (FACT) - `npx tsc --noEmit` clears the DEF-75 build-freshness guard
+   while emitting nothing, which is the silent green the guard exists to prevent
+   jupyterlab_ai_code_assistants_extension/tests/test_descriptor_parity.py:137
+
+   `_require_fresh_lib` takes its build marker as
+   `max(newest lib/*.js, tsconfig.tsbuildinfo)`. `tsconfig.json` sets
+   `incremental: true` AND `composite: true`, and TypeScript 5.5 writes the
+   buildinfo on a `--noEmit` run too. So a typecheck - which produces no `.js`
+   at all - refreshes the marker and certifies `lib/`.
+
+   Reproduced end to end in `fresh/` (mtimes preserved, `lib/` byte-identical
+   to the repo's):
+     A  pytest test_descriptor_parity.py                       4 passed
+     B  append `export const _PROBE_ROUND6 = 1;` to
+        src/core/colour.ts, pytest                             4 FAILED
+        ("lib/ is older than src/: src/core/colour.ts was written after
+         tsconfig.tsbuildinfo")
+     C  npx tsc --noEmit                                       exit 0
+        tsconfig.tsbuildinfo mtime -> now; newest lib/*.js UNCHANGED;
+        `grep -c _PROBE_ROUND6 lib/core/colour.js` -> 0
+     D  pytest test_descriptor_parity.py                       4 passed
+
+   Step D is the whole defect: four parity assertions comparing today's Python
+   against a `lib/` that provably does not contain today's TypeScript, reported
+   green. The guard's own docstring says "the failure this guard exists to
+   prevent is a SILENT green, and a red that needs one documented command is a
+   far cheaper mistake" - and the cheap mistake has been traded for the
+   expensive one by a command every agent in this campaign runs. `npx tsc
+   --noEmit` is in the baseline list of this very round.
+
+   The ordering that hits it is the campaign's ordinary loop: edit `src/`,
+   typecheck, run pytest. Nothing exotic is required.
+
+   Note the blast radius is wider than the parity file: `scripts/generate-
+   schema.mjs` reads `lib/providers/*.js` too, so a stale `lib/` also generates
+   a stale `schema/plugin.json` - and the parity guard is the only thing that
+   was watching.
+
+   What would close it: use a marker the typecheck cannot forge. Either drop
+   `BUILD_INFO` from the max and accept the known false positive DEF-75
+   documented (its remedy is one command and the docstring already names it), or
+   compare CONTENT rather than mtime - e.g. require that every `src/**/*.ts`
+   has a `lib/**/*.js` newer than it, or hash the descriptor fields out of both
+   `src/` and `lib/`. mtime plus a file tsc rewrites for a non-build cannot
+   answer the question the guard asks.
+
+3. MINOR (FACT) - the DEF-72 timeout surface has no production consumer, and the
+   escape hatch its own comment prescribes has no user
+   src/core/request.ts:29-55, :24
+
+   `RequestTimeoutError` and `isRequestTimeout` are referenced by exactly one
+   file outside `request.ts`: `src/__tests__/request.spec.ts`. Grep across
+   `src/` for `isRequestTimeout|RequestTimeoutError|REQUEST_TIMEOUT_MS` outside
+   `request.ts` returns the spec, plus two prose mentions in comments
+   (`colour.ts:230`, `panel.ts:1104`). No caller branches on a timeout, so the
+   rationale the class carries - "a caller that cannot tell the two apart cannot
+   report either honestly" - describes a caller that does not exist. Today a
+   timeout reaches the user as whatever the generic failure path shows.
+
+   DELETE-TEST, in `mut/`: removed `isRequestTimeout` and its docblock.
+     npx tsc --noEmit -p tsconfig.json            exit 0
+     npx jest                        6 suites pass, 112 passed;
+                                     only request.spec.ts fails to compile
+   The predicate is held alive solely by the test written for it.
+
+   The second half is the same shape and matters more. The docblock on
+   `REQUEST_TIMEOUT_MS` says the two N-bounded routes are covered because "a
+   caller that knows it is starting such a sweep passes its own `signal` and
+   gets no ceiling from here". No caller passes a `signal` - grep for `signal`
+   across `src/` outside `request.ts` finds three comments and no code. So the
+   documented mitigation is unimplemented prose, and the project DELETE that
+   runs one `codex` CLI invocation per conversation (0.7s measured, 30s worst
+   case each) is hard-capped at 60s with no way to opt out. The ledger discloses
+   that these routes can exceed the constant; it does not disclose that the
+   escape hatch named in the source is fictional.
+
+   Smallest honest close: either wire one caller (the project DELETE) to its own
+   `AbortController`, or delete the sentence and the unused predicate and say
+   plainly that the N-bounded routes are capped like everything else.
+
+4. MINOR (FACT) - the core-neutrality guard's comment stripper truncates at the
+   first `//` even inside a string, and five lines in the core sit behind it
+   src/__tests__/core-neutrality.spec.ts:80-90
+
+   `stripComments` drops everything from the first `//` on a line, with no
+   awareness of string literals. `src/core/icons.ts` carries five template
+   literals containing `xmlns="http://www.w3.org/2000/svg"`, so everything after
+   the scheme separator on those five lines is invisible to the scan.
+
+   Measured, in `mut/`: injected a live branch onto icons.ts line 15, AFTER the
+   `//` of the xmlns URL -
+     `data-x="${false ? 'kimi' : ''}"`
+   `npx jest core-neutrality` -> 19 passed. The guard whose docstring says "the
+   source itself is the assertion" does not see it.
+
+   No live violation exists today - I rescanned all of `src/core/*.ts` with a
+   stripper that only honours a `//` not preceded by `:`, over
+   claude|codex|kimi|gemini|anthropic|moonshot, and it found nothing. So this is
+   coverage, not a breach, which is why it is MINOR. The one-line close is to
+   ignore a `//` preceded by `:` (or to strip strings before comments).
+
+5. MINOR (FACT) - two of DEF-71's four exported constants have no importer
+   src/core/panel.ts:91-92
+
+   `DEFAULT_RECENT_LIMIT` and `DEFAULT_PRESENTATION_MODE` are imported by
+   `src/index.ts`, which is what DEF-71 was for. `MIN_RECENT_LIMIT` and
+   `MAX_RECENT_LIMIT` are used only inside `panel.ts` itself (the clamp at
+   :260-261) - no importer in `src/`, no importer in `ui-tests/`, no spec.
+
+   DELETE-TEST, in `mut/`: dropped the `export` keyword from both.
+     npx tsc --noEmit -p tsconfig.json            exit 0
+     npx jest                                     119 passed, 7 suites
+   Green either way, so the two `export` keywords are surface with no consumer.
+   The constants themselves are load-bearing and must stay.
+
+
+WHAT THE ROUND ASKED ME TO CONFIRM - ALL HOLD
+==============================================
+
+DEF-30, the 22 deleted references. Zero orphans. `grep -rn
+'_writeSeq|_writeStart|_readSeq|_readAbsorbed|_absorb|_current\('` over `src/`,
+`lib/`, `ui-tests/`, `docs/`, `scripts/` and the Python package returns exactly
+one hit - the historical account inside `docs/defects.md` - plus unrelated
+Python names (`_pick_current`, `resolve_current`, `_resolve_project_current`)
+that only match because of the `_current(` pattern. The shipped labextension
+bundle carries `_writeSeq` 0 times and `_chain` 4 times, so the built artifact
+is the new mechanism too.
+
+DEF-30, the five replacement tests. Each kills a real mutant, and the set is not
+redundant - four different mutations partition them:
+  M1 `_run` returns `op()` (queue bypassed, `_chain` still assigned so it stays
+     type-clean)                    -> 5 failed / 33 passed: exactly the five
+  M2 `_openWrite` moved inside the queued op (pending counted from the send)
+                                    -> 3 failed, incl. "reports a write as
+                                       pending before it goes out"
+  M3 `forget` filters at the CALL rather than inside its op
+                                    -> 2 failed, incl. "releases a colour a
+                                       reload queued ahead of it is about to
+                                       bring in"
+  M4 `forget` filter drops `|| this.isPending(id)`
+                                    -> 1 failed: "releases an id whose write is
+                                       queued behind it"
+  M5 `load` bypasses the queue only  -> 3 failed, incl. "does not put a reload
+                                       on the wire while a write is unanswered"
+                                       and "takes the later of two overlapping
+                                       reloads"
+Every one of the five is the sole victim of at least one mutation, so none is
+carried by another. Note jest here type-checks, so a mutation must be
+type-clean to be a behavioural result - M1's first form was rejected with
+TS6133 rather than run, and was reshaped rather than counted.
+
+One survivor, disclosed rather than reported: `this._chain = result.then(settled,
+settled)` -> `result.then(settled)` leaves 38/38 green. It is unreachable today
+because every op catches its own failure, and the source says so in as many
+words ("only the first is reachable by test"). Documented defensive depth for a
+future edit, not slop - `forget`'s filter already sits outside its own `try`,
+which is the edit that would need it.
+
+DEF-73, the re-entrancy source guard. Injecting `await this.load()` into `set`
+reddens `ColourStore queue re-entrancy > set does not call back into the queue`
+and nothing else (1 failed / 3 passed of the -t 're-entrancy' selection).
+
+DEF-31, `_inheritColour`. Covered, and not vacuously:
+  M7 delete the `if (isPending(parentId)) await load()` gate -> 2 failed
+  M8 `const stored = null` (trust the click-time value)      -> 3 failed
+Five DEF-31 tests exist in `panel.spec.ts`; the two mutations between them kill
+three distinct ones.
+
+DEF-58, registry-derived neutrality. Injecting
+`private _isKimi = this._descriptor.id === 'kimi';` into `panel.ts` reddens
+`panel.ts carries no assistant name outside comments` and nothing else. The
+derived-list assertions and the `nimbus` growth test are real. Its one hole is
+finding 4.
+
+DEF-52, byte-hashing parity. `fnv1aColour` walks `new TextEncoder().encode(id)`
+in TS; the parity suite's vm sandbox hands back `TextEncoder` and only
+`TextEncoder`; all four parity tests pass on a fresh `lib/`. (Whether they were
+LOOKING at a fresh `lib/` is finding 2.)
+
+DEF-72. The bounding is real and its seven tests pass; the constant is 60_000
+and the spec pins `> 30_000` against codex.py's `_CLI_TIMEOUT_S`. Its surface is
+finding 3.
+
+DEF-71. Two of four constants are properly consumed by `index.ts`; the schema
+generator still holds the third copy, which the ledger already records as a
+deliberate leave-alone. The other two exports are finding 5.
+
+Version tracking. package.json 1.0.7, package-lock root 1.0.7,
+`packages[""]` 1.0.7 - the 0.6.17 drift is gone. `schema/plugin.json`
+regenerates byte-identical.
+
+
+CHECKED AND CLEAN - no finding
+------------------------------
+- Orphan CSS: all 53 `.jp-AiAssistants*` selectors in `style/` have a producer
+  in `src/`. Zero orphans.
+- Dead Python: every `def` in the package outside tests is referenced somewhere
+  except the three Jupyter entry points (`_jupyter_labextension_paths`,
+  `_jupyter_server_extension_points`, `_load_jupyter_server_extension`), which
+  are called by name by the host.
+- Dead TS exports: swept all of `src/`. After discounting intra-file use, the
+  only genuine ones are finding 5. `assistantsIcon` looked dead - no reference
+  anywhere in `src/` - and is NOT: `schema/plugin.json:5` resolves it by
+  registered name (`"jupyter.lab.setting-icon"`), and the built bundle contains
+  the glyph, so the LabIcon constructor's registration is the consumer.
+  `package.json` lists only `style/*` under `sideEffects`, but webpack does not
+  drop an un-annotated `new LabIcon(...)`, and the dev bundle proves it survives.
+- Settings keys: every leaf in `schema/plugin.json` has a reader in `src/` or in
+  the Python package. No orphan config.
+- Stale prose sweep: no TODO/FIXME/"for now"/"deferred" in shipped `src/` or in
+  the Python package outside tests. `colour.ts` describes the deleted counters
+  strictly in the past tense.
+- Deleted docs: `docs/feature-parity.md` and `docs/research-source-extensions.md`
+  are gone with no live link into them - the only mentions are the journal's own
+  history and one unrelated "feature-parity audit" phrase in the ledger.
+- Build detritus: `ui-tests/run*.log`, `test-results/`, `playwright-report/` and
+  `ui-tests/tmp/` are all matched by `.gitignore`; nothing junk is staged.
+- Galata fixtures: the second seeded project in `jupyter_server_test_config.py`
+  is consumed - `WIDE_NAME` by the DEF-41 test - and its deliberately older
+  mtimes are load-bearing for the two specs that resolve "the first listed
+  conversation".
+- `jupyterlab_ai_code_assistants_extension/_version.py` reads 1.0.0 against a
+  1.0.7 package.json. It is gitignored and regenerated by the packaging build,
+  so it is a local artifact, not a repo defect. Worth knowing only if something
+  reads `__version__` before the next `make install`.
+
+NOT REPORTED, deliberately
+--------------------------
+- `logs/README.md` does not list `build-and-venv-refresh.log`, the one family on
+  disk it misses (37 of 38 entries covered). DEF-69 closed one round ago and the
+  gap is a file created after it. Reporting a missing line in a log index in a
+  confirming round is how a review loop starts manufacturing its own work.
+- DEF-74, the server-copy fork colour, per instruction.

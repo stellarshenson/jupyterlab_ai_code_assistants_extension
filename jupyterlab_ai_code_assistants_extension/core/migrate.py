@@ -32,9 +32,18 @@ _log = logging.getLogger(__name__)
 MARKER_FILENAME = "migration.json"
 
 
-def _legacy_settings(plugin_id: str) -> dict:
-    """The saved settings of a retired plugin, or empty when it has none."""
-    folder = Path(jupyter_config_dir()) / "lab" / "user-settings" / plugin_id
+def _legacy_settings(plugin_id: str, settings_dir: Path | None = None) -> dict:
+    """The saved settings of a retired plugin, or empty when it has none.
+
+    ``settings_dir`` is JupyterLab's user-settings folder on THIS server, which
+    is a configurable trait - a server that moved it kept the retired
+    extensions' saved settings there too, so migration must look where the
+    running server actually writes rather than at the default. Only the route
+    knows the running app, so it passes the folder down; the default keeps a
+    direct caller (and the tests) working exactly as before.
+    """
+    root = settings_dir or Path(jupyter_config_dir()) / "lab" / "user-settings"
+    folder = root / plugin_id
     if not folder.is_dir():
         return {}
     for path in sorted(folder.glob("*.jupyterlab-settings")):
@@ -79,7 +88,9 @@ def _save_marker(migrated: set[str]) -> None:
     write_json_atomic(_marker_path(), {"migrated": sorted(migrated)})
 
 
-def migrate(providers: Iterable[Provider]) -> list[dict]:
+def migrate(
+    providers: Iterable[Provider], settings_dir: Path | None = None
+) -> list[dict]:
     """Migrate every provider not migrated before.
 
     Returns one entry per provider migrated in THIS call -
@@ -89,6 +100,9 @@ def migrate(providers: Iterable[Provider]) -> list[dict]:
     legacy source, or one whose retired extension left nothing behind, is a
     silent no-op (acc-crit "Edge: nothing to migrate" / "Edge: partial prior
     install").
+
+    ``settings_dir`` is passed through to :func:`_legacy_settings` - see there
+    for why the caller supplies it rather than this module deriving it.
     """
     done = _load_marker()
     migrated: list[dict] = []
@@ -99,7 +113,9 @@ def migrate(providers: Iterable[Provider]) -> list[dict]:
 
         keys = {
             legacy.settings_map[old]: value
-            for old, value in _legacy_settings(legacy.plugin_id).items()
+            for old, value in _legacy_settings(
+                legacy.plugin_id, settings_dir
+            ).items()
             if old in legacy.settings_map
         }
 

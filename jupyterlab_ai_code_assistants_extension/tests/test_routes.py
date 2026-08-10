@@ -16,6 +16,7 @@ import pytest
 import tornado
 
 from jupyterlab_ai_code_assistants_extension.core import registry, routes, state
+from jupyterlab_ai_code_assistants_extension.providers import claude as claude_provider
 
 
 URL = "jupyterlab-ai-code-assistants-extension"
@@ -304,18 +305,21 @@ async def test_the_colour_store_serves_all_three_verbs(jp_fetch, present):
     assert dropped["colours"] == {}
 
 
-async def test_a_native_colour_provider_refuses_a_write(jp_fetch, present):
-    """The assistant owns its colour, so a shadow value is refused, not kept."""
-    status, error = await error_of(
-        jp_fetch,
-        URL,
-        "providers",
-        "claude",
-        "colours",
-        method="POST",
-        body=json.dumps({"session_id": "abc", "colour": "mint"}),
+async def test_a_native_colour_provider_accepts_a_write(jp_fetch, present):
+    """The assistant supplies the default; the user's tab colour overrides it."""
+    stored = json.loads(
+        (
+            await jp_fetch(
+                URL,
+                "providers",
+                "claude",
+                "colours",
+                method="POST",
+                body=json.dumps({"session_id": "abc", "colour": "mint"}),
+            )
+        ).body
     )
-    assert (status, error) == (400, "colour_owned_by_assistant")
+    assert stored["colours"]["abc"] == "mint"
 
 
 async def test_colours_are_per_provider(jp_fetch, present):
@@ -334,14 +338,175 @@ async def test_colours_are_per_provider(jp_fetch, present):
 
 
 class _FakeTerminalManager:
-    """Records what a launch asked for instead of spawning a pty."""
+    """Records what a launch asked for instead of spawning a pty.
+
+    ``get_terminal`` is get-OR-CREATE here because it is get-or-create in both
+    real managers - a fake that answered None for an unknown name would hide
+    DEF-32 rather than reproduce it, and ``terminals`` is the registry the
+    route is required to read instead.
+    """
 
     def __init__(self) -> None:
         self.created: list[dict] = []
+        self.terminals: dict[str, "_FakePty"] = {}
 
     def create(self, shell_command=None, cwd=None):
+        # Deliberately NO ``dimensions`` parameter: terminado accepts one and
+        # drops it before the pty, so a fake that recorded it would certify a
+        # resize that never happens.
         self.created.append({"shell_command": shell_command, "cwd": cwd})
+        self.terminals["term-1"] = _FakePty()
         return {"name": "term-1"}
+
+    def get_terminal(self, name):
+        return self.terminals.setdefault(name, _FakePty())
+
+
+class _FakePty:
+    """Just enough terminal to stand in for one the manager holds.
+
+    The pid is settable because the probe route walks ``/proc`` from it: a
+    probe of a pid that is live on this machine would enumerate the real
+    process tree of whatever is running as pid 1 in the container.
+    """
+
+    def __init__(self, pid: int = 1) -> None:
+        self.ptyproc = self
+        self.pid = pid
+
+
+# Above ``/proc/sys/kernel/pid_max`` on every Linux this server runs on, so
+# every ``/proc/<pid>`` read the probe makes answers "gone" rather than
+# reaching a process the test does not own.
+UNUSED_PID = 0x40000000
+
+
+async def test_a_launch_sizes_the_pty_from_inside_the_child(
+    jp_fetch, jp_serverapp, tmp_path, present, monkeypatch
+):
+    """The waiter marks its own pty; the route must not race it.
+
+    A browser terminal that renders exactly terminado's 24x80 default resizes
+    to the size it already has, which Linux answers without raising SIGWINCH -
+    so nothing fires and the assistant appears five seconds later behind the
+    launch modal. The 1x1 mark is what makes every attach a real change, and
+    it belongs to the child: issued from the route it races the child's own
+    baseline read and can exec the assistant into a 1x1 window (DEF-33).
+    """
+    manager = _FakeTerminalManager()
+    monkeypatch.setitem(jp_serverapp.web_app.settings, "terminal_manager", manager)
+    monkeypatch.setattr(registry.Provider, "cli_path", lambda self: "/usr/bin/x")
+    await jp_fetch(
+        URL,
+        "providers",
+        "claude",
+        "launch",
+        method="POST",
+        body=json.dumps({"project_path": str(tmp_path)}),
+    )
+    script = manager.created[0]["shell_command"][2]
+    assert "stty rows 1 cols 1" in script
+    # No SIGWINCH trap and no captured baseline: the differential form is what
+    # the server-side resize used to race.
+    assert "WINCH" not in script
+
+
+async def test_probing_an_unknown_terminal_creates_nothing(
+    jp_fetch, jp_serverapp, present, monkeypatch
+):
+    """A probe must never spawn the terminal it fails to find (DEF-32).
+
+    ``get_terminal`` creates on a miss, and a terminal born that way has no
+    ``last_activity``, so ``TerminalManager.list()`` then raises for EVERY
+    terminal and ``GET /api/terminals`` 500s for every client of the server.
+    """
+    manager = _FakeTerminalManager()
+    monkeypatch.setitem(jp_serverapp.web_app.settings, "terminal_manager", manager)
+    with pytest.raises(tornado.httpclient.HTTPClientError) as excinfo:
+        await jp_fetch(URL, "providers", "claude", "terminal", "never-seen")
+    assert excinfo.value.code == 404
+    assert manager.terminals == {}
+
+
+async def test_probing_a_known_terminal_answers_its_conversation_and_colour(
+    jp_fetch, jp_serverapp, present, monkeypatch
+):
+    """The whole point of the route, which had no test at all.
+
+    DEF-32 covered only the miss - the 404 - so every line past the registry
+    lookup was unexercised: resolving the assistant out of the pty's process
+    tree, reading the conversation off it, and resolving that conversation's
+    tint through the colour store. The identity half is stubbed at the store,
+    since a real answer needs a live assistant in a real pty; everything the
+    ROUTE does with that answer is the assertion.
+    """
+    session_id = "77777777-6666-5555-4444-333333333333"
+    manager = _FakeTerminalManager()
+    # Registered directly, never through ``create``: this is the terminal a
+    # browser tab already holds, which is the only case the route answers for.
+    manager.terminals["term-known"] = _FakePty(pid=UNUSED_PID)
+    monkeypatch.setitem(jp_serverapp.web_app.settings, "terminal_manager", manager)
+    monkeypatch.setattr(
+        claude_provider.ClaudeStore, "owns_pid", lambda self, pid: pid == UNUSED_PID
+    )
+    monkeypatch.setattr(
+        claude_provider.ClaudeStore,
+        "session_id_for_pid",
+        lambda self, pid: session_id,
+    )
+    # A hand-set tab colour, so the answer's ``colour`` is a value the store
+    # actually holds rather than the None a bare scratch tree would give.
+    await jp_fetch(
+        URL,
+        "providers",
+        "claude",
+        "colours",
+        method="POST",
+        body=json.dumps({"session_id": session_id, "colour": "lemon"}),
+    )
+
+    answer = json.loads(
+        (await jp_fetch(URL, "providers", "claude", "terminal", "term-known")).body
+    )
+    assert answer == {
+        "terminal_name": "term-known",
+        "running": True,
+        "cwds": [],
+        "session_id": session_id,
+        "colour": "lemon",
+    }
+    # The probe read the registry and left it alone - a get-or-create lookup
+    # here is DEF-32 in the shape that does not 404.
+    assert list(manager.terminals) == ["term-known"]
+
+
+async def test_probing_a_terminal_running_another_assistant_says_nothing(
+    jp_fetch, jp_serverapp, present, monkeypatch
+):
+    """One provider's panel never reads another's conversation ids.
+
+    Same terminal, same running assistant, asked through the codex routes:
+    ``running`` false, and - the part that matters - no session id and no
+    colour, so a shared terminal cannot leak one assistant's conversation into
+    another's panel.
+    """
+    manager = _FakeTerminalManager()
+    manager.terminals["term-known"] = _FakePty(pid=UNUSED_PID)
+    monkeypatch.setitem(jp_serverapp.web_app.settings, "terminal_manager", manager)
+    monkeypatch.setattr(
+        claude_provider.ClaudeStore, "owns_pid", lambda self, pid: pid == UNUSED_PID
+    )
+    monkeypatch.setattr(
+        claude_provider.ClaudeStore,
+        "session_id_for_pid",
+        lambda self, pid: "77777777-6666-5555-4444-333333333333",
+    )
+    answer = json.loads(
+        (await jp_fetch(URL, "providers", "codex", "terminal", "term-known")).body
+    )
+    assert answer["running"] is False
+    assert answer["session_id"] is None
+    assert answer["colour"] is None
 
 
 async def test_a_native_command_fork_launches_with_fork_from(
@@ -468,3 +633,32 @@ async def test_resuming_a_conversation_leaves_the_pin_alone(
         ),
     )
     assert state.read_pin("kimi", encoded) == pinned
+
+
+def test_the_shallowest_assistant_in_the_tree_wins(monkeypatch):
+    """A terminal running one assistant that spawned another is the FIRST's.
+
+    ``_tree_assistant`` asks every enabled provider about every pid, breadth
+    first, and the shallowest match is the answer. That is the whole reason
+    the candidate list is not narrowed to the provider that called: a claude
+    terminal that spawned ``codex`` as a tool must answer "not yours" to the
+    codex panel, or that panel reuses a terminal it does not own - which then
+    resumes someone else's conversation on the next click.
+    """
+    tree = {10: [20], 20: []}
+    monkeypatch.setattr(routes, "_process_children", lambda pid: tree.get(pid, []))
+
+    claude = registry.get("claude")
+    codex = registry.get("codex")
+    monkeypatch.setattr(
+        type(claude.store), "owns_pid", lambda self, pid: pid == 10
+    )
+    monkeypatch.setattr(type(codex.store), "owns_pid", lambda self, pid: pid == 20)
+    monkeypatch.setattr(
+        type(claude.store), "session_id_for_pid", lambda self, pid: "outer"
+    )
+    monkeypatch.setattr(registry.Provider, "cli_path", lambda self: "/usr/bin/x")
+
+    found, session_id = routes._tree_assistant(10)
+    assert found is not None and found.id == "claude"
+    assert session_id == "outer"

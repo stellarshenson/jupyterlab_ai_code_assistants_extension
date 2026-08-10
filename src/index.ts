@@ -13,6 +13,8 @@ import { IDisposable } from '@lumino/disposable';
 
 import {
   AssistantSessionsPanel,
+  DEFAULT_PRESENTATION_MODE,
+  DEFAULT_RECENT_LIMIT,
   PresentationMode,
   commandId,
   panelWidgetId
@@ -25,6 +27,9 @@ import {
   IStatusResponse
 } from './core/types';
 import { PROVIDERS } from './providers';
+
+/** Which sidebar the panels dock into unless the user says otherwise. */
+const DEFAULT_SIDEBAR = 'right';
 
 const PLUGIN_ID = 'jupyterlab_ai_code_assistants_extension:plugin';
 /** Sidebar rank, shared by every panel so they dock together. */
@@ -109,7 +114,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     let status: IStatusResponse | null = null;
     let settings: ISettingRegistry.ISettings | null = null;
-    let sidebar: Sidebar = 'right';
+    let sidebar: Sidebar = DEFAULT_SIDEBAR;
 
     /** Ask the server which providers exist and which of their binaries are on
      * PATH. A failure leaves the extension activated with no panels - never a
@@ -161,11 +166,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
       // Any value other than `path` is treated as `name`, so an older saved
       // value still maps onto a live mode.
       const mode: PresentationMode =
-        setting<string>('presentationMode', 'name') === 'path'
+        setting<string>('presentationMode', DEFAULT_PRESENTATION_MODE) ===
+        'path'
           ? 'path'
-          : 'name';
+          : DEFAULT_PRESENTATION_MODE;
       panel.setPresentationMode(mode);
-      const limit = setting<number>('recentLimit', 10);
+      const limit = setting<number>('recentLimit', DEFAULT_RECENT_LIMIT);
       if (typeof limit === 'number') {
         panel.setRecentLimit(limit);
       }
@@ -239,11 +245,36 @@ const plugin: JupyterFrontEndPlugin<void> = {
         // Enabled but binary absent must not be a silent state: the user sees
         // a missing panel with no clue that PATH under the Jupyter server
         // differs from their shell. Once per id, not per reconcile.
-        if (enabled && !available && !warnedUnavailable.has(id)) {
+        // Only when the probe SUCCEEDED and this provider is the one missing.
+        // A failed probe sets every provider unavailable, and blaming PATH for
+        // a server the frontend never reached names the wrong cause; and every
+        // provider defaults to enabled, so a machine with one assistant
+        // installed would otherwise raise three toasts about assistants the
+        // user has never heard of. The console line stays for that case.
+        const chosen =
+          settings?.get(`providers.${id}.enabled`).user !== undefined;
+        if (
+          probe !== null &&
+          probe.available === false &&
+          enabled &&
+          chosen &&
+          !warnedUnavailable.has(id)
+        ) {
           warnedUnavailable.add(id);
           const binary = registry.get(id)?.descriptor.cliBinary ?? id;
+          const label = registry.get(id)?.descriptor.label ?? id;
           console.info(
             `${LOG_PREFIX} "${id}" is enabled but its \`${binary}\` binary was not found on the server's PATH; panel not shown.`
+          );
+          // And say it where the user is looking. A console line satisfies the
+          // comment above only for someone who already suspects the cause; the
+          // symptom is a panel that never appears, which reads as a broken
+          // install rather than a PATH difference between the Jupyter server
+          // and the user's shell. The retired-extension case next door already
+          // gets a notification, so the COMMON failure was the quiet one.
+          Notification.warning(
+            `${label} is enabled but \`${binary}\` was not found on the Jupyter server's PATH, so its panel is not shown.`,
+            { autoClose: 8000 }
           );
         }
         if (enabled && available) {
@@ -297,7 +328,19 @@ const plugin: JupyterFrontEndPlugin<void> = {
         );
         for (const entry of result.migrated ?? []) {
           for (const [key, value] of Object.entries(entry.keys ?? {})) {
-            await settings?.set(key, value as any);
+            // Per key. The server marks EVERY provider migrated before it
+            // answers, so one rejection aborting the loop used to drop the
+            // remaining providers' values with no retry ever offered again -
+            // the same blast radius DEF-13 closed for a missing registry, one
+            // level down.
+            try {
+              await settings?.set(key, value as any);
+            } catch (err) {
+              console.warn(
+                `${LOG_PREFIX} could not carry over "${key}" from the retired extension.`,
+                err
+              );
+            }
           }
         }
       } catch (err) {
@@ -309,7 +352,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     };
 
     const applySidebar = (): void => {
-      const next = setting<string>('sidebar', 'right');
+      const next = setting<string>('sidebar', DEFAULT_SIDEBAR);
       if ((next === 'left' || next === 'right') && next !== sidebar) {
         sidebar = next;
         live.forEach(entry => dock(entry.panel));
@@ -322,7 +365,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
       try {
         settings = await settingRegistry.load(PLUGIN_ID);
         sidebar =
-          setting<string>('sidebar', 'right') === 'left' ? 'left' : 'right';
+          setting<string>('sidebar', DEFAULT_SIDEBAR) === 'left'
+            ? 'left'
+            : 'right';
         settings.changed.connect(() => {
           applySidebar();
           reconcile();

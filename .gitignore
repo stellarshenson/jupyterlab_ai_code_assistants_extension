@@ -133,3 +133,14 @@ dmypy.json
 
 # Jest junit report, rewritten by every `jlpm test`
 junit.xml
+
+# graphify knowledge-graph artefacts. The sanctioned path is tmp/graphify-out;
+# `graphify-out/` alone is a stray cache. ~10MB of AST JSON that `git add -A`
+# would otherwise commit. Both patterns are unanchored, so they match at any
+# depth - `ui-tests/tmp/` needs no line of its own.
+tmp/
+graphify-out/
+
+# uv's lockfile. The build lifecycle is pip + jlpm through the Makefile; uv is
+# not used here, and the file is 351KB.
+uv.lock

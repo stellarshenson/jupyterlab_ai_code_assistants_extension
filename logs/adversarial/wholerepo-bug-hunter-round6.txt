@@ -1,0 +1,218 @@
+BUG-HUNTER ADVERSARY - ROUND 6 (CONFIRMING) - v1.0.7
+=====================================================
+Lens: runtime behaviour, races, lifecycle, error paths, library internals.
+Verdict: DO-NOT-SHIP. Two findings, both FACT (executed), both new to the
+ledger. Galata was NOT needed and was NOT run - both findings reproduce under
+jest and under a scratch tsc, which is stronger evidence than a screenshot.
+
+
+BASELINES - RE-MEASURED, NOT TRUSTED
+------------------------------------
+pytest                     163 passed, 44 warnings, 8.12s            MATCHES
+npx jest                   119 passed, 7 suites                      MATCHES
+npx tsc --noEmit           exit 0                                    MATCHES
+npx eslint . --no-cache    0 errors, 43 warnings                     MATCHES
+prettier --check (CI glob) clean                                     MATCHES
+stylelint style/**/*.css   clean                                     MATCHES
+acc-crit.py                scripts/acc-crit.py does not exist at that
+                           path in this tree - not run, not a finding,
+                           flagged so the orchestrator can re-point it.
+
+Everything the wave claims landed is present and type-checks. The two findings
+below are things the wave did not look at, not things it got wrong on its own
+terms.
+
+
+WHAT I CONFIRMED HOLDS
+----------------------
+DEF-72 (bounded request). Holds, and holds in PRODUCTION, which the shipped
+spec does not actually prove. src/__tests__/request.spec.ts spies
+ServerConnection.makeRequest, so the real Private.handleRequest path - the one
+that decides whether the AbortSignal survives into fetch - is never executed by
+the suite. I executed it directly against the installed
+node_modules/@jupyterlab/services (scratchpad/probe_signal.js, node v26.6.0):
+
+    signal reached fetch: true   aborted before: false
+    rejected: NetworkError TypeError aborted
+    signal aborted after: true
+
+handleRequest does `new settings.Request(url, {...settings.init, ...init})` and
+then `settings.fetch.call(null, request)`. Both the Request constructor and
+fetch(Request) carry the signal, so the 60s ceiling is real on the wire and not
+merely real against a mock. The 60s > _CLI_TIMEOUT_S=30 margin is asserted by
+the spec and is correct.
+
+DEF-30 (colour store serialisation). The chain is five lines and the deleted
+machinery is genuinely gone (0 references to _writeSeq/_writeStart/_readSeq/
+_readAbsorbed/_current/_absorb). I attacked the queue for a way to make it
+reject or wedge and did not find one: every op catches its own failure, the
+tail waits on settlement rather than success, and every op's request is bounded
+by DEF-72, so K queued ops wait K*60s rather than forever. isPending's
+call-time counting is correct for `set`; `forget` marks pending only inside its
+op, which means a second release can be offered while the first is queued -
+harmless, because the second finds nothing present and answers true.
+
+DEF-73 (source-reading re-entrancy guard). The guard has a hole - it scans for
+`this.load(` / `this.set(` / `this.forget(` only, so a queued op calling
+`this.inherit(...)` would deadlock and pass the scan. I did NOT report it,
+because I executed the mutation and the RUNTIME suite catches it anyway:
+injecting `await this.inherit('rose','x')` into load's op leaves the guard green
+and reddens 7 of 38 colour tests by timeout - the deadlock, observed. Belt and
+braces, not a gap.
+
+DEF-52, DEF-63, DEF-71, DEF-58, DEF-31: type-check and test clean; nothing in
+my lens to add. DEF-74 left alone per instruction.
+
+
+FINDING 1 - MAJOR - FACT
+Turning tab colouring off, or disabling a provider, leaves tints on screen
+permanently
+src/core/terminals.ts:301 (reconcileColours), :432 (_applyColour), :256
+(setColouredTabs), and src/core/panel.ts:213 (dispose)
+
+reconcileColours reads this._colouredTabs exactly once, at entry (line 302),
+and _applyColour checks only _colourfulTabs and widget.isDisposed - never
+_colouredTabs and never _disposed. A pass that was already in flight when the
+user turned colouring off therefore finishes its network probes and REPAINTS
+the tint that clearColours has just stripped.
+
+It does not heal. The late pass rearms the loop in its `finally`
+(startColourLoop), and the next tick hits `if (!this._colouredTabs) { return; }`
+before the try/finally, so it neither clears nor rearms: the loop stops and the
+tint stays until the page is reloaded.
+
+Two reachable triggers, both executed
+(scratchpad/repo/src/__tests__/probe-tints.spec.ts, a scratch COPY of the repo
+with node_modules symlinked - the tree was not touched):
+
+  (a) settings toggle. reconcileColours() in flight -> setColouredTabs(false)
+      -> clearColours lands first -> the late pass lands second.
+        after clear:      [null]
+        after late pass:  [null,"lavender"]
+      Then 120_000 ms of advanced timers produce ZERO further setColour calls.
+
+  (b) provider disabled. Exactly what AssistantSessionsPanel.dispose() does, in
+      that order: `void this._terminals.clearColours(); this._terminals.dispose();`
+        dispose path:     [null,"lavender"]
+      This one is the worse of the two. The panel is gone, its poll is stopped
+      and its colour loop is dead, so nothing will ever repaint - and it
+      directly contradicts the comment on that very line, "Disabling a provider
+      must leave its running terminals alive and only drop the tint this panel
+      applied."
+
+Reachability is not theoretical. `colouredTabs` is a documented setting
+(schema/plugin.json:23) wired straight through index.ts applySharedSettings ->
+panel.setColouredTabs (panel.ts:282) -> TerminalManager.setColouredTabs, and
+`stop(id)` in index.ts disposes the panel on every provider-disable. A
+reconcile pass is in flight often: the 30s colour loop, every _fetch (poll and
+Refresh), and every right-click all start one, and each pass costs one
+server-side probe PER OPEN TERMINAL, so the window widens with the number of
+terminals - which is exactly the user who cares about tab tints.
+
+There is no existing coverage: `setColouredTabs` and `colouredTabs` appear in
+zero jest specs, zero Galata specs and zero ledger entries.
+
+Shape of a fix (not applied - this is a review): re-check the gate at paint
+time rather than only at entry. `_applyColour` already refuses on
+`!this._colourfulTabs` and `widget.isDisposed`; adding `!this._colouredTabs ||
+this._disposed` to that same guard closes both triggers in one line and needs
+no new state. The symmetric ON-direction race (turn colouring on while a clear
+is out) self-heals at the next 30s tick, so it does not need the same
+treatment.
+
+
+FINDING 2 - MAJOR - FACT
+DEF-75's freshness guard is defeated by `npx tsc --noEmit` - the project's own
+typecheck - and certifies today's Python against yesterday's TypeScript
+jupyterlab_ai_code_assistants_extension/tests/test_descriptor_parity.py:170
+
+_require_fresh_lib takes the build marker as max(newest lib/*.js,
+tsconfig.tsbuildinfo). The ledger entry defends that choice as conservative:
+"the conservative direction is the right one, because the failure this guard
+exists to prevent is a SILENT green", and records that the first attempt's
+claim that a compile always refreshes the buildinfo was "measured to be FALSE".
+The measurements taken were `touch` alone (still red) and
+`rm tsconfig.tsbuildinfo && npx tsc --sourceMap` (clears it). The case that was
+not measured is the ordinary one: a REAL content edit followed by a typecheck.
+
+Executed in a scratch copy (scratchpad/probe/: src, lib, tsconfig.json and
+tsconfig.tsbuildinfo copied, node_modules symlinked, guard.py a verbatim
+transcription of _require_fresh_lib):
+
+  step 1  append `export const PROBE_MARKER = 42;` to src/core/colour.ts
+          GUARD FAILS (src colour.ts 1786365272.09 > build tsconfig.tsbuildinfo
+          1786364937.98)                                     <- correct
+  step 2  ./node_modules/.bin/tsc -p tsconfig.json --noEmit   exit 0
+          tsconfig.tsbuildinfo mtime 14:28:57 -> 14:34:34     <- refreshed
+  step 3  GUARD PASSES (src colour.ts 1786365272.09 <= build
+          tsconfig.tsbuildinfo 1786365274.35)
+          grep -c PROBE_MARKER lib/core/colour.js -> 0        <- lib IS stale
+
+So: edit src, typecheck, run pytest, and all four parity tests report green
+while comparing the Python registry against a lib/ that predates the edit. That
+is precisely the silent green the guard exists to prevent, reached by the most
+ordinary sequence there is - and it is the sequence this very review round is
+told to run as its baseline (`npx tsc --noEmit` is on the baseline list).
+
+Note the buildinfo is not refreshed on EVERY --noEmit run: a second consecutive
+`npx tsc --noEmit` against unchanged sources left the mtime untouched
+(14:28:57.976095531 both before and after, verified in the real tree). It is
+refreshed whenever the recorded state changes - which includes every real
+source edit, which is the case that matters.
+
+The fix direction is not "drop the buildinfo from the marker" - that restores
+DEF-75's own false positive. The honest instruments are content-based, not
+mtime-based: hash src/**/*.ts and compare against a hash recorded at emit time,
+or read the emitted lib/*.js the tests actually import and assert it contains
+what src declares. Either removes mtime from the question entirely. Failing
+that, the guard should compare against lib/*.js ALONE and the documented remedy
+for the touched-but-identical case should be `rm tsconfig.tsbuildinfo` (which
+the message already names) - a documented false positive is strictly better
+than an undocumented false negative, and the ledger entry itself argues that.
+
+
+FINDING 3 - MINOR - FACT
+A load-bearing comment states the opposite of what this wave just landed
+src/core/panel.ts:2393
+
+    // Nothing here may hold the menu hostage. `requestAPI` sets no timeout, so
+    // a suspended connection would otherwise cost the user Open, Copy Path and
+    // Remove for as long as it hangs; ...
+
+`requestAPI` sets a timeout as of DEF-72, in this same wave
+(REQUEST_TIMEOUT_MS = 60_000, src/core/request.ts:27). The comment's premise is
+false and its consequence ("for as long as it hangs") is now bounded at 60s.
+The 800ms MENU_STATE_BUDGET_MS race is still the right call - 60s of frozen
+menu is unacceptable too - so this is a wrong reason for a right decision, not
+a wrong decision. Every other DEF-72 reference in the tree was updated
+(colour.ts:230 and panel.ts:1104 both name REQUEST_TIMEOUT_MS correctly); this
+one was missed.
+
+
+THINGS I CHASED AND CLEARED (stated so the next round does not re-chase them)
+----------------------------------------------------------------------------
+- Chain poisoning in ColourStore._run: not constructible. Every op catches, the
+  tail settles rather than succeeds.
+- _pending counter leak: _closeWrite runs in each op's `finally` and tolerates a
+  missing key (`?? 1`); a doubled write counts to 2 and back to 0.
+- load() clobbering the cache on a malformed answer: `_overrides` is assigned
+  before `_colours`, both after the await, and a throwing `.filter` leaves BOTH
+  untouched. Consistent either way.
+- requestAPI leaking timers: `clearTimeout` is in a `finally` spanning both the
+  fetch and the body read; the spec asserts getTimerCount()===0 on the fast and
+  the failed path, and both pass.
+- requestAPI mutating the caller's init: it spreads into a copy. Verified.
+- TerminalManager.dispose leaving the colour loop armed: dispose() sets
+  _disposed then stopColourLoop(), and reconcileColours' rearm checks
+  _disposed. Clean. (The tint itself is NOT clean - see Finding 1.)
+- clearColours() being cut short by the dispose that follows it:
+  _eachAssistantTerminal does not check _disposed, so the clear completes. This
+  is deliberate and correct; it is the LATE reconcile that undoes it.
+- _startPolling fires _fetch() on a 30s interval with no overlap guard while one
+  request may now legitimately run 60s, so two fetches can overlap and each
+  queues a load + a reconcile. Pre-existing, unchanged by this wave, and the
+  serialised store makes the duplicates cheap rather than harmful. Not reported.
+
+VERDICT: DO-NOT-SHIP on Finding 1 (a user-facing setting that silently fails to
+apply and never recovers) and Finding 2 (the wave's own anti-silent-green guard
+is defeated by the wave's own baseline command). Finding 3 rides along.

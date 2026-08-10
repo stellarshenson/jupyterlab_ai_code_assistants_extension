@@ -10,7 +10,13 @@ import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
 import { ServerConnection } from '@jupyterlab/services';
 import { ITerminalTracker } from '@jupyterlab/terminal';
 import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
-import { closeIcon, folderIcon, terminalIcon } from '@jupyterlab/ui-components';
+import {
+  LabIcon,
+  MenuSvg,
+  closeIcon,
+  folderIcon,
+  terminalIcon
+} from '@jupyterlab/ui-components';
 import { CommandRegistry } from '@lumino/commands';
 import { UUID } from '@lumino/coreutils';
 import { Message } from '@lumino/messaging';
@@ -28,7 +34,11 @@ import {
   switchIcon,
   warningIcon
 } from './icons';
-import { resolveLaunchMode } from './modes';
+import {
+  IResolvedLaunchMode,
+  resolveLaunchMode,
+  resolvedLaunchModeEntry
+} from './modes';
 import { showManageSessionsPopup } from './popup';
 import { LOG_PREFIX } from './registry';
 import { isResponseStatus, requestProvider, withQuery } from './request';
@@ -54,11 +64,32 @@ import {
 // server caches for the context menu, so raising it past the server's cache
 // horizon leaves that snapshot stale at every menu open.
 const POLL_INTERVAL_MS = 30_000;
+/** How long the context menu waits for fresh branch and colour state before
+ * opening on what it already has.
+ *
+ * A right-click that shows nothing for longer than this reads as a lost click,
+ * and the retry costs more than the wait: a second click supersedes the first,
+ * so the menu never opens at all and the budget starts again. Listing branches
+ * can spawn the assistant's own CLI, measured at ~320 ms, so this is roughly
+ * 2.5x the honest work - and a fetch that loses is kept for the next open
+ * rather than thrown away, so losing costs one degraded menu, not the branch
+ * submenus for good. */
+const MENU_STATE_BUDGET_MS = 800;
+/** Minimum visible spin on a manual refresh. `_fetch` is filesystem-fast, so
+ * without a floor the spinner shows for a frame and the click reads as
+ * "nothing happened". */
+const REFRESH_SPIN_FLOOR_MS = 500;
 // After a fork is requested, watch for its lazily-written store entry at this
 // faster cadence (bounded) so a new branch surfaces in seconds.
 const BRANCH_WATCH_INTERVAL_MS = 2_000;
 const BRANCH_WATCH_MAX_ATTEMPTS = 90; // ~3 minutes
-const DEFAULT_RECENT_LIMIT = 10;
+/** Default and bounds for the Recent section's size. Exported because
+ * `src/index.ts` reads the same setting and used to restate all three as
+ * literals; `schema/plugin.json` declares the identical default, minimum and
+ * maximum, so a change here is a change there. */
+export const DEFAULT_RECENT_LIMIT = 10;
+export const MIN_RECENT_LIMIT = 1;
+export const MAX_RECENT_LIMIT = 100;
 /** Conversations listed inline in a branch submenu before the popup takes over. */
 const INLINE_BRANCH_LIMIT = 5;
 
@@ -66,7 +97,7 @@ type SectionKey = 'favourites' | 'recent' | 'all';
 
 export type PresentationMode = 'name' | 'path';
 
-const DEFAULT_PRESENTATION_MODE: PresentationMode = 'name';
+export const DEFAULT_PRESENTATION_MODE: PresentationMode = 'name';
 
 const SECTION_LABELS: Record<SectionKey, string> = {
   favourites: 'Favorites',
@@ -121,13 +152,6 @@ function saveExpanded(
   }
 }
 
-/** Whether the user asked the platform for reduced motion. */
-function prefersReducedMotion(): boolean {
-  return (
-    window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
-  );
-}
-
 /**
  * One assistant's sessions panel.
  *
@@ -143,7 +167,12 @@ export class AssistantSessionsPanel extends Widget {
     this._descriptor = options.descriptor;
     this._hooks = options.hooks ?? {};
     this._serverSettings = options.app.serviceManager.serverSettings;
-    this._rootDir = (options.rootDir || '').replace(/\/+$/, '');
+    // Trailing slashes go, but never the root itself: serving JupyterLab at
+    // `/` used to normalise to the empty string, which reads as "no root" -
+    // the + button then did nothing at all, and Open Terminal and Show in File
+    // Browser answered "outside the JupyterLab root" for every row inside it.
+    const root = (options.rootDir || '').replace(/\/+$/, '');
+    this._rootDir = root || (options.rootDir ? '/' : '');
     this._deleteToTrash = options.deleteToTrash !== false;
     this._fileBrowser = options.fileBrowser ?? null;
     this._expandedKey = `jupyterlab_ai_code_assistants_extension:${this._descriptor.id}:expanded`;
@@ -191,16 +220,22 @@ export class AssistantSessionsPanel extends Widget {
   }
 
   refresh(): void {
-    this._setLoading(true);
+    // The veil covers the whole panel, header included, so raising it on a
+    // re-show scrims rows that are already on screen and blocks the filter and
+    // the refresh button for the length of the floor below. Only a COLD load
+    // has nothing to show; every other refresh spins the button alone and
+    // leaves the list live.
+    if (this._sessions === null) {
+      this._setLoading(true);
+    }
     this._setRefreshSpinning(true);
-    // `_fetch` is filesystem-fast, so without a floor the spinner shows for a
-    // single frame and reads as "nothing happened". Hold it ~500 ms so the
-    // click visibly registers as a full re-poll - except under reduced motion,
-    // where an artificially prolonged spin is exactly what the preference asks
-    // us not to draw.
-    const minSpin = prefersReducedMotion()
-      ? Promise.resolve()
-      : new Promise<void>(resolve => window.setTimeout(resolve, 500));
+    // The floor is held under reduced motion too. What that preference asks us
+    // not to draw is MOTION; the CSS already swaps the spin for a static dim,
+    // and holding that dim is the only feedback an explicit Refresh gives -
+    // without it the click produces a few-millisecond flicker on a 16px icon.
+    const minSpin = new Promise<void>(resolve =>
+      window.setTimeout(resolve, REFRESH_SPIN_FLOOR_MS)
+    );
     Promise.all([
       this._fetch().catch(err => this._showError(err)),
       minSpin
@@ -221,7 +256,10 @@ export class AssistantSessionsPanel extends Widget {
 
   /** How many rows the Recent section displays. */
   setRecentLimit(n: number): void {
-    const clamped = Math.max(1, Math.min(100, Math.floor(n)));
+    const clamped = Math.max(
+      MIN_RECENT_LIMIT,
+      Math.min(MAX_RECENT_LIMIT, Math.floor(n))
+    );
     if (this._recentLimit === clamped) {
       return;
     }
@@ -233,9 +271,16 @@ export class AssistantSessionsPanel extends Widget {
    * key is an `ILaunchMode.id` in the assistant's own terminology. */
   setModes(modes: Record<string, boolean | string>): void {
     this._modes = { ...modes };
+    // Menu labels are lazy and re-read this on every open; the button's title
+    // is a written string, so it has to be rewritten here.
+    this._renameNewButton?.();
+    // Same for its glyph - a menu item re-reads its icon on every open, a
+    // painted button does not.
+    this._repaintNewIcon?.();
   }
 
   setColouredTabs(on: boolean): void {
+    this._colouredTabs = on;
     this._terminals.setColouredTabs(on);
   }
 
@@ -269,9 +314,59 @@ export class AssistantSessionsPanel extends Widget {
 
     const newBtn = document.createElement('button');
     newBtn.className = 'jp-AiAssistantsPanel-iconButton';
-    newBtn.title = `New ${this._descriptor.label} session in the current folder`;
-    addIcon.element({ container: newBtn });
+    // Names the folder rather than "the current folder", and reads it at
+    // HOVER time: the target is the FILE BROWSER's path, which lives in the
+    // opposite sidebar, may be collapsed, and changes without this panel
+    // re-rendering - so the button would otherwise create a session somewhere
+    // the user cannot see, or name a folder they have since left.
+    const nameNewButton = (): void => {
+      // `_displayPath` answers '.' for the root itself, which is truthy and
+      // would read as "in .".
+      const shown = this._displayPath(this._currentFolder());
+      const where = shown && shown !== '.' ? shown : 'the current folder';
+      // The suffix, because with a mode in force the variants suppress
+      // themselves and this button LAUNCHES on click instead of dropping a
+      // menu - so without it the one surface that starts an approval-free
+      // session is the only one that never says so (DEF-36).
+      newBtn.title = `New ${this._descriptor.label} session in ${where}${this._variantSuffix()}`;
+    };
+    // Focus as well as hover, or the icon-only button's accessible name is the
+    // generic one for everybody not using a mouse.
+    newBtn.addEventListener('pointerenter', nameNewButton);
+    newBtn.addEventListener('focus', nameNewButton);
+    // Held so `setModes` can re-title it. The shell is built before settings
+    // arrive, so the title written here can only ever say "no mode in force";
+    // a user who never hovers or focuses the button would keep reading that
+    // after turning an approval-free mode on (DEF-38).
+    this._renameNewButton = nameNewButton;
+    nameNewButton();
+    // The glyph follows the same rule the menu entries follow: where a mode
+    // WIDENS what runs without asking, the mode's warning glyph wins over the
+    // action's own (DEF-35). It matters most here - with a mode in force the
+    // variants suppress themselves and this button launches on click, so a
+    // plain "+" would be the only one-click approval-free launch in the panel
+    // wearing no warning at all.
+    const paintNewIcon = (): void => {
+      const icon =
+        (this._visibleVariantCount() === 0 ? this._variantIcon() : undefined) ??
+        addIcon;
+      // `LabIcon.element` appends into the container, so the previous glyph
+      // has to go or the button would collect one svg per settings change.
+      newBtn.replaceChildren();
+      icon.element({ container: newBtn });
+    };
+    // Held for the same reason the title is: the shell is built before
+    // settings arrive, so what is drawn here can only say "no mode in force"
+    // and `setModes` has to repaint it (DEF-38).
+    this._repaintNewIcon = paintNewIcon;
+    paintNewIcon();
     newBtn.addEventListener('click', () => {
+      // With a mode in force the variant items suppress themselves, leaving a
+      // dropdown with one entry - two clicks for its only outcome. Do it.
+      if (this._visibleVariantCount() === 0) {
+        void this._newSession();
+        return;
+      }
       // Drop the menu just below the button, left-aligned with it.
       const rect = newBtn.getBoundingClientRect();
       this._newSessionMenu.open(rect.left, rect.bottom);
@@ -281,6 +376,9 @@ export class AssistantSessionsPanel extends Widget {
     const filterBtn = document.createElement('button');
     filterBtn.className = 'jp-AiAssistantsPanel-iconButton';
     filterBtn.title = 'Filter sessions';
+    // The pressed state is drawn with a class, which says nothing to a screen
+    // reader; the filter bar starts hidden, so this starts false.
+    filterBtn.setAttribute('aria-pressed', 'false');
     filterIcon.element({ container: filterBtn });
     filterBtn.addEventListener('click', () => this._toggleFilterBar());
     header.appendChild(filterBtn);
@@ -382,6 +480,7 @@ export class AssistantSessionsPanel extends Widget {
     this._searchWrapEl.hidden = !show;
     if (this._filterBtn) {
       this._filterBtn.classList.toggle('jp-mod-active', show);
+      this._filterBtn.setAttribute('aria-pressed', String(show));
     }
     if (show) {
       this._searchEl.focus();
@@ -516,6 +615,17 @@ export class AssistantSessionsPanel extends Widget {
     this._setInlineError(`${copy} ${message}`);
   }
 
+  /** A launch failed. This cannot go to the inline banner: every launch path
+   * refetches in its `finally`, and a successful `_fetch` clears the banner -
+   * so the message would be painted and wiped within the same tick, leaving
+   * the user with a flash. The banner's copy is wrong for this case anyway:
+   * the launch REACHED the server and was refused, and nothing retries it. */
+  private _notifyLaunchError(copy: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this._logError(message);
+    Notification.error(`${copy}: ${message}`, { autoClose: 4000 });
+  }
+
   private _logError(message: string): void {
     console.error(`${LOG_PREFIX}[${this._descriptor.id}]`, message);
   }
@@ -559,7 +669,7 @@ export class AssistantSessionsPanel extends Widget {
     } catch (err) {
       session.favourite = !next; // roll back
       this._render();
-      this._showActionError('Could not toggle favourite - try again.', err);
+      this._showActionError('Could not toggle favorite - try again.', err);
     }
   }
 
@@ -575,7 +685,13 @@ export class AssistantSessionsPanel extends Widget {
         `Remove "${name}" from ${this._descriptor.label}? This drops the ` +
         `entire project history and every conversation it holds - ` +
         `${this._disposalVerb}. This cannot be undone.`,
-      buttons: [Dialog.cancelButton(), Dialog.warnButton({ label: 'Remove' })]
+      buttons: [Dialog.cancelButton(), Dialog.warnButton({ label: 'Remove' })],
+      // Cancel, explicitly. JupyterLab defaults `defaultButton` to the LAST
+      // button and focuses it on attach, so omitting this handed the keyboard
+      // to Remove - one Enter on a dialog that has just appeared and the
+      // project history is gone (DEF-51). JupyterLab's own file browser sets
+      // the same 0 on its delete, for the same reason.
+      defaultButton: 0
     });
     if (!confirm.button.accept) {
       return;
@@ -614,7 +730,9 @@ export class AssistantSessionsPanel extends Widget {
         `Remove ${extra} parallel session${extra === 1 ? '' : 's'} from ` +
         `"${name}"? The current conversation is kept; the rest are ` +
         `${this._disposalVerb}. This cannot be undone.`,
-      buttons: [Dialog.cancelButton(), Dialog.warnButton({ label: 'Remove' })]
+      buttons: [Dialog.cancelButton(), Dialog.warnButton({ label: 'Remove' })],
+      // Cancel, as above (DEF-51).
+      defaultButton: 0
     });
     if (!confirm.button.accept) {
       return;
@@ -642,14 +760,13 @@ export class AssistantSessionsPanel extends Widget {
       body,
       buttons: [Dialog.okButton({ label: 'Close' })]
     });
-    // Hide the Close button while work is in progress; restore it once the
-    // outcome is shown so the user can dismiss the popup.
-    const footer = dialog.node.querySelector(
-      '.jp-Dialog-footer'
-    ) as HTMLElement | null;
-    if (footer) {
-      footer.style.display = 'none';
-    }
+    // Close stays live while the work runs. Hiding it took away the only exit
+    // a keyboard user has: the dialog listens for Escape on its own node, it
+    // puts focus on this button and nowhere else, and focusing a hidden button
+    // is a no-op - so Escape never reached the dialog and the sole way out was
+    // a click on the backdrop. Closing early cancels nothing (the request runs
+    // on to its own 60s ceiling), and a modal that cannot be left is worse than
+    // one dismissed before its outcome is read.
     void dialog.launch();
 
     try {
@@ -672,6 +789,8 @@ export class AssistantSessionsPanel extends Widget {
       // Only the conversations that ACTUALLY went lose their colour - one the
       // server could not delete keeps its tint.
       await this._colours.forget(data.removed_ids ?? ids);
+      // The kept listing names conversations that may have just gone.
+      this._branchCache = null;
       bar.value = 1;
       message.textContent = `Removed ${data.removed_count} parallel session${
         data.removed_count === 1 ? '' : 's'
@@ -685,10 +804,6 @@ export class AssistantSessionsPanel extends Widget {
         err instanceof Error ? err.message : String(err)
       }`;
       this._showError(err);
-    } finally {
-      if (footer) {
-        footer.style.display = '';
-      }
     }
   }
 
@@ -718,7 +833,7 @@ export class AssistantSessionsPanel extends Widget {
           { autoClose: 4000 }
         );
       } else {
-        this._showError(err);
+        this._notifyLaunchError('Could not open that conversation', err);
       }
     } finally {
       // Reuse or fresh launch, either way the picture changed. Pull fresh
@@ -731,7 +846,10 @@ export class AssistantSessionsPanel extends Widget {
    * no file browser is available. */
   private _currentFolder(): string {
     const rel = (this._fileBrowser?.model?.path ?? '').replace(/^\/+/, '');
-    return rel ? `${this._rootDir}/${rel}` : this._rootDir;
+    if (!rel) {
+      return this._rootDir;
+    }
+    return this._rootDir === '/' ? `/${rel}` : `${this._rootDir}/${rel}`;
   }
 
   /** Start a brand-new conversation in the file browser's current folder. */
@@ -761,7 +879,9 @@ export class AssistantSessionsPanel extends Widget {
         newId
       );
     } catch (err) {
-      this._showError(err);
+      // Same shape as `_openSession` above - the `finally` refetches, so an
+      // inline banner would not survive to be read.
+      this._notifyLaunchError('Could not start a new session', err);
     } finally {
       void this._fetch().catch(() => undefined);
     }
@@ -790,14 +910,29 @@ export class AssistantSessionsPanel extends Widget {
         label: 'Name for the new session',
         placeholder: this._lookupName(session)
       });
-      if (!named.button.accept || !named.value || !named.value.trim()) {
+      if (!named.button.accept) {
         return;
       }
-      name = named.value.trim();
+      name = (named.value ?? '').trim();
+      if (!name) {
+        // Reported, not swallowed. The placeholder shows the parent's name,
+        // which reads as the "press Ok for the default" idiom, so Ok on an
+        // empty field was a closed dialog with no POST and no word (DEF-43).
+        // A notification rather than a disabled Ok because that is how this
+        // panel refuses everywhere else - Open Terminal and Show in File
+        // Browser on a folder outside the root - and `InputDialog.getText`
+        // offers no hook to disable Ok while the field is empty; getting one
+        // means replacing the dialog with a hand-built body widget.
+        Notification.warning(
+          'Enter a name for the new session - nothing was branched.',
+          { autoClose: 4000 }
+        );
+        return;
+      }
     }
 
     if (this._descriptor.forkStrategy === 'server-copy') {
-      await this._branchByServerCopy(session, name, force, parentColour);
+      await this._branchByServerCopy(session, name, force);
       return;
     }
     if (this._descriptor.forkStrategy === 'native-command') {
@@ -833,7 +968,7 @@ export class AssistantSessionsPanel extends Widget {
       this._showActionError('Could not branch this session - try again.', err);
       return;
     }
-    await this._inheritColour(parentColour, forkId);
+    await this._inheritColour(parentColour, forkId, session.session_id);
     this._watchForBranch(session.encoded_path, forkId);
   }
 
@@ -857,7 +992,7 @@ export class AssistantSessionsPanel extends Widget {
         mode: this._launchMode(force)
       });
     } catch (err) {
-      this._showError(err);
+      this._showActionError('Could not branch this session - try again.', err);
       return;
     }
     this._watchForNewBranch(session, known, parentColour);
@@ -870,8 +1005,7 @@ export class AssistantSessionsPanel extends Widget {
   private async _branchByServerCopy(
     session: ISession,
     name: string | undefined,
-    force: string | undefined,
-    parentColour: string | null
+    force: string | undefined
   ): Promise<void> {
     try {
       const fork = await requestProvider<IForkResponse>(
@@ -887,7 +1021,11 @@ export class AssistantSessionsPanel extends Widget {
           })
         }
       );
-      await this._inheritColour(parentColour, fork.session_id);
+      // No colour write here. `BranchHandler` already inherited it while
+      // minting this fork, from a read taken server-side at request time -
+      // strictly fresher than the click-time read this would repeat, and the
+      // frontend's value simply overwrote it on every server-copy fork.
+      this._branchCache = null;
       await this._terminals.launch(
         {
           project_path: session.project_path,
@@ -903,25 +1041,89 @@ export class AssistantSessionsPanel extends Widget {
           { autoClose: 4000 }
         );
       } else {
-        this._showError(err);
+        this._showActionError(
+          'Could not branch this session - try again.',
+          err
+        );
       }
       return;
     }
     await this._fetch().catch(() => undefined);
   }
 
-  /** Copy the parent's tint onto a fresh branch, unless the assistant owns
-   * conversation colours itself: that store refuses every write (the server
-   * answers 400), so the call would be one guaranteed-failing request per fork
-   * plus a tint that shows until the next reconcile drops it again. */
-  private async _inheritColour(
-    parentColour: string | null,
-    childId: string
-  ): Promise<void> {
-    if (this._descriptor.colourSource === 'native') {
+  /** Drop the hand-set colours of this project's conversations and re-tint
+   * from the defaults at once, so nothing keeps showing a released colour
+   * until the next reconcile tick. One request for the whole set, so a release
+   * is never left half applied.
+   *
+   * The colourful-tab extension's own menu record is normally consumed when
+   * the colour is captured, so this is the release. A tab closed in the window
+   * between the capture write and the paint keeps that record, and reopening
+   * the terminal re-captures the colour - rare, and visible rather than
+   * silent, since the tab still wears it. */
+  private async _resetColours(sessionIds: string[]): Promise<void> {
+    if (!(await this._colours.forget(sessionIds))) {
+      // No refresh afterwards: `_fetch` clears the inline error, and a failure
+      // the user never sees reads as a reset that silently did nothing.
+      this._setInlineError(
+        sessionIds.length > 1
+          ? 'Could not reset the tab colours - try again.'
+          : 'Could not reset the tab colour - try again.'
+      );
       return;
     }
-    await this._colours.inherit(parentColour, childId);
+    await this._terminals.reconcileColours();
+    await this._fetch().catch(() => undefined);
+  }
+
+  /** Copy the parent's tint onto a fresh branch.
+   *
+   * A native-colour assistant hands every conversation its own colour, so a
+   * fork already arrives correctly tinted: only what this extension's own
+   * store holds for the parent is inherited there - an entry the parent itself
+   * inherited counts, which is what makes a branch of a branch take what its
+   * parent actually shows. Copying the parent's native tint instead would pin
+   * the fork to it and shadow the fork's own `/color` for good.
+   * Every other assistant inherits the parent's effective colour, which is the
+   * only tint it has. */
+  private async _inheritColour(
+    parentColour: string | null,
+    childId: string,
+    parentId: string
+  ): Promise<void> {
+    // The project gained a conversation, so a listing kept from before it is
+    // short by one.
+    this._branchCache = null;
+    // Let the parent's colour settle before copying it (DEF-31). The store
+    // holds only server-confirmed values, so a colour picked on the parent's
+    // tab moments earlier is not in it yet, and a fork started in that window
+    // was born wearing the PREVIOUS tint - stored as inherited, so never
+    // offered for release and corrected by no later pass.
+    //
+    // A reload is a queued request like every other of this store's (DEF-30):
+    // it is not sent until the capture ahead of it has been answered, which is
+    // what makes the re-read below current. It runs only inside the capture
+    // window, so an ordinary fork still costs no request, and the wait is
+    // bounded - every request is capped at REQUEST_TIMEOUT_MS (DEF-72). A
+    // reload that fails keeps the cache, which by then holds whatever the
+    // capture confirmed, so the re-read is current either way.
+    if (this._colours.isPending(parentId)) {
+      await this._colours.load();
+    }
+    // Re-read rather than trust `parentColour`, which was taken at click time -
+    // before the name dialog. A capture in flight at click time may well have
+    // landed while that dialog was open, which leaves nothing pending and the
+    // snapshot stale all the same. It stays as the fallback everywhere but a
+    // `native` provider - it is the only value here in which the derived hash
+    // is resolved, so a parent this store holds no colour for still hands its
+    // fork the tint it actually shows. `native` takes no fallback at all, for
+    // the reason above.
+    const stored = this._colours.get(parentId);
+    const inherited =
+      this._descriptor.colourSource === 'native'
+        ? stored
+        : (stored ?? parentColour);
+    await this._colours.inherit(inherited, childId);
   }
 
   /** Poll fast for a fork whose id we already know, then refresh once. The
@@ -979,7 +1181,11 @@ export class AssistantSessionsPanel extends Widget {
         const data = await this._fetchBranches(session);
         const fresh = data.branches.find(b => !known.has(b.session_id));
         if (fresh) {
-          await this._inheritColour(parentColour, fresh.session_id);
+          await this._inheritColour(
+            parentColour,
+            fresh.session_id,
+            session.session_id
+          );
           await this._switchBranch(session, fresh.session_id);
           return;
         }
@@ -1013,7 +1219,7 @@ export class AssistantSessionsPanel extends Widget {
       );
       if (result.current !== result.requested) {
         Notification.warning(
-          'That conversation cannot become current - its recorded folder does not match the project.',
+          'That conversation could not be made the current one.',
           { autoClose: 4000 }
         );
       }
@@ -1053,6 +1259,8 @@ export class AssistantSessionsPanel extends Widget {
       // A deleted conversation leaves no colour entry behind - but only the
       // ids the server says it removed, so a refused delete keeps its tint.
       await this._colours.forget(result.removed_ids ?? sessionIds);
+      // The kept listing names conversations that may have just gone.
+      this._branchCache = null;
       return result.removed_count;
     } catch (err) {
       Notification.error(`Delete failed: ${String(err)}`, { autoClose: 4000 });
@@ -1164,6 +1372,25 @@ export class AssistantSessionsPanel extends Widget {
         }
       });
 
+    // The focused row, so a 30s poll landing mid-keyboard-navigation does not
+    // drop focus to <body> and make the user tab back from the top. The
+    // scroll offsets a few lines up are saved for the same reason.
+    const active =
+      document.activeElement instanceof HTMLElement &&
+      this._bodyEl.contains(document.activeElement)
+        ? document.activeElement
+        : null;
+    // Section AND row: the same project renders into Favorites, Recent and All
+    // at once, so the row key alone would restore focus to a different copy -
+    // and scroll the list to it. Section headers have no row key, so they
+    // carry their own.
+    const focusedSection =
+      active?.closest<HTMLElement>('.jp-AiAssistantsPanel-section')?.dataset
+        .section ?? null;
+    const focusedPath = active?.dataset.encodedPath ?? null;
+    const focusedHeader = active?.classList.contains(
+      'jp-AiAssistantsPanel-sectionHeader'
+    );
     this._bodyEl.innerHTML = '';
 
     if (sessions.length === 0) {
@@ -1193,10 +1420,22 @@ export class AssistantSessionsPanel extends Widget {
       this._lookupName(a).localeCompare(this._lookupName(b))
     );
 
-    if (favourites.length > 0) {
+    // Rendered whenever the user HAS favourites, not whenever the filter
+    // matches one: dropping the heading leaves them unable to tell a filter
+    // miss from lost stars, and makes the section's own empty state - which
+    // the comment below documents as live - unreachable.
+    if (favourites.length > 0 || this._sessions?.some(s => s.favourite)) {
       this._renderSection('favourites', favourites);
     }
-    this._renderSection('recent', recent);
+    // Recent is a shortcut into the top of All, so it earns a heading only
+    // while it is genuinely shorter: below the limit both sections list the
+    // same projects under two headings, which is the default state for anyone
+    // with fewer than `recentLimit` of them (DEF-44). Measured against the
+    // UNFILTERED count for the reason Favorites is - a section that vanishes
+    // while the user types cannot be told from one that lost its rows.
+    if (sessions.length > this._recentLimit) {
+      this._renderSection('recent', recent);
+    }
     this._renderSection('all', all);
 
     this._bodyEl
@@ -1212,6 +1451,26 @@ export class AssistantSessionsPanel extends Widget {
         }
       });
     this._bodyEl.scrollTop = bodyScroll;
+    if (focusedSection) {
+      const section = this._bodyEl.querySelector<HTMLElement>(
+        `.jp-AiAssistantsPanel-section[data-section="${CSS.escape(
+          focusedSection
+        )}"]`
+      );
+      const target = focusedHeader
+        ? section?.querySelector<HTMLElement>(
+            '.jp-AiAssistantsPanel-sectionHeader'
+          )
+        : focusedPath
+          ? section?.querySelector<HTMLElement>(
+              `.jp-AiAssistantsPanel-row[data-encoded-path="${CSS.escape(
+                focusedPath
+              )}"]`
+            )
+          : null;
+      // preventScroll, or the restore undoes the offsets set two lines up.
+      target?.focus({ preventScroll: true });
+    }
   }
 
   private _renderSection(key: SectionKey, items: ISession[]): void {
@@ -1249,17 +1508,24 @@ export class AssistantSessionsPanel extends Widget {
       if (items.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'jp-AiAssistantsPanel-emptySection';
-        // A filter that hides everything and a genuinely empty section are
-        // different states, and only the first one has a way out.
-        empty.textContent = this._filter.trim()
-          ? 'No matches.'
-          : key === 'favourites'
-            ? 'No favorites yet.'
-            : 'Empty.';
+        // Only a filter can empty a section: the panel returns early when
+        // there are no sessions at all, an empty filter matches every row,
+        // and Recent's limit is clamped to at least one.
+        empty.textContent = 'No matches.';
         list.appendChild(empty);
       } else {
+        // Roving tabindex: the section holds ONE tab stop, not one per row.
+        // The same project renders into Favorites, Recent and All at once, so
+        // a stop per row made Tab visit that project three times before it
+        // left the panel. The remembered row survives a re-render; when it is
+        // gone - filtered out, or never set - the stop falls to the first row.
+        const stop =
+          items.find(i => i.encoded_path === this._roving[key])?.encoded_path ??
+          items[0].encoded_path;
         for (const item of items) {
-          list.appendChild(this._renderRow(item, key));
+          list.appendChild(
+            this._renderRow(item, key, item.encoded_path === stop)
+          );
         }
       }
       section.appendChild(list);
@@ -1270,7 +1536,8 @@ export class AssistantSessionsPanel extends Widget {
 
   private _renderRow(
     session: ISession,
-    sectionKey: SectionKey
+    sectionKey: SectionKey,
+    isTabStop: boolean
   ): HTMLDivElement {
     const row = document.createElement('div');
     row.className = 'jp-AiAssistantsPanel-row';
@@ -1278,7 +1545,12 @@ export class AssistantSessionsPanel extends Widget {
     // The row IS the primary control - without these it is reachable by mouse
     // only, and so is the context menu that carries every other action.
     row.setAttribute('role', 'button');
-    row.tabIndex = 0;
+    // -1 is still focusable programmatically, which is what the arrow keys
+    // below and the post-render focus restore both use.
+    row.tabIndex = isTabStop ? 0 : -1;
+    // Identity across a re-render, so the poll can put focus back where the
+    // user left it.
+    row.dataset.encodedPath = session.encoded_path;
 
     // Age emphasis: active within the last minute reads bright, idle over a
     // week dims; both decay or promote on the next refresh.
@@ -1304,7 +1576,14 @@ export class AssistantSessionsPanel extends Widget {
 
     const name = document.createElement('span');
     name.className = 'jp-AiAssistantsPanel-name';
-    name.textContent = this._lookupName(session);
+    // The text ellipsises in a span of its own so the badges after it survive
+    // truncation: appended into the ellipsising span they were clipped away
+    // entirely at sidebar width, on exactly the long-named rows (DEF-41). Same
+    // structure the Manage Sessions popup's branch rows already use.
+    const nameText = document.createElement('span');
+    nameText.className = 'jp-AiAssistantsPanel-nameText';
+    nameText.textContent = this._lookupName(session);
+    name.appendChild(nameText);
     // Branch icon plus total conversation count, only when the project holds
     // more than one. Inside the name span so it hugs the label text instead of
     // being flexed to the row's right edge.
@@ -1336,9 +1615,14 @@ export class AssistantSessionsPanel extends Widget {
     // The star sits before the time so the fixed-width time column stays the
     // rightmost alignment anchor across all rows.
     if (session.favourite && sectionKey !== 'favourites') {
+      // A marker, not a control. It carried a `title` that made it read as
+      // one while a click fell through to the row and launched a terminal;
+      // un-starring stays where every other row action lives, in the context
+      // menu, rather than becoming a second hit target inside the row.
       const star = document.createElement('span');
       star.className = 'jp-AiAssistantsPanel-favStar';
-      star.title = 'Favorite';
+      star.setAttribute('aria-label', 'Favorite');
+      star.setAttribute('role', 'img');
       starFilledIcon.element({ container: star });
       row.appendChild(star);
     }
@@ -1367,7 +1651,38 @@ export class AssistantSessionsPanel extends Widget {
       this._setActiveRow(row);
       void this._openContextMenu(session, e.clientX, e.clientY);
     });
+    // The tab stop follows the focus, so tabbing out of the panel and back
+    // returns to the row the user left rather than to the top of the section.
+    // Focus arrives here from a click, an arrow key, or the post-render
+    // restore, and all three should move the stop.
+    row.addEventListener('focus', () => {
+      this._roving[sectionKey] = session.encoded_path;
+      for (const sibling of this._rowsBeside(row)) {
+        sibling.tabIndex = sibling === row ? 0 : -1;
+      }
+    });
     row.addEventListener('keydown', e => {
+      // Arrow keys move within the section - between sections is what the
+      // section headers, which are tab stops of their own, are for. Live even
+      // while the row is busy: moving the focus off a row being removed is
+      // exactly what a user needs to be able to do.
+      const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+      if (step !== 0 || e.key === 'Home' || e.key === 'End') {
+        // Or the list scrolls under the moving focus.
+        e.preventDefault();
+        const rows = this._rowsBeside(row);
+        const at = rows.indexOf(row);
+        const to =
+          e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? rows.length - 1
+              : // Clamped, not wrapped: at either end the arrow does nothing,
+                // so the ends of the list stay findable by feel.
+                Math.min(rows.length - 1, Math.max(0, at + step));
+        rows[to]?.focus();
+        return;
+      }
       if (removing) {
         return;
       }
@@ -1389,6 +1704,15 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     return row;
+  }
+
+  /** The rows of one section, in render order - the row itself included. */
+  private _rowsBeside(row: HTMLElement): HTMLElement[] {
+    return Array.from(
+      row.parentElement?.querySelectorAll<HTMLElement>(
+        '.jp-AiAssistantsPanel-row'
+      ) ?? []
+    );
   }
 
   /** Leading status dot, or a placeholder that reserves its column. Which
@@ -1447,12 +1771,18 @@ export class AssistantSessionsPanel extends Widget {
     if (this._descriptor.hasBgAgents && s.bg_id) {
       lines.push(`Background agent: ${s.bg_id} (click attaches to it)`);
     }
-    lines.push(
-      ...(this._hooks.tooltipLines?.({
-        session: s,
-        descriptor: this._descriptor
-      }) ?? [])
-    );
+    lines.push(...(this._hooks.tooltipLines?.(s) ?? []));
+    // What THIS row's click resolves to, which is the attach-aware question:
+    // the line above may have just said the click joins a live worker, and an
+    // attach is issued before the mode is appended, so `_resolvedVariant`
+    // promised a flag the server discards - one tooltip naming both, a line
+    // apart (DEF-46).
+    const variant = this._resumeVariant(s);
+    if (variant) {
+      // The row click launches with this, and the menu is the only other place
+      // that says so.
+      lines.push(`Launch mode: ${variant.label}`);
+    }
     if (s.session_id) {
       lines.push(`Session id: ${s.session_id}`);
     }
@@ -1482,8 +1812,11 @@ export class AssistantSessionsPanel extends Widget {
     if (absolute === this._rootDir) {
       return '';
     }
-    if (absolute.startsWith(this._rootDir + '/')) {
-      return absolute.slice(this._rootDir.length + 1);
+    // `/` is its own separator, so the prefix must not gain a second one -
+    // otherwise every path under a server rooted at `/` reads as outside it.
+    const prefix = this._rootDir === '/' ? '/' : this._rootDir + '/';
+    if (absolute.startsWith(prefix)) {
+      return absolute.slice(prefix.length);
     }
     return null;
   }
@@ -1569,6 +1902,70 @@ export class AssistantSessionsPanel extends Widget {
     );
   }
 
+  /** The launch mode a PLAIN action resolves to right now, or null.
+   *
+   * Every marking below hangs off this rather than off `force`, because a mode
+   * left on in settings is applied to the plain items too: marking only the
+   * forced variant then puts the warning on the SAFER-looking of two entries
+   * that build a byte-identical launch, and the unmarked one is the default
+   * the user clicks. */
+  private _resolvedVariant(): IResolvedLaunchMode | null {
+    const resolved = resolvedLaunchModeEntry(
+      this._descriptor.launchModes,
+      this._modes
+    );
+    return resolved;
+  }
+
+  /** The same mode as it applies to RESUME - of the active row by default, or
+   * of whichever conversation is named.
+   *
+   * An attach is not a launch: the server returns the argv before the flag is
+   * appended, deliberately, so promising the mode on a conversation a live
+   * worker already holds would name something the assistant never receives.
+   * That is true of resuming and of nothing else, so it is tested HERE rather
+   * than in `_resolvedVariant` - which is read by the `+` button and both
+   * new-session and branch items, none of which attach. Testing it there let
+   * one right-click on a background-agent row strip the mode's name off every
+   * one of those surfaces panel-wide, while their launches went on carrying it
+   * (DEF-37).
+   *
+   * The argument is what lets a surface that describes SOMEONE ELSE'S resume -
+   * a row tooltip built during a render, a branch item in the submenu - ask the
+   * question about that conversation rather than about the active row.
+   */
+  private _resumeVariant(
+    target: { bg_id?: string | null } | null = this._activeSession
+  ): IResolvedLaunchMode | null {
+    const joining = this._descriptor.hasBgAgents && !!target?.bg_id;
+    return joining ? null : this._resolvedVariant();
+  }
+
+  /** The variant suffix a plain item wears while that mode is in force. */
+  private _variantSuffix(): string {
+    const resolved = this._resolvedVariant();
+    return resolved ? ` (${resolved.label})` : '';
+  }
+
+  /** Whether a forced variant would build the launch the plain item already
+   * builds - a mode left on in settings makes the plain item carry it, so the
+   * variant beside it would be a second entry for one outcome. Only a boolean
+   * variant can match: a forced token is the bare mode id, so an enum sitting
+   * on a widening value is a launch no variant duplicates. */
+  private _buildsSameLaunch(mode: ILaunchMode): boolean {
+    const forced = resolveLaunchMode(
+      this._descriptor.launchModes,
+      this._modes,
+      mode.id
+    );
+    return !!forced && forced === this._launchMode();
+  }
+
+  /** The glyph, only where the mode WIDENS what runs without asking. */
+  private _variantIcon(): LabIcon | undefined {
+    return this._resolvedVariant()?.unsafe ? warningIcon : undefined;
+  }
+
   private _setupCommands(): void {
     this._commands = new CommandRegistry();
     const active = (): ISession | null => this._activeSession;
@@ -1589,7 +1986,12 @@ export class AssistantSessionsPanel extends Widget {
       // Joining a live worker and resuming a dormant conversation are
       // different verbs, so a provider that has both says which one this row
       // gets.
-      label: () => this._hooks.resumeLabel?.(active()) ?? 'Resume',
+      label: () => {
+        const variant = this._resumeVariant();
+        const verb = this._hooks.resumeLabel?.(active()) ?? 'Resume';
+        return variant ? `${verb} (${variant.label})` : verb;
+      },
+      icon: () => (this._resumeVariant()?.unsafe ? warningIcon : undefined),
       execute: () => {
         const s = active();
         if (s) {
@@ -1602,6 +2004,9 @@ export class AssistantSessionsPanel extends Widget {
       this._commands.addCommand(this._cmd(`resume-${mode.id}`), {
         label: `Resume (${mode.menuLabel})`,
         icon: warningIcon,
+        // Absent while the plain item already resolves to this same mode - it
+        // would be a second entry building an identical launch.
+        isVisible: () => !this._buildsSameLaunch(mode),
         // A conversation a live worker already holds was started in whatever
         // mode that worker has; joining it cannot change that, so the variant
         // is disabled rather than silently joining in the wrong mode.
@@ -1616,11 +2021,13 @@ export class AssistantSessionsPanel extends Widget {
       this._commands.addCommand(this._cmd(`new-session-${mode.id}`), {
         label: `New ${this._descriptor.label} Session (${mode.menuLabel})`,
         icon: warningIcon,
+        isVisible: () => !this._buildsSameLaunch(mode),
         execute: () => void this._newSession(mode.id)
       });
       this._commands.addCommand(this._cmd(`branch-session-${mode.id}`), {
         label: mode.menuLabel as string,
         icon: warningIcon,
+        isVisible: () => !this._buildsSameLaunch(mode),
         execute: () => void this._branchSession(mode.id)
       });
     }
@@ -1692,9 +2099,36 @@ export class AssistantSessionsPanel extends Widget {
       }
     });
 
+    // The only way back out of a hand-set tab colour. The colourful-tab
+    // extension's own Clear touches its storage and the tab's classes, neither
+    // of which this extension reads once the colour is in its store, so
+    // without this item the override would be permanent - and on a native
+    // assistant that means `/color` silently never showing again.
+    //
+    // It covers every conversation of the row, not just the current one: a
+    // terminal opened on a branch files its colour under THAT branch, and this
+    // row is the only surface offering the release. Absent while tab colouring
+    // is off, where a reset would change nothing on screen. The count is on
+    // the label because the conversations it reaches are not all on the row -
+    // even at one, which may be a branch whose tab is not open - and every
+    // other multi-target item in this menu names its number too.
+    this._commands.addCommand(this._cmd('reset-colour'), {
+      label: () => {
+        const n = this._resettableColours.length;
+        return n > 1 ? `Reset Tab Colours (${n})` : `Reset Tab Colour (${n})`;
+      },
+      isVisible: () => this._colouredTabs && this._resettableColours.length > 0,
+      execute: () => void this._resetColours(this._resettableColours)
+    });
+
     this._commands.addCommand(this._cmd('cleanup-parallel'), {
       label: () =>
         `Clean Up Parallel Sessions (${active()?.extra_sessions ?? 0})`,
+      // Marked, like `Remove from ...` below it. The two share the group the
+      // separator was added to protect, and both delete history that cannot be
+      // recovered; leaving this one bare made the pair read as one dangerous
+      // item beside an ordinary one (DEF-45).
+      icon: warningIcon,
       isVisible: () => (active()?.extra_sessions ?? 0) > 0,
       execute: () => {
         const s = active();
@@ -1726,7 +2160,18 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     this._commands.addCommand(this._cmd('open-branch'), {
-      label: args => String(args.label ?? ''),
+      // Names the mode the launch carries, like Resume, `+` and Branch Session
+      // do - this item opens a terminal, so the mode in force applies to it and
+      // this was the one launch surface that stayed silent about it. Attach-
+      // aware per conversation: the submenu passes `bg`, since a branch a live
+      // worker holds is attached to and takes no mode (DEF-46's rule).
+      label: args => {
+        const base = String(args.label ?? '');
+        const variant = this._resumeVariant(
+          args.bg ? { bg_id: String(args.bg) } : null
+        );
+        return variant ? `${base} (${variant.label})` : base;
+      },
       // Intent glyph, not row state - see switch-branch above.
       icon: terminalIcon,
       execute: args => {
@@ -1739,7 +2184,27 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     this._commands.addCommand(this._cmd('branch-session'), {
-      label: 'Normal',
+      // Two positions, two identities. Inside the submenu the title already
+      // says Branch Session, so the item only has to name WHICH launch it is.
+      // Flattened to the top level - which happens exactly when every variant
+      // suppresses itself - that title is gone with it, and an item reading
+      // `Default (Bypass Approvals)`, or bare `Normal` on a row holding a
+      // background agent, names no verb at all while sitting one row above the
+      // entries that delete history (DEF-35).
+      label: () =>
+        this._visibleVariantCount() === 0
+          ? `Branch Session${this._variantSuffix()}`
+          : this._variantSuffix()
+            ? `Default${this._variantSuffix()}`
+            : 'Normal',
+      // The suffix names the mode in words, but the icon slot is what marks
+      // danger everywhere else in this menu - spending it on a branch glyph
+      // left `Branch Session (Skip Permissions)` looking exactly as safe as
+      // Show in File Browser while `Resume (Skip Permissions)` beside it wore
+      // the triangle. The branch glyph is the fallback, not the winner.
+      icon: () =>
+        this._variantIcon() ??
+        (this._visibleVariantCount() === 0 ? branchIcon : undefined),
       execute: () => void this._branchSession()
     });
 
@@ -1755,11 +2220,20 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     this._commands.addCommand(this._cmd('new-session'), {
-      label: `New ${this._descriptor.label} Session`,
+      label: () =>
+        `New ${this._descriptor.label} Session${this._variantSuffix()}`,
+      icon: () => this._variantIcon(),
       execute: () => void this._newSession()
     });
 
     this._buildMenus();
+  }
+
+  /** How many forced launch variants would actually render right now. Zero
+   * means every variant builds the launch the plain item already builds, so a
+   * menu offering both is a menu with one entry. */
+  private _visibleVariantCount(): number {
+    return this._variantModes.filter(m => !this._buildsSameLaunch(m)).length;
   }
 
   private _buildMenus(): void {
@@ -1810,7 +2284,14 @@ export class AssistantSessionsPanel extends Widget {
   }
 
   private _menu(): Menu {
-    const menu = new Menu({ commands: this._commands });
+    // MenuSvg, not a plain Lumino Menu. Lumino's default renderer emits
+    // `div.lm-Menu-itemSubmenuIcon` EMPTY, so every submenu here drew no caret
+    // and `Branch Session`, which opens on hover, read exactly like the items
+    // that act on click (DEF-42). MenuSvg's renderer is the one JupyterLab's
+    // own menus use: it fills that div with the caret glyph, and otherwise
+    // differs only in adding the stock menu-item icon sizing our items already
+    // get from `base.css`.
+    const menu = new MenuSvg({ commands: this._commands });
     menu.addClass('jp-AiAssistantsContextMenu');
     return menu;
   }
@@ -1834,6 +2315,7 @@ export class AssistantSessionsPanel extends Widget {
     add('toggle-favourite');
     add('copy-path');
     add('copy-session-id');
+    add('reset-colour');
     this._contextMenu.addItem({ type: 'separator' });
     if (withBranches) {
       this._contextMenu.addItem({
@@ -1845,64 +2327,170 @@ export class AssistantSessionsPanel extends Widget {
         submenu: this._switchSubmenu
       });
     }
-    this._contextMenu.addItem({
-      type: 'submenu',
-      submenu: this._branchSessionMenu
-    });
+    // A submenu holding one entry is a hover for nothing - it happens whenever
+    // a mode is in force and the variant suppresses itself, same as the plus
+    // button above.
+    if (this._visibleVariantCount() === 0) {
+      add('branch-session');
+    } else {
+      this._contextMenu.addItem({
+        type: 'submenu',
+        submenu: this._branchSessionMenu
+      });
+    }
+    // The two entries that delete history get their own group. Lumino opens a
+    // submenu on hover, so the pointer travels down-RIGHT across Branch
+    // Session to reach its items and a slip lands here; a separator is the
+    // only thing between that slip and a project's history.
+    this._contextMenu.addItem({ type: 'separator' });
     add('cleanup-parallel');
     add('remove');
   }
 
   /** Open the row context menu, populating the branch submenus first when the
-   * project holds more than one conversation. A fetch failure opens the menu
-   * without them rather than not at all. */
+   * project holds more than one conversation. A fetch failure - or one too
+   * slow to wait for - opens the menu without them rather than not at all.
+   *
+   * Everything before the menu is built is raced against one budget, because
+   * every await here is a window in which the user right-clicks again. A
+   * superseded open touches nothing: `clearItems` CLOSES an attached menu, so
+   * a late arrival would shut the menu on screen and reopen its own elsewhere,
+   * leaving `Remove` pointed at a project the user had abandoned - and a late
+   * arrival that only refilled the submenus would leave the visible menu
+   * listing another project's conversations under this one's label. */
   private async _openContextMenu(
     session: ISession,
     x: number,
     y: number
   ): Promise<void> {
-    let hasBranches = false;
-    if (session.extra_sessions > 0) {
-      try {
-        const data = await this._fetchBranches(session);
-        this._lastBranches = data.branches;
-        this._lastBranchesCurrent = data.current;
-        const inline = data.branches.slice(0, INLINE_BRANCH_LIMIT);
-
-        // The submenu shows only the most recent few inline - fewest clicks
-        // for often-used conversations; the full list plus management lives
-        // behind the always-present Manage Sessions popup.
-        this._switchSubmenu.clearItems();
-        this._switchSubmenu.title.label = `Switch and Manage Sessions (${data.branches.length})`;
-        for (const b of inline) {
-          this._switchSubmenu.addItem({
-            command: this._cmd('switch-branch'),
-            args: { session_id: b.session_id, label: this._branchMenuLabel(b) }
-          });
-        }
-        this._switchSubmenu.addItem({ type: 'separator' });
-        this._switchSubmenu.addItem({ command: this._cmd('manage-sessions') });
-
-        // Same conversations, but each launches its own terminal directly.
-        this._openBranchSubmenu.clearItems();
-        this._openBranchSubmenu.title.label = `Open Branched Conversation (${data.branches.length})`;
-        for (const b of inline) {
-          this._openBranchSubmenu.addItem({
-            command: this._cmd('open-branch'),
-            args: { session_id: b.session_id, label: this._branchMenuLabel(b) }
-          });
-        }
-        this._openBranchSubmenu.addItem({ type: 'separator' });
-        this._openBranchSubmenu.addItem({
-          command: this._cmd('manage-sessions')
-        });
-        hasBranches = data.branches.length > 0;
-      } catch {
-        hasBranches = false;
+    const generation = ++this._menuGeneration;
+    // Fetched into a LOCAL. Nothing this open learns may reach a field or a
+    // submenu before the guard below: those are read by whichever menu is on
+    // screen, so a loser writing them retargets someone else's menu - down to
+    // `Reset Tab Colours` dropping the colours of a project the user is not
+    // looking at, since the colour store is keyed by provider, not by project.
+    const branches = async (): Promise<IBranchesResponse | null> => {
+      if (session.extra_sessions <= 0) {
+        return null;
       }
+      try {
+        const fetched = await this._fetchBranches(session);
+        // Kept under the project it describes, even when this open has already
+        // given up on it: a project whose listing outruns the budget would
+        // otherwise never show its branch submenus on ANY open. Never
+        // `_lastBranches` - that is the menu's own state and is written after
+        // the guard, for the row being opened, by whoever wins.
+        this._branchCache = { path: session.encoded_path, data: fetched };
+        return fetched;
+      } catch {
+        return null;
+      }
+    };
+    // The reconcile is what MOVES a colour just picked on a tab into the
+    // store, so without it the release stays invisible until the next tick -
+    // the whole first half-minute after the gesture that creates the need.
+    const colours = this._colours
+      .load()
+      .then(() => this._terminals.reconcileColours());
+
+    // Nothing here may hold the menu hostage. `requestAPI` is bounded, but at
+    // 60s - seventy-five times this budget - so a suspended connection would
+    // otherwise cost the user Open, Copy Path and Remove for up to a minute;
+    // past the budget the menu opens on what is already cached, and the work
+    // completes for the next right-click.
+    const data = await Promise.race([
+      Promise.all([branches(), colours]).then(([fetched]) => fetched),
+      new Promise<IBranchesResponse | null>(resolve =>
+        window.setTimeout(() => resolve(null), MENU_STATE_BUDGET_MS)
+      )
+    ]);
+    if (generation !== this._menuGeneration) {
+      return;
     }
+    // A fetch that lost the race may have landed since, or on an earlier open.
+    // Only when one was actually attempted: `branches()` also answers null for
+    // a row with no other conversations, and serving the cache there would
+    // resurrect a list the user has just cleaned up - submenus offering
+    // conversations that no longer exist, on every open, for good.
+    const known =
+      data ??
+      (session.extra_sessions > 0 &&
+      this._branchCache?.path === session.encoded_path
+        ? this._branchCache.data
+        : null);
+    const branchList: IBranch[] = known?.branches ?? [];
+    const hasBranches = branchList.length > 0;
+    if (known) {
+      this._lastBranches = branchList;
+      this._lastBranchesCurrent = known.current;
+      this._fillBranchSubmenus(branchList);
+    }
+    // Hand-set colours only. A branch's inherited tint is its identity, not a
+    // preference to take back - offering it here would let one click scatter
+    // every fork of the project to an unrelated colour. A branch list that did
+    // not arrive narrows the scope to the row's own conversation, which the
+    // label then states exactly - never to nothing, which would hide the only
+    // way back out of a hand-set colour.
+    this._resettableColours = Array.from(
+      new Set([
+        session.session_id,
+        ...(hasBranches
+          ? [this._lastBranchesCurrent, ...branchList.map(b => b.session_id)]
+          : [])
+      ])
+    ).filter(
+      id =>
+        !!id &&
+        this._colours.isOverride(id) &&
+        // Not while its colour is still being written. `isOverride` answers
+        // from the last CONFIRMED colour, so a capture replacing an existing
+        // one leaves it true - and a release issued in that window is undone,
+        // either by the capture landing after it or by the reconcile the
+        // release itself runs.
+        !this._colours.isPending(id)
+    );
     this._rebuildContextMenu(hasBranches);
     this._contextMenu.open(x, y);
+  }
+
+  /** Refill both branch submenus for one project. Called only once an open has
+   * proved it is still the current one - these are shared widgets, and the
+   * menu on screen renders whatever they last held. */
+  private _fillBranchSubmenus(branches: IBranch[]): void {
+    // The submenu shows only the most recent few inline - fewest clicks for
+    // often-used conversations; the full list plus management lives behind the
+    // always-present Manage Sessions popup.
+    const inline = branches.slice(0, INLINE_BRANCH_LIMIT);
+    this._switchSubmenu.clearItems();
+    this._switchSubmenu.title.label = `Switch and Manage Sessions (${branches.length})`;
+    for (const b of inline) {
+      this._switchSubmenu.addItem({
+        command: this._cmd('switch-branch'),
+        args: { session_id: b.session_id, label: this._branchMenuLabel(b) }
+      });
+    }
+    this._switchSubmenu.addItem({ type: 'separator' });
+    this._switchSubmenu.addItem({ command: this._cmd('manage-sessions') });
+
+    // Same conversations, but each launches its own terminal directly.
+    this._openBranchSubmenu.clearItems();
+    this._openBranchSubmenu.title.label = `Open Branched Conversation (${branches.length})`;
+    for (const b of inline) {
+      this._openBranchSubmenu.addItem({
+        command: this._cmd('open-branch'),
+        args: {
+          session_id: b.session_id,
+          label: this._branchMenuLabel(b),
+          // The label reads this to tell an attach from a launch; the
+          // provider's own worker capability is tested where it is answered.
+          ...(b.bg_id ? { bg: b.bg_id } : {})
+        }
+      });
+    }
+    this._openBranchSubmenu.addItem({ type: 'separator' });
+    this._openBranchSubmenu.addItem({
+      command: this._cmd('manage-sessions')
+    });
   }
 
   private _openManagePopup(): void {
@@ -1917,9 +2505,8 @@ export class AssistantSessionsPanel extends Widget {
       deleteToTrash: this._deleteToTrash,
       branchName: b => this._branchDisplayName(b),
       formatTime: ms => this._formatRelativeTime(ms),
-      branchBadge: this._hooks.branchBadge
-        ? b => this._hooks.branchBadge!(b)
-        : b => this._bgBadgeFor(b),
+      branchBadge: b => this._bgBadgeFor(b),
+      openTitle: id => this._openBranchTitle(session, id),
       onSwitch: id => void this._switchBranch(session, id),
       onOpen: id => void this._openSession(session, undefined, id),
       onDelete: ids => this._deleteBranches(session, ids),
@@ -1928,6 +2515,21 @@ export class AssistantSessionsPanel extends Widget {
         this._lastBranches = branches;
       }
     });
+  }
+
+  /** Tooltip for one Open button in the Manage Sessions popup. Same rule as the
+   * Open Branched Conversation submenu: the button launches a terminal, so it
+   * names the mode that launch carries, and a conversation a live worker holds
+   * is attached to and carries none. The row's own conversation is not in
+   * `_lastBranches`, so it answers from the session. */
+  private _openBranchTitle(session: ISession, sessionId: string): string {
+    const base = 'Open this conversation in its own terminal';
+    const target =
+      sessionId === session.session_id
+        ? session
+        : (this._lastBranches.find(b => b.session_id === sessionId) ?? null);
+    const variant = this._resumeVariant(target);
+    return variant ? `${base} (${variant.label})` : base;
   }
 
   /** The live-worker chip for a branch row, when the provider has workers at
@@ -1986,14 +2588,28 @@ export class AssistantSessionsPanel extends Widget {
   private _searchClearEl: HTMLButtonElement | null = null;
   private _sessions: ISession[] | null = null;
   private _expanded: Record<SectionKey, boolean>;
+  /** Which row carries each section's single tab stop, by encoded path. */
+  private _roving: Partial<Record<SectionKey, string>> = {};
   private _commands!: CommandRegistry;
   private _contextMenu!: Menu;
   private _switchSubmenu!: Menu;
   private _openBranchSubmenu!: Menu;
   private _branchSessionMenu!: Menu;
   private _newSessionMenu!: Menu;
+  /** Re-writes the `+` button's title. Set once the shell exists. */
+  private _renameNewButton: (() => void) | null = null;
+  /** Re-draws the `+` button's glyph. Set once the shell exists. */
+  private _repaintNewIcon: (() => void) | null = null;
   private _lastBranches: IBranch[] = [];
   private _lastBranchesCurrent = '';
+  private _colouredTabs = true;
+  private _resettableColours: string[] = [];
+  /** Bumped per context-menu open, so a slow one that has been superseded
+   * knows to touch nothing. */
+  private _menuGeneration = 0;
+  /** The last branch listing fetched, and the project it belongs to. Read only
+   * when this open's own fetch did not arrive in time. */
+  private _branchCache: { path: string; data: IBranchesResponse } | null = null;
   private _activeSession: ISession | null = null;
   private _activeRowEl: HTMLElement | null = null;
   private _pollHandle: number | null = null;

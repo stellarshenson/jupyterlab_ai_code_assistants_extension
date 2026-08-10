@@ -71,7 +71,9 @@ export const descriptor: IProviderDescriptor = {
         'Approval ladder passed as `--approval-mode` when set to a value other than the default. A non-default value here takes precedence over the YOLO switch; only the forced YOLO menu action overrides it. `default` prompts for approval, `auto_edit` auto-approves edit tools, `yolo` auto-approves every tool, `plan` is read-only.',
       kind: 'enum',
       values: ['default', 'auto_edit', 'yolo', 'plan'],
-      default: 'default'
+      default: 'default',
+      // `plan` is read-only and `default` prompts, so neither widens anything.
+      unsafeValues: ['auto_edit', 'yolo']
     }
   ],
   hasRemoteControl: false,

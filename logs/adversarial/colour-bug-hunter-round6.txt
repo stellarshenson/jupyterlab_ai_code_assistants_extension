@@ -1,0 +1,91 @@
+I'll start by reading the adversary persona file and my round-5 report.
+
+VERDICT: DO-NOT-SHIP (4 findings) - the round-5 in-flight guard is keyed on "request on the wire" rather than "answer predates my write", so the exact corruption it was written to close still reproduces from a GET issued before the write and answered after it.
+
+## (a) Round-5 findings, re-confirmed
+
+**NEW-1 (generation guard stamped after the state it protects) - CLEARED.** `src/core/panel.ts:1949-1958` fetches into a local via the `branches()` closure; `:1970-1975` races it; `:1976-1978` guards; `_lastBranches`, `_lastBranchesCurrent` and `_fillBranchSubmenus` are all behind the guard at `:1981-1985`. Both my scenarios die at the guard: a loser now writes no field and touches neither submenu, so B's on-screen menu can no longer list A's conversations, and `_resettableColours` (`:1992-1999`) reads `this._lastBranchesCurrent` that THIS open wrote three lines earlier - self-consistent, no cross-project drop. I re-walked every field a losing open could reach: `_menuGeneration` (`:1943`) and the shared colour store are the only ones, and neither is per-project. `_fetchBranches` (`:1113-1130`) is a read-only GET with no server-side side effect (`BranchesHandler`, `routes.py:370-393`), so a loser's request is invisible too.
+
+**`_fillBranchSubmenus` vs `_openManagePopup` - CLEARED.** `_openManagePopup` (`:2043-2066`) reads `_lastBranches` / `_lastBranchesCurrent` / `_activeSession`, all three written together at `:1982-1983` and `:2005`. It is reachable only from inside the two submenus, which `_rebuildContextMenu` inserts only when `withBranches` is true (`:1909-1918`), and `hasBranches` is true only when `data` was non-null - the same condition that filled those fields this open. When the budget wins (`data === null`) the fields keep the previous row's values but the submenus are not in the menu, so nothing can read them.
+
+**Round-5 fix 4 (`branchesKnown` deleted) - CLEARED, and the cross-project reset it used to close is genuinely closed by fix 1.** `:1992-1999` falls back to `[session.session_id]` when the list did not arrive, filtered by `isOverride`. A stale `_lastBranches` can no longer reach `_resettableColours`, because `hasBranches` is derived from `branchList`, which is `data?.branches ?? []` for THIS open only (`:1979-1980`).
+
+**NEW-2 (whole-map rollback and `load()`'s mid-write `_absorb`) - NOT-CLEARED.** `_snapshot(ids)` (`src/core/colour.ts:322-341`) is per-key and the `_inFlight` set (`:187-199`, `:229`, `:271`, `:285`, `:311`) exists, and both close the cases my round-5 t1/t3 exercised. Three new repros show the fix is incomplete on its own axis - see findings 1, 2, 3.
+
+**NEW-3 (five artefacts claiming a native fork inherits only a HAND-SET override) - CLEARED.** `routes.py:548-553` and `:587-591`, `panel.ts:949-958`, acc-crit `:231` (table row "stored colour only") and `:266`. All five now say "stored", and the correction is logged at acc-crit `:270`.
+
+**Round-5 fix 5 (dead `.catch`, `clearColours` self-catch, stale docstrings) - CLEARED.** `terminals.ts:396-404` mirrors `reconcileColours`' `try/catch/finally` (`:301-375`); `providers/claude.py:1057-1058` and `src/providers/claude.ts:50-52` both read "DEFAULT". No `.catch` remains at the menu-open site (`panel.ts:1962-1964`).
+
+**Round-5 fix 6 (README) - CLEARED.** `README.md:36` documents the override, `Reset Tab Colour`, the pre-1.0.0 re-pick caveat and the branch caveat.
+
+**Suites re-run at the current tree, nothing rebuilt: pytest 143 passed, Jest 74 passed, `npx tsc --noEmit` exit 0.** `git status --short` byte-identical before and after.
+
+## (b) New defects
+
+**1. [MAJOR] The in-flight guard protects only the window while a write is on the wire, so a GET issued BEFORE the write and answered after it still wipes the colour** - `src/core/colour.ts:187` (`for (const id of this._inFlight)`), `:229` (`this._inFlight.add`), `:270-272` (`finally { this._inFlight.delete(sessionId); }`).
+
+FACT for the store behaviour, tested. `/tmp/.../r6/t4_slow_get.js` drives the compiled `src/core/colour.ts` against a stubbed `requestProvider` and a server model that answers each verb with the store as of the moment it is served:
+
+```
+set -> true | cache after set: sky
+server: {"colours":{"AAA":"sky"},"overrides":["AAA"]}
+cache : get null isOverride false
+```
+
+Scenario. `load()` issues its GET at t0, when the store is empty. At t1 the colour loop (`terminals.ts:272-275`) captures a hand-set colour and `set(A,'sky')` POSTs. The POST resolves at t2 - `_inFlight` is emptied in the `finally` at `:271` - and `reconcileColours` (`terminals.ts:333-335`, then `:355-363`) paints the tab, which makes `jupyterlab_colourful_tab_extension` delete its own localStorage record, the last browser-side copy of the user's pick. At t3 the GET, whose snapshot predates the POST, is absorbed with `_inFlight` empty: A is dropped from `_colours` and from `_overrides`. The next reconcile pass reads `readUserSetTabColour` as null (released at t2) and `_colours.get(A)` as null, and repaints the tab with the assistant's default. `Reset Tab Colour` is hidden meanwhile (`panel.ts:1999`). The colour returns on the next successful `load()`, so the user sees their colour vanish and come back over ~30-60 s.
+
+Reachability: SUSPICION on the wall clock, FACT on the code path. `load()` is issued from `panel.ts:546` (`_fetch`, which ~10 call sites fire, plus the 30 s poll at `:2087-2093`), from `:183` at construction and from `:1962-1964` at every menu open; `set` is issued from `reconcileColours`, which the colour loop arms independently of the panel poll. Nothing serialises a GET against a POST. Settling test: a Jest case that issues `load()` FIRST, then `set`, resolves the POST, and only then resolves the GET - the existing case at `src/__tests__/colour.spec.ts:322-338` resolves the GET *during* the write, which is the sub-window the fix does cover.
+
+Fix: the invariant is "this answer predates a write to that id", not "a write is on the wire". Give the store a monotonic `_writeSeq` and a `Map<string, number>` of last-write-start per id; have `load()` capture `_writeSeq` at ISSUE time and, in `_absorb`, keep the cache's own value for every id whose last-write-start exceeds the captured value (in flight or already settled). That closes finding 2 as well.
+
+**2. [MAJOR] `_inFlight` is a set, not a reference count: an overlapping write on the same id clears the flag while the other request is still on the wire** - `src/core/colour.ts:229` and `:271` (`set`), `:285` and `:311` (`forget`).
+
+FACT, tested. `/tmp/.../r6/t3_inflight_leak.js`:
+
+```
+inFlight while DELETE still on the wire: []
+forget -> true
+server : {"colours":{},"overrides":[]}
+cache  : get sky isOverride true
+```
+
+Scenario. The user right-clicks a row; `_openContextMenu` runs `load().then(reconcileColours())` (`panel.ts:1962-1964`), the reconcile re-captures the tab colour and `set(A,'sky')` goes on the wire. Past the 1.5 s budget the menu opens (`panel.ts:1970-1975`) and the user clicks `Reset Tab Colour` → `forget(['A'])` DELETEs. Both added A to `_inFlight`; the POST settles first and its `finally` at `:271` removes A outright, though the DELETE is still unanswered. A routine `load()` - whose snapshot predates the DELETE - is then absorbed with A unguarded and re-inserts `A='sky'` with `isOverride` true. The DELETE lands, the server drops A, `forget` returns true and `_resetColours` (`panel.ts:934-947`) reports success. The tab keeps its released tint and the menu keeps offering the reset until the next `load()` - and `panel.ts:254-256` stops the poll when the panel is hidden, so if the user closes the sidebar in that window nothing refreshes the cache at all while the colour loop keeps painting from it.
+
+Fix: make `_inFlight` a `Map<string, number>` incremented on entry and decremented in the `finally`, with the id guarded while the count is above zero - or adopt the per-id sequence from finding 1, which subsumes it.
+
+**3. [MAJOR] The per-key snapshot still clobbers on the SAME key: the older write's rollback restores a value that predates the newer write** - `src/core/colour.ts:322-341` (`_snapshot` captures `this._colours.get(id)` at issue time), `:228`, `:254`, `:268`.
+
+FACT, tested. `/tmp/.../r6/t1_same_id_rollback.js`:
+
+```
+set(mint) -> true
+set(sky)  -> false
+server   : {"colours":{"AAA":"mint"},"overrides":["AAA"]}
+cache get: null isOverride: false
+```
+
+`set(A,'sky')` is issued first and captures `before = [A, null, false]`. `set(A,'mint')` is issued second, succeeds, and returns true - so its caller in `reconcileColours` (`terminals.ts:334`, `:355-363`) paints the tab and the companion extension drops its record. The first write then fails and its rollback restores the pre-`sky` state, deleting A from a cache the server holds as `mint`. Identical end state to the round-5 t1 that motivated the per-key snapshot; per-key does not order writes, it only narrows their blast radius to one key.
+
+Reachability: FACT for the store, SUSPICION for the trigger. Two concurrent writes to one id are reachable three ways - `forget` overlapping `set` (finding 2's scenario, which I drove), `inherit` from `_watchForNewBranch` (`panel.ts:1026-1030` → `colour.ts:350-355`) overlapping a capture on the freshly opened branch terminal, and two terminals resumed on the same conversation with different tab colours, which `_eachAssistantTerminal`'s `Promise.all` (`terminals.ts:420-428`) issues in one pass. Settling test for the third: open the same branch twice via `Open Branched Conversation` and check whether both probes answer the same `session_id`.
+
+Fix: give each write a sequence number and make a rollback a no-op if a later write to the same id has started. The sequence map from finding 1 carries this for free.
+
+**4. [MINOR] `set`'s success path re-adds the override a concurrent `forget` had just removed, leaving `isOverride` true with no colour - a reset item that issues no request and reports success** - `src/core/colour.ts:262-265` writes `_overrides` unconditionally on success; `:280` filters `forget` on `_colours.has(id)`.
+
+FACT, tested. `/tmp/.../r6/t2_forget_over_set.js` ends at `get null / isOverride true` with the server empty. In that state `_resettableColours` (`panel.ts:1999`, filtered on `isOverride`) includes A, so `Reset Tab Colour (1)` is shown; `execute` (`:1762`) → `forget(['A'])` finds `present` empty at `:280-282` and returns true after zero requests; `_resetColours` shows no error and refreshes. The click does nothing except trigger the refresh that clears the phantom.
+
+Narrow, hence MINOR: `_openContextMenu` runs `load()` before computing `_resettableColours`, and the absorb clears the phantom as soon as that GET resolves regardless of the 1.5 s budget - so the item is only ever shown if that particular `load()` fails or outlives the budget on its own. Fix: at `:262-265`, do not re-assert `_overrides` for an id whose entry is no longer in `_colours`.
+
+**5. [MINOR] The budget comment promises the branch fetch pays off on the next right-click; it is discarded** - `src/core/panel.ts:1966-1969` ("past the budget the menu opens on what is already cached, and the work completes for the next right-click"). `_fetchBranches` (`:1113-1130`) is an uncached `cache: 'no-store'` GET with no store behind it, and when the timer wins the race at `:1970-1975` the resolved `IBranchesResponse` is dropped on the floor - `:1981` only runs for the value the race returned. On a provider slow enough to blow the budget, every right-click re-fetches from scratch and the branch submenus are permanently unreachable rather than one wait away. The colours half of the sentence is true (`load()` and the reconcile do land in the shared store). Fix: either say so, or hold the losing fetch's result and fill the submenus on the next open once the generation matches.
+
+## Tested and cleared
+- **The generation guard, all four fields.** `_lastBranches`, `_lastBranchesCurrent` and both submenus are written only at `panel.ts:1982-1984`, after the guard at `:1976`. I re-walked every other field a losing `_openContextMenu` touches: `_menuGeneration` (its own) and the provider-wide colour store. `_activeSession` is also set eagerly in the row handlers (`:1414`, `:1432`), but that assignment always belongs to the LAST right-click, which is by construction the winner, and `:2005` reasserts the same value.
+- **`_absorb` re-applies in-flight deletes correctly.** For an id whose optimistic delete is pending, `this._colours.get(id)` is undefined so `:191` takes the `next.delete(id)` branch and `:197` drops it from `overrides`. Verified in t2/t3 - the failure there is the flag being absent, not the re-application being wrong.
+- **A rollback cannot race a reload.** In both `set` (`:253-269`) and `forget` (`:300-309`) the rollback and the `finally` that clears `_inFlight` are separated by no `await`, so no `_absorb` can interleave between them.
+- **No duplicate colour timers from the new awaited call sites.** `reconcileColours`' `finally` (`:371-375`) always calls `startColourLoop`, which early-returns while `_colourHandle` is non-null (`terminals.ts:269`), so the menu-open reconcile, `_resetColours`' reconcile and the loop's own cannot leave two timers armed. Traced both settle orders.
+- **`_colouredTabs` reaches the visibility gate.** Defaults true at `panel.ts:2132` and `terminals.ts:472`, and `src/index.ts:173` pushes the setting on every settings load, so the reset item is not gated behind a signal that never fires.
+- **`_save`'s exception surface is adequate.** `write_json_atomic` (`core/store.py:71-84`) can only raise `OSError` subclasses for the mkdir, the open, the fsync and the replace; the payload is `dict[str,str]` plus `list[str]`, so `json.dumps` cannot raise. `colour_store._save`'s bare `except OSError` covers it.
+- **`_effective_colour`'s preloaded map does not change native semantics wrongly.** `routes.py:206-208` uses `if stored is not None`, so an empty store still takes the preloaded branch; `SessionsHandler` passes it (`:316`, `:323`), `TerminalProbeHandler` does not and gets the per-id read. `blue → sky` via `_TAB_COLOUR_ID` (`providers/claude.py:104-111`), which is what the new Galata seed at `ui-tests/jupyter_server_test_config.py:113-121` and `ASSISTANTS_OWN` in the spec depend on.
+- **Fresh-machine and upgrade journeys.** No colour file → `_read` (`colour_store.py:39-60`) returns `({}, set())` and the GET answers `{"colours": {}, "overrides": []}`. A pre-1.0.0 file with no `overrides` key returns an empty set, so nothing is offered for release and re-picking on the tab re-captures it - `held` at `terminals.ts:329-332` is false because `isOverride` is false, which is the clause that makes the re-pick land. Both covered by pytest and by `colour.spec.ts:236-246`.
+
+Journeys not verified: the Galata tier - per instruction I did not rebuild, so `ui-tests/tests/colour-override.spec.ts` was read, not executed. Read against my findings, none of the five cases has two writes in flight, a GET straddling a write, or a `forget` overlapping a `set`, so all four defects are invisible to it.

@@ -44,9 +44,8 @@ const PREAMBLE = `
 Repo: ${REPO} - a JupyterLab 4 extension consolidating four AI code assistant panels behind a provider registry.
 
 MANDATORY first reads, in this order:
-1. ${REPO}/docs/research-source-extensions.md - verified mechanism maps of the three source extensions and the Gemini CLI; capability matrix; coupling points; environment gotchas
-2. ${REPO}/docs/acc-crit-jupyterlab-ai-code-assistants.md - the acceptance criteria; your work must satisfy the sections named in your task
-3. ${REPO}/.claude/CLAUDE.md - project rules
+1. ${REPO}/docs/acc-crit-jupyterlab-ai-code-assistants.md - the acceptance criteria; your work must satisfy the sections named in your task
+2. ${REPO}/.claude/CLAUDE.md - project rules
 
 Reference sources (read what your task needs, port mechanisms not files):
 - BASE (architecture to generalise): /home/lab/workspace/private/jupyterlab/jupyterlab_claude_code_extension

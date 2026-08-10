@@ -6,6 +6,15 @@
 
 import { ILaunchMode } from './types';
 
+/** A resolved launch mode, with what to call it and whether to warn. */
+export interface IResolvedLaunchMode {
+  mode: ILaunchMode;
+  /** What the menu should call it - the value, or the mode's own label. */
+  label: string;
+  /** Whether this widens what the assistant may do without asking. */
+  unsafe: boolean;
+}
+
 /**
  * The single launch-mode token for one action, or undefined for a plain launch.
  *
@@ -42,4 +51,43 @@ export function resolveLaunchMode(
     }
   }
   return undefined;
+}
+
+/**
+ * The mode a PLAIN launch would carry right now, as a descriptor entry.
+ *
+ * The panel marks and labels its plain menu items from this. A mode left on in
+ * settings applies to the plain items too, so deciding the warning glyph from
+ * the menu's `force` argument instead puts it on the safer-looking of two
+ * entries that build an identical launch - and leaves the one the user clicks
+ * unmarked. Answers the entry rather than the token so the caller can use the
+ * assistant's own wording.
+ */
+export function resolvedLaunchModeEntry(
+  launchModes: ILaunchMode[],
+  values: Record<string, boolean | string>
+): IResolvedLaunchMode | null {
+  const token = resolveLaunchMode(launchModes, values);
+  if (!token) {
+    return null;
+  }
+  const [id, value] = token.split('=');
+  const mode = launchModes.find(m => m.id === id);
+  if (!mode) {
+    return null;
+  }
+  // A boolean mode with a menu label IS the assistant's skip-approval switch;
+  // an enum only widens on the values its provider declared. `plan` resolves
+  // to a mode and is stricter than the default, so "resolved at all" is the
+  // wrong question to ask about danger.
+  const unsafe = value
+    ? (mode.unsafeValues ?? []).indexOf(value) !== -1
+    : !!mode.menuLabel;
+  // Name the VALUE where there is one - three enum values sharing the mode's
+  // title render as one indistinguishable label.
+  return {
+    mode,
+    label: value ?? mode.menuLabel ?? mode.title,
+    unsafe
+  };
 }

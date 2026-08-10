@@ -77,7 +77,7 @@ _UUID_RE = re.compile(
 # on every start and a real archive reaches the app-server, so keep a generous
 # margin rather than tuning to the fast path.
 _CLI_TIMEOUT_S = 30
-# Columns ``_list_threads`` needs; anything missing in an older/newer schema is
+# Columns ``_threads_from_db`` needs; anything missing in an older/newer schema is
 # selected as NULL so one query shape serves every known generation.
 _THREAD_COLUMNS = (
     "id",
@@ -472,11 +472,8 @@ class CodexStore(SessionStore):
                 # Codex's index records no per-thread turn count, and deriving
                 # one would mean opening every rollout on every 30s poll.
                 "message_count": 0,
-                "summary": current["preview"] or current["first_user_message"],
                 "model": current["model"],
                 "tokens_used": current["tokens_used"],
-                "created": current["created_ms"] or None,
-                "modified": current["updated_ms"] or None,
                 "file_mtime": current["recency_ms"],
                 "git_branch": current["git_branch"],
                 "live": cwd in active,

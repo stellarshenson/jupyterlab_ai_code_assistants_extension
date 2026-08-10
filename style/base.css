@@ -182,10 +182,13 @@
   min-height: 0;
 }
 
+/* color2, not color3: this is the only content a new user sees, and color3
+   measures 2.68:1 on the stock light theme - below the 4.5:1 AA needs for
+   body text. color2 is 4.59:1. */
 .jp-AiAssistantsPanel-empty,
 .jp-AiAssistantsPanel-emptySection {
   padding: 8px 12px;
-  color: var(--jp-ui-font-color3);
+  color: var(--jp-ui-font-color2);
   font-style: italic;
 }
 
@@ -310,13 +313,28 @@
   background: var(--jp-layout-color3);
 }
 
+/* Flex line: the TEXT span ellipsises, the badges after it are flex: none
+   siblings that survive truncation. Ellipsising the whole name span clipped
+   the branch count and the "bg" chip away entirely on a long project name at
+   sidebar width - measured with the badge box at x=1083 against a clip edge at
+   x=913 - so the row lost the one marker saying a click JOINS a running worker
+   (DEF-41). The Manage Sessions popup's branch rows carry the same structure,
+   for the same reason. */
 .jp-AiAssistantsPanel-name {
   flex: 1 1 auto;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  display: flex;
+  align-items: center;
   font-size: var(--jp-ui-font-size1);
   color: var(--jp-ui-font-color1);
+}
+
+.jp-AiAssistantsPanel-nameText {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .jp-AiAssistantsPanel-dot,
@@ -329,27 +347,27 @@
 }
 
 .jp-AiAssistantsPanel-dot {
-  background-color: var(--jp-success-color1);
-  box-shadow: 0 0 4px var(--jp-success-color1);
-
-  /* Softened a touch - full saturation reads too loud next to row text. */
-  opacity: 0.75;
+  /* color0, at full opacity. This dot is the ONLY graphic for "a process is
+     running here", so WCAG 1.4.11's 3:1 applies to it; softened over color1 it
+     measured 2.12:1 on the stock light theme. color0 is the darker token, so
+     it reads quieter than a saturated color1 while clearing the bar. */
+  background-color: var(--jp-success-color0);
+  box-shadow: 0 0 4px var(--jp-success-color0);
 }
 
 .jp-AiAssistantsPanel-dotPlaceholder {
   background-color: transparent;
 }
 
-/* Branch icon plus conversation count, hugging the name text inside the
-   ellipsised name span (not flexed to the row edge). Also the Manage Sessions
-   popup's bare fork marker, where it is a flex child instead - see the
-   `.branchLabel >` override further down.
+/* Branch icon plus conversation count, hugging the name text on the name span's
+   flex line (not flexed to the row edge). Also the Manage Sessions popup's bare
+   fork marker - see the `.branchLabel >` override further down, twin of the
+   `.name >` one below.
    line-height must be its own, not the row's 24px: an inline-flex box whose
-   text item inherits 24px becomes 24px tall, and vertical-align: middle then
-   grows the name span's line box past the fixed row height - the last row of a
-   list overflows it by 1px and classic-scrollbar platforms paint a full
-   arrow-button scrollbar on a list that visually fits. Same value as the bg
-   badge below. */
+   text item inherits 24px becomes 24px tall, which grows the name span past the
+   fixed row height - the last row of a list overflows it by 1px and classic-
+   scrollbar platforms paint a full arrow-button scrollbar on a list that
+   visually fits. Same value as the bg badge below. */
 .jp-AiAssistantsPanel-branchBadge {
   display: inline-flex;
   align-items: center;
@@ -387,6 +405,13 @@
   vertical-align: middle;
 }
 
+/* Both badges are flex items on the name line - never shrunk, never clipped
+   (DEF-41). Twin of the `.branchLabel >` override in the popup below. */
+.jp-AiAssistantsPanel-name > .jp-AiAssistantsPanel-branchBadge,
+.jp-AiAssistantsPanel-name > .jp-AiAssistantsPanel-bgBadge {
+  flex: 0 0 auto;
+}
+
 .jp-AiAssistantsPanel-favStar {
   flex: 0 0 auto;
   display: inline-flex;
@@ -395,9 +420,10 @@
   width: 14px;
   height: 14px;
 
-  /* Dim the standard jp-icon3 star so the favourite marker is quiet, not an
-     alarm - lowers its visual weight against the row text. */
-  opacity: 0.5;
+  /* 0.8, not 0.5: the star is the only graphic marking a favourite, so 1.4.11
+     applies here too and half opacity measured 2.17:1. Still quieter than the
+     row text, which is what the dimming was for. */
+  opacity: 0.8;
 }
 
 .jp-AiAssistantsPanel-favStar svg {
@@ -868,11 +894,18 @@
    values line up across rows; the star column sits before it. */
 .jp-AiAssistantsPanel-rowTime {
   flex: 0 0 auto;
-  width: 4em;
+
+  /* 4.5em, not 4em: the longest label this column draws ("11mo ago") measures
+     47.4px against a 43.3px box, so the one column promised as fixed-width
+     right-aligned went ragged on exactly the oldest rows. Tabular figures keep
+     the digits aligned down the column, as the branch popup's twin already
+     does. */
+  width: 4.5em;
   white-space: nowrap;
   text-align: right;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size0);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Age emphasis: a row active within the last minute reads bright, a row idle
@@ -883,6 +916,10 @@
   color: var(--jp-brand-color1);
 }
 
-.jp-AiAssistantsPanel-row.jp-mod-stale {
+/* The dim marks the NAME, not the row. Applied to the row it multiplied
+   through the time column and the branch badge - both already color2 - to
+   2.45:1, and "idle over a week" is most rows in a real workspace, so the
+   panel's least legible text was also its most common. */
+.jp-AiAssistantsPanel-row.jp-mod-stale .jp-AiAssistantsPanel-name {
   opacity: 0.65;
 }

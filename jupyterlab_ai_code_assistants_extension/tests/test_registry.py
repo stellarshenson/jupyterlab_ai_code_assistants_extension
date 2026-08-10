@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib
 import itertools
+import json
+from pathlib import Path
 import sys
 
 import pytest
@@ -189,9 +191,19 @@ def test_legacy_source_maps_onto_this_extension_keys(provider_id):
         return
     assert legacy.plugin_id
     assert legacy.state_file
+    schema = json.loads(
+        (
+            Path(__file__).resolve().parents[2] / "schema" / "plugin.json"
+        ).read_text(encoding="utf-8")
+    )
     for old, new in legacy.settings_map.items():
         assert old
         assert new.startswith(f"providers.{provider_id}.")
+        # And it must be a key the shipped schema declares. A target that no
+        # longer exists is written into a key nothing reads, and the migration
+        # marker commits in the same call - so the carried-over value is lost
+        # with no retry, silently.
+        assert new in schema["properties"], new
 
 
 def test_cli_path_is_probed_per_call(monkeypatch):

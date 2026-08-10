@@ -33,13 +33,14 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 - **Conversation switcher** - a right-click "Switch and Manage Sessions" submenu lists a project's other conversations by name and short id with last-activity time; "Manage Sessions..." opens a searchable popup over the full list with multi-select delete and per-row open and copy-id buttons
 - **Branch session** - fork the current conversation into a new named session via the right-click menu; each assistant forks its own way (Claude's native `--fork-session`, Codex's `codex fork`, server-side copies for Kimi and Gemini) behind the same menu item
 - **Launch modes under each assistant's own name** - Claude's skip-permissions, Codex's approval bypass, Kimi's `--yolo`, Gemini's YOLO and approval modes; unsafe variants carry a warning glyph
-- **Coloured terminal tabs** - each session's colour tints its terminal tab via the companion `jupyterlab_colourful_tab_extension` (installed automatically). Assistants without a colour concept get a stable colour from the extension's own store, and a branched session inherits its parent's colour
+- **Coloured terminal tabs** - each session's colour tints its terminal tab via the companion `jupyterlab_colourful_tab_extension` (installed automatically). Claude's own `/color` supplies its default, Kimi derives a stable colour from the conversation id; Codex and Gemini have no colour of their own until you set one, and a branched session inherits its parent's colour, which it keeps even if the parent's colour later changes or is reset
+- **Your own tab colour wins** - set a colour on a terminal tab and the extension remembers it for that conversation, overriding whatever the assistant chose. `Reset Tab Colour (n)` in the session's right-click menu hands back every colour you set by hand on that project's conversations, and appears once there is one to hand back. Use it rather than the tab menu's own Clear, which will not release a stored colour. A Codex or Kimi conversation that has never been resumed cannot be tracked yet, so a colour set on its tab is not kept
 - **Favorites** - star projects you keep coming back to via the right-click menu; favourites from the standalone extensions are migrated on first run
 - **Remove and clean up** - drop a project's history or a project's extra parallel sessions from the right-click menu, confirmation dialog first; removed files honour JupyterLab's "move files to trash" setting
 - **Activity at a glance** - each row shows its last activity in an aligned column; rows active within the last minute light up, rows idle for over a week dim, and rows with parallel conversations show a branch icon with the count
 - **Remote control indicator and background agents** (Claude) - a green dot marks sessions actively under remote control, and a conversation held by a running background agent shows a `bg` chip; clicking attaches to the agent instead of copying it
 - **Search** - fuzzy filter per panel, toggled by the funnel button
-- **Presentation modes** - label rows by session name, folder name, or path relative to the JupyterLab root
+- **Presentation modes** - label rows by session name or by path relative to the JupyterLab root
 - **Conflict-safe upgrade** - if a retired standalone extension is still installed, its panel wins and this extension stands down for that assistant instead of showing a duplicate
 - **Auto-disabled when absent** - an assistant whose CLI is not on `PATH` does not show a panel
 
@@ -73,6 +74,8 @@ This package supersedes `jupyterlab_claude_code_extension`, `jupyterlab_codex_ex
 ```bash
 pip uninstall jupyterlab_claude_code_extension jupyterlab_codex_extension jupyterlab_kimi_code_extension
 ```
+
+Tab colours stored by versions of THIS extension before 1.0.0 are carried over and keep tinting their tabs, but `Reset Tab Colour` will not offer them: the store from that version cannot tell a colour you set from one a branch inherited, and offering the wrong one would strip a branch of the colour it was forked with. Set the colour on that tab once more and it becomes yours to reset.
 
 While a standalone extension is still installed, its panel is shown and this extension's panel for that assistant stays out of the way.
 

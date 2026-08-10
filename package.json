@@ -1,6 +1,6 @@
 {
     "name": "jupyterlab_ai_code_assistants_extension",
-    "version": "0.6.17",
+    "version": "1.0.8",
     "description": "Jupyterlab extension to replace individual jupyterlab_*_code_extension and integrate into one, that offers joint capability, joint settings page and individual right toolbar panels per code assistant, with the ability in settings to decide which code assistant support is on (default - all are enabled)",
     "keywords": [
         "jupyter",
@@ -85,7 +85,6 @@
         "eslint-plugin-prettier": "^5.0.0",
         "globals": "^15.0.0",
         "jest": "^29.2.0",
-        "mkdirp": "^1.0.3",
         "npm-run-all2": "^7.0.1",
         "prettier": "^3.0.0",
         "rimraf": "^5.0.1",

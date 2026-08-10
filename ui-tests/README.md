@@ -35,7 +35,18 @@ ui-tests/.venv/bin/jupyter labextension list
 
 `jupyterlab_ai_code_assistants_extension` must be listed `OK`, and `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension` must be absent. Never uninstall anything from your own environment to achieve that - a fresh venv gives it for free.
 
-Everything the running server reads or writes is redirected into `ui-tests/.scratch`: the HOME each provider resolves its store from, this extension's state directory, Jupyter's config, data and runtime directories, and a directory of stub assistant binaries at the front of `PATH`. The scratch tree is swept before the server starts (in `webServer.command`) and again in `global-teardown.js`.
+Everything the running server reads or writes is redirected into `ui-tests/.scratch/<port>`: the HOME each provider resolves its store from, this extension's state directory, Jupyter's config, data and runtime directories, and a directory of stub assistant binaries at the front of `PATH`. The scratch tree is swept before the server starts (in `webServer.command`) and again in `global-teardown.js`.
+
+Every directory a run owns is keyed by its port - `.scratch/<port>`, `test-results/<port>`, `playwright-report/<port>` - so two suites on one machine cannot delete each other's fixtures or artefacts. Two runs must hold different ports to both start, which is what makes the port a safe key.
+
+The redirect that matters most is `HOME`, and it is set in `webServer.env` rather than in `jupyter_server_test_config.py`. Jupyter resolves its config search path - and loads any `~/.jupyter/jupyter_lab_config.py` it finds - before that file executes, so a `HOME` set there arrives too late to keep the developer's live config out. To confirm the isolation on your own machine:
+
+```sh
+cd ./ui-tests
+HOME="$PWD/.scratch/8888/home" PATH="$PWD/.venv/bin:$PATH" jupyter --paths
+```
+
+The `config:` list must name `.scratch/8888/home/.jupyter` and must not name your own `~/.jupyter`.
 
 ## Run the tests
 

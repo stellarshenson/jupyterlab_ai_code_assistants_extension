@@ -6,3 +6,5 @@ node_modules
 jupyterlab_ai_code_assistants_extension
 eslint.config.mjs
 .venv
+tmp
+graphify-out

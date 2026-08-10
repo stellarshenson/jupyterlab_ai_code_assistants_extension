@@ -1,0 +1,278 @@
+UX-DESIGNER ADVERSARY - WHOLE-REPO CONFIRMING ROUND 6
+jupyterlab_ai_code_assistants_extension v1.0.7 (uncommitted, 114 changed files)
+Lens: friction, hierarchy, focus, accessibility, safety cues, copy
+Date: 2026-08-10
+
+VERDICT: DO-NOT-SHIP
+
+Seven findings, none of them in docs/defects.md, none of them DEF-74. Two are
+regressions the round-6 batch introduced or left standing; five are proof-tier
+findings about what the new rendered tier actually asserts.
+
+
+WHAT I COULD NOT RENDER
+-----------------------
+I was denied Galata this round, so every visual claim below is read from
+source, CSS and the committed spec files. Specifically I could NOT:
+
+- measure any computed style or bounding box in a real browser
+- observe the context menu's rendered icon column
+- confirm that ui-tests/tests/panel-regressions.spec.ts is green as reported
+
+Every finding below is therefore grounded in code text and CSS cascade
+reasoning, and each says which. Where a claim depends on layout I say so.
+
+
+RE-MEASURED BASELINES
+---------------------
+- pytest -q                 163 passed, 44 warnings, 8.37s        MATCHES
+- npx jest                  119 passed, 7 suites, 2.709s          MATCHES
+- npx tsc --noEmit          exit 0                                MATCHES
+
+I did not run eslint, prettier, stylelint, acc-crit or Galata: three are
+outside this lens and the last is forbidden to me.
+
+
+FINDING 1 - MAJOR - FACT
+The two destructive N-scaling routes run under the 60s ceiling that DEF-72's
+own docstring exempts them from. No caller in the tree passes a signal.
+
+src/core/request.ts:20-25 states the rule in as many words: "It bounds
+SINGLE-shot routes. Two server paths scale with N and can exceed it honestly:
+a project DELETE runs one CLI invocation per conversation (CodexStore._dispose,
+~0.7s each measured, 30s each worst case) ... A caller that knows it is
+starting such a sweep passes its own `signal` and gets no ceiling from here."
+
+`grep -rn "signal" src/ --include=*.ts` outside src/core/request.ts and the
+test tier returns only comments. Neither named caller passes one:
+
+- src/core/panel.ts:703-711  _removeProject -> DELETE {method, body}
+- src/core/panel.ts:775-786  _cleanupParallel -> DELETE {method, body,
+                             session_ids}
+
+Server side confirms the N scaling. providers/codex.py:589-619 `_dispose`
+loops `for tid in thread_ids` calling `_dispose_thread`, each a subprocess
+capped at `_CLI_TIMEOUT_S = 30` (line 79, line 570). `remove()` (line 621)
+feeds it EVERY thread in the project; `delete_branches()` (line 637) feeds it
+the cleanup's selection. So the ceiling is crossed by roughly 86 conversations
+at the measured 0.7s each, or by two slow disposals at the worst case.
+
+User-visible consequence, in order of harm:
+  a. A destructive operation that SUCCEEDED reports failure. The catch in
+     _removeProject paints "Could not remove \"<name>\" - try again."
+     (panel.ts:717) while the server keeps deleting.
+  b. "try again" is an instruction to re-issue a destructive sweep against a
+     project mid-deletion.
+  c. `await this._colours.forget(data.removed_ids ?? ids)` (panel.ts:789) is
+     never reached on the timeout path, so every conversation the server did
+     delete keeps its stored tint forever. The colour store accumulates dead
+     ids with no reclaim path.
+  d. The cleanup dialog swaps to "Cleanup failed: Request to
+     providers/codex/sessions timed out after 60000 ms" - technically true,
+     and it describes the client, not the outcome.
+
+This is a regression of the round-6 batch: before DEF-72 landed, these calls
+were unbounded and completed. The docstring anticipated it precisely and the
+callers were not updated to match.
+
+
+FINDING 2 - MAJOR - FACT
+"Could not reach the server - retrying." is the branch-failure copy on three
+of the four providers, and it is false on all three.
+
+`_showError` (panel.ts:604-608) hardcodes that string. Its callers on the
+branch paths:
+
+  panel.ts:995   _branchByNativeCommand  catch -> _showError
+  panel.ts:1044  _branchByServerCopy     catch -> _showError (non-400 branch)
+
+versus the fourth path:
+
+  panel.ts:968   _branchByNativeFlag     catch -> _showActionError(
+                 'Could not branch this session - try again.', err)
+
+Mapped onto the registry (grep forkStrategy in src/providers/): claude is
+`native-flag` and gets the correct copy; codex is `native-command`, kimi and
+gemini are `server-copy` and all three get "Could not reach the server -
+retrying." for a branch the server reached and refused. Nothing retries a
+branch - the 30s poll only re-lists sessions.
+
+DEF-53 named this exact copy as defective in its own headline ("the copy was
+wrong for the case as well, reading 'Could not reach the server - retrying'
+for a launch that reached the server and was refused"). Its closure note
+(docs/defects.md:198) states these two sites were "checked before touching the
+helper" and "deliberately left alone" - but the justification given covers
+only the ERASURE half ("their banner survives to the next poll"). The copy
+half was never addressed and still applies to them verbatim.
+
+Same false copy also carries two failures that have nothing to do with the
+server at all - Lumino command rejections at panel.ts:2053
+(`terminal:create-new`) and panel.ts:2075 (`filebrowser:go-to-path`).
+
+The asymmetry is the sharpest part: one user action, "Branch Session", tells
+the truth on Claude and lies on Codex, Kimi and Gemini.
+
+
+FINDING 3 - MINOR - FACT
+Safety-cue inversion between the two destructive context-menu entries. DEF-45
+is satisfied - both are marked - but the more destructive of the pair now
+carries the quieter glyph.
+
+  panel.ts:2128  cleanup-parallel -> icon: warningIcon
+  panel.ts:2210  remove           -> icon: removeIcon
+
+icons.ts:61 gives warningIcon `class="jp-icon-warn0"` (the theme's caution
+orange). icons.ts:47 gives removeIcon `class="jp-icon3"` (the neutral grey,
+measured rgb(97,97,97) light / rgb(189,189,189) dark by DEF-40's own
+investigation).
+
+Read against the dialog copy each opens: cleanup removes N parallel sessions
+and "The current conversation is kept" (panel.ts:729); remove "drops the
+entire project history and every conversation it holds" (panel.ts:750). The
+lesser action wears the alarm colour, the greater one wears the neutral grey.
+
+DEF-40's whole argument was that a caution glyph rendered in the neutral grey
+is the least conspicuous thing in the menu. That argument now applies to the
+panel's single most destructive item. The Galata proof for DEF-45 asserts
+glyph PRESENCE and a non-zero box only, so it renders green over the
+inversion. Not in the ledger.
+
+
+FINDING 4 - MINOR - FACT
+DEF-40's rendered proof does not measure what the closure note claims, and its
+size assertion cannot fail.
+
+docs/defects.md:202 records: "the warning glyph's computed `fill` differs from
+a neutral sibling read in the same page, and its box is not smaller than its
+siblings'."
+
+What ui-tests/tests/panel-regressions.spec.ts actually does:
+
+  - `neutralFill` is read from the SAME "+" button before the mode is armed
+    (line ~140), not from a sibling. It is the button's own add glyph one
+    state earlier.
+  - The size check is `expect(box.width).toBeGreaterThanOrEqual(14)` against
+    an absolute floor. No sibling box is ever read.
+
+The size assertion is vacuous. panel.ts:316 sets
+`newBtn.className = 'jp-AiAssistantsPanel-iconButton'`, and style/base.css:74
+pins `.jp-AiAssistantsPanel-iconButton svg { width: 14px; height: 14px; }`.
+A CSS declaration beats an SVG presentation attribute, so the 13x13 icon the
+defect was about would render at exactly 14x14 in that button and pass the
+assertion identically.
+
+The surface is also wrong. DEF-40 lived in the context MENU
+("the smallest glyph in the menu"), where style/base.css:549 sets only
+`vertical-align`, `display` and `margin` on `.lm-Menu-itemIcon svg` and the
+authored width therefore governs. The test never opens a menu.
+
+The substantive guard does exist and is sound - src/__tests__/panel.spec.ts:
+354-364 asserts the authored width/height of warningIcon, addIcon and
+branchIcon all equal "16". So DEF-40 is genuinely closed. What is wrong is the
+claim that the browser tier settles it: on the size dimension the browser tier
+adds nothing, and the ledger note says otherwise.
+
+
+FINDING 5 - MINOR - FACT
+DEF-72's RequestTimeoutError / isRequestTimeout have zero production
+consumers. `grep -rn "isRequestTimeout\|RequestTimeoutError" src/` outside
+src/core/request.ts returns only src/__tests__/request.spec.ts.
+
+request.ts:30-37 states the reason the type exists: "A distinct type on
+purpose. ServerConnection.NetworkError means the server is unreachable; this
+means it is reachable and slow, and a caller that cannot tell the two apart
+cannot report either honestly."
+
+No caller tells them apart. A 60s timeout reaches the user as one of:
+  - "Could not reach the server - retrying. <msg>"  (server IS reachable)
+  - "Could not remove \"<name>\" - try again. <msg>"
+  - "Cleanup failed: Request to ... timed out after 60000 ms"
+
+Only the third is honest, and it is honest by accident - it interpolates the
+raw message rather than branching.
+
+This is the shape DEF-70 was closed for: a type member with no producer and no
+consumer, justified by a distinction the code never draws. Here there IS a
+producer; what is missing is the consumer the docstring promises.
+
+
+FINDING 6 - MINOR - FACT
+DEF-41's rendered proof covers the branch badge only; the badge the defect was
+about is never rendered in the browser.
+
+DEF-41's headline names two markers and identifies which one matters:
+"the lost chip is the one saying a click JOINS a running worker" - the bg
+chip. The Galata test asserts `.jp-AiAssistantsPanel-branchBadge` and nothing
+else.
+
+The fixture cannot render the bg chip. panel.ts:1603 gates it on
+`this._descriptor.hasBgAgents && session.bg_id`, and
+ui-tests/jupyter_server_test_config.py's stub answers `agents` with `[]`, so
+no session carries a bg_id in the suite.
+
+Mitigating: style/base.css:410-411 puts both badges in ONE declaration
+(`flex: 0 0 auto`), so the layout fix is genuinely shared and proving one
+proves the mechanism. Aggravating: the bg chip is the wider of the two
+(base.css:395-407 adds a 1px border and 3px horizontal padding) and it renders
+AFTER the branch badge, so it is the one nearest the clip edge - which is why
+it was the one named in the defect.
+
+The claim "rendered proof for DEF-41" is therefore true of the mechanism and
+not of the marker the defect was written about.
+
+
+FINDING 7 - MINOR - FACT
+DEF-55's rendered proof never presses the exit in the state the defect
+existed in.
+
+The test holds the DELETE, asserts the footer button is visible and enabled,
+then calls `release!()` and only afterwards clicks it. The defect state -
+request hung, user presses the only way out - is never exercised. The spec's
+own comment ("the way out is only a way out if pressing it gets you out")
+describes a stronger assertion than the code makes.
+
+Reading the code for what that press would do: panel.ts:757-770 launches the
+Dialog and never awaits it; the try block continues independently. Pressing
+Close mid-flight disposes the dialog, and the in-flight continuation then
+writes `bar.value = 1` and `message.textContent` into a detached node - no
+throw, but no outcome reported anywhere either. On the failure branch
+`this._showError(err)` (panel.ts:806) paints Finding 2's false "retrying"
+banner into a panel whose dialog is already gone. So the untested state is
+also the one with the weakest reporting.
+
+
+CLOSURES CHECKED
+----------------
+HOLD, verified by reading:
+  DEF-30  colour.ts carries `_run(op)` and one `_chain` field; `_writeSeq`,
+          `_writeStart`, `_readSeq`, `_readAbsorbed`, `_current`, `_absorb`
+          are absent from the tree. load/set/forget all enter through _run.
+  DEF-31  _inheritColour gates on isPending, awaits load(), re-reads, falls
+          back to the click-time value.
+  DEF-42  panel.ts:15 imports MenuSvg, panel.ts:2291 constructs it.
+  DEF-51  both showDialog calls carry `defaultButton: 0` (panel.ts:663,
+          panel.ts:733).
+  DEF-56  filterBtn carries aria-pressed, kept in sync at panel.ts:483.
+  DEF-57  roving tabindex is real and complete - one stop per section
+          (panel.ts:1519-1524), focus moves the stop (panel.ts:1655-1660),
+          ArrowUp/ArrowDown/Home/End clamped not wrapped, Enter/Space open,
+          ContextMenu and Shift+F10 open the menu (panel.ts:1661-1710). The
+          usual failure mode of a roving tabindex - rows 2..n unreachable by
+          keyboard - is not present here.
+  DEF-71  panel.ts exports the four constants, index.ts imports them.
+  DEF-53  the ERASURE half holds at every site.
+
+HOLD WITH A QUALIFIED CLOSURE NOTE:
+  DEF-40  closed by the unit tier, not by the browser tier the note credits
+          (Finding 4).
+  DEF-41  closed for the branch badge; the bg chip is unrendered (Finding 6).
+  DEF-55  closed for footer presence; the press-while-hung case untested
+          (Finding 7).
+  DEF-45  closed as written; the fix introduced a hierarchy inversion the
+          defect did not anticipate (Finding 3).
+  DEF-53  the COPY half is still open at three call sites (Finding 2).
+
+NOT RE-REPORTED: DEF-74, deliberately deferred.
+
+COULD NOT VERIFY: everything requiring a browser - the 26/26 Galata run, all
+computed styles, all bounding boxes.

@@ -178,3 +178,46 @@ def test_gemini_registry_and_marker_agree_on_one_row(scratch_stores, stores):
     # Registry entry gone, marker left: still exactly one row.
     rows = stores["gemini"][0].list_sessions()
     assert [row["encoded_path"] for row in rows] == [GEMINI_SHORT_ID]
+
+
+def test_concurrent_writers_never_lose_a_write_or_publish_a_torn_file(tmp_path):
+    """Two servers under one data directory is the default, not an edge case.
+
+    ``JUPYTER_DATA_DIR`` defaults to a shared ``~/.local/share/jupyter``, so a
+    second Jupyter server writes the same state files. A temp name shared
+    between writers makes the rename atomic only against itself: one writer's
+    buffered content lands inside the file the other already published, and
+    the loser's own replace fails on a path that no longer exists.
+    """
+    import threading
+
+    from jupyterlab_ai_code_assistants_extension.core.store import (
+        load_json,
+        write_json_atomic,
+    )
+
+    target = tmp_path / "state" / "claude.json"
+    errors: list[BaseException] = []
+    torn: list[object] = []
+
+    def writer(tag: int) -> None:
+        for i in range(40):
+            try:
+                write_json_atomic(target, {"writer": tag, "n": i})
+            except BaseException as err:  # noqa: BLE001 - the assertion is below
+                errors.append(err)
+            data = load_json(target)
+            if data is not None and not isinstance(data.get("n"), int):
+                torn.append(data)
+
+    threads = [threading.Thread(target=writer, args=(t,)) for t in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert torn == []
+    assert isinstance(load_json(target), dict)
+    # No temp file outlives its write.
+    assert list(target.parent.glob("*.tmp")) == []

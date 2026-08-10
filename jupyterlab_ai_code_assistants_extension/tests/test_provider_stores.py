@@ -1,9 +1,8 @@
 """Per-adapter store scans against fixture trees.
 
 Each assistant keeps its history in a different shape, and the store adapter is
-the only place that shape is understood. The trees below mirror the layouts
-recorded in ``docs/research-source-extensions.md``; nothing here reads a real
-assistant directory.
+the only place that shape is understood. The trees below mirror the layouts of the
+retired standalone extensions; nothing here reads a real assistant directory.
 """
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ import pytest
 
 from jupyterlab_ai_code_assistants_extension.core import state
 from jupyterlab_ai_code_assistants_extension.core import store as store_module
+from jupyterlab_ai_code_assistants_extension.core.store import SessionNotFound
 from jupyterlab_ai_code_assistants_extension.providers import codex as codex_provider
 from jupyterlab_ai_code_assistants_extension.providers import gemini as gemini_provider
 from jupyterlab_ai_code_assistants_extension.providers.claude import ClaudeStore
@@ -64,6 +64,40 @@ def claude(scratch_stores):
     store = ClaudeStore()
     store.provider_id = "claude"
     return store, scratch_stores / "claude"
+
+
+def test_a_malformed_number_costs_a_row_a_field_not_the_whole_listing(
+    claude, scratch_stores
+):
+    """The assistants write these files; the panel only reads them.
+
+    ``updatedAt`` is compared and subtracted, so an ISO string there - from a future or older CLI, in a directory
+    Claude never prunes - used to raise out of the executor and 500 the
+    sessions poll for EVERY project, on every tick, with nothing naming the
+    file. One unusable value must cost its own field and nothing else.
+    """
+    store, root = claude
+    sid = new_uuid()
+    write_claude_tree(root, [{"id": sid, "cwd": PROJECT_PATH, "turns": 1}])
+
+    states = root / "sessions"
+    states.mkdir(parents=True, exist_ok=True)
+    (states / "999.json").write_text(
+        json.dumps(
+            {"cwd": PROJECT_PATH, "pid": 999, "updatedAt": "2026-01-01T00:00:00Z"}
+        ),
+        encoding="utf-8",
+    )
+    index = root / "sessions-index.json"
+    if index.exists():
+        data = json.loads(index.read_text(encoding="utf-8"))
+    else:
+        data = {}
+    index.write_text(json.dumps(data), encoding="utf-8")
+
+    rows = store.list_sessions()
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == sid
 
 
 def test_claude_lists_one_row_per_project(claude, scratch_stores):
@@ -468,6 +502,15 @@ def test_kimi_derived_colour_is_stable_and_in_vocabulary(kimi):
     colour = derived_colour(session)
     assert colour in ("rose", "peach", "lemon", "mint", "sky", "lavender")
     assert derived_colour(session) == colour
+    # Bound to the SAME literals Jest pins for the TypeScript hash
+    # (src/__tests__/colour.spec.ts). Both runtimes hash the same string over
+    # the same ordered six-colour vocabulary, and nothing else forces them to
+    # agree: reorder either list and a fork inherits the server's colour while
+    # the tab is immediately repainted the frontend's, one visible flip per
+    # fork, with every test still green.
+    assert derived_colour("session_demo") == "peach"
+    assert derived_colour("11111111-1111-4111-8111-111111111111") == "peach"
+    assert derived_colour("22222222-2222-4222-8222-222222222222") == "lavender"
     assert kimi[0].default_colour(session) == colour
 
 
@@ -494,7 +537,9 @@ def test_gemini_scans_the_registry_and_chat_files(gemini):
     assert row["encoded_path"] == GEMINI_SHORT_ID
     assert row["session_id"] == session
     assert row["message_count"] == 4
-    assert row["first_prompt"] == "turn 0"
+    # The first prompt is read for the BRANCH label, not put on the row - no
+    # client reads it there.
+    assert store.list_branches(GEMINI_SHORT_ID) is not None
 
 
 def test_gemini_skips_subagent_transcripts(gemini):
@@ -553,10 +598,13 @@ def test_gemini_launch_argv_resumes_by_chat_file_never_by_resume(gemini):
     assert argv == ["/bin/gemini", "--session-file", str(chat_file)]
     assert "--resume" not in argv
 
-    # A conversation whose file is gone degrades to a bare launch rather than
-    # opening whichever one an index would have landed on.
+    # A conversation whose file is gone REFUSES the launch: a bare ``gemini``
+    # would open a brand-new conversation in the clicked row's place, which
+    # reads as the resume that was asked for. The route turns this into the
+    # 404 the panel already renders.
     chat_file.unlink()
-    assert store.launch_argv("/bin/gemini", session_id=session) == ["/bin/gemini"]
+    with pytest.raises(SessionNotFound):
+        store.launch_argv("/bin/gemini", session_id=session)
 
 
 def test_gemini_launch_argv_starts_and_modes(gemini):
@@ -622,21 +670,23 @@ def test_gemini_remove_drops_only_the_conversations(gemini):
     assert (root / "projects.json").is_file()
 
 
+@pytest.mark.parametrize("node_comm", ["MainThread", "node-MainThread", "node"])
 def test_gemini_claims_only_a_node_process_that_is_actually_gemini(
-    gemini, monkeypatch
+    gemini, monkeypatch, node_comm
 ):
     """Every node process reports the same comm, so the argv decides.
 
-    ``node-MainThread`` is what ``/proc/<pid>/comm`` says for a plain ``node``
-    just as much as for the CLI, so a comm match alone claims ``npm run dev``
+    Whatever Node writes there is what a plain ``node`` writes too, so a comm match alone claims ``npm run dev``
     in a registered project as a running conversation - and the colour loop
     then writes that terminal's tab colour into gemini's store under a
     cwd-guessed id.
     """
     store, _root = gemini
-    # The comm read lives on the base contract, the cmdline read on gemini's
-    # own override - so each is patched where its module resolves it.
-    monkeypatch.setattr(store_module, "process_comm", lambda pid: "node-MainThread")
+    # Patched in gemini's own namespace, and over EVERY spelling Node uses for
+    # its main thread - `MainThread` up to Node 24, `node-MainThread` from 26.
+    # Pinning one of them here is what hid the version skew that made Gemini
+    # terminals unidentifiable on the Node releases the CLI supports.
+    monkeypatch.setattr(gemini_provider, "process_comm", lambda pid: node_comm)
     cmdlines = {
         11: cmdline("node", "/home/lab/project/node_modules/.bin/vite", "dev"),
         22: cmdline(

@@ -1,0 +1,94 @@
+I'll start by reading the adversary file and my round-1 report.
+
+`VERDICT: DO-NOT-SHIP (6 findings)` - round-1 finding 6 is not fixed: the installed terminado discards the `dimensions` kwarg, and I re-measured the same 5.15 s launch stall through the production code path.
+
+## (a) Round-1 findings, re-confirmed
+
+**1. Gemini comm gate - CLEARED (runtime-proven).** `_NODE_COMMS` at `providers/gemini.py:73`, consumed at `:866` in place of `super().owns_pid`. Ran the real bundle under both Nodes on this machine:
+```
+.nodeenv/bin/node (v24.19.0): comm='MainThread'       owns_pid=True
+node             (v26.6.0) : comm='node-MainThread'  owns_pid=True
+```
+`comm_name = "node-MainThread"` at `:429` now only feeds the candidacy filter at `core/routes.py:137`, which is satisfied by any non-empty string. Stale prose at `gemini.py:853` still asserts "the comm every node process reports is identical (`node-MainThread`)" - the fix's own comment two screens up contradicts it. Cosmetic.
+
+**2. Destructive routes on the IOLoop - CLEARED.** `SessionsHandler.delete` is `async def` with `run_in_executor` at `core/routes.py:334,361,373`; `SwitchHandler.post` at `:420,435`. Both lambdas capture correctly; no store call remains on the loop in either.
+
+**3. Malformed numbers killing the Claude listing - CLEARED (reproduced).** Guards at `providers/claude.py:353-354` and `:658-666`. Against a scratch store, an ISO-string `updatedAt` and a `True` now degrade to `0` instead of raising:
+```
+by_cwd: {'/tmp/proj': {'updated_at': 0, ...}, '/tmp/proj2': {'updated_at': 0, ...}}
+```
+`bool` is excluded explicitly, which the `or 0` idiom would otherwise let through.
+
+**4. Shared `.tmp` filename - CLEARED (measured).** `core/store.py:88-100`. Re-ran the three-writer/one-reader probe against a pre-seeded state file:
+```
+writer 0/1/2 errors=0   (was 297 of 900)
+reader unparseable=0 pins-missing=0   (was 9 of 600 empty)
+leftover: ['claude.json']
+```
+`unlink(missing_ok=True)` under `except BaseException` leaves no orphans. Residual, not re-raised as a finding: `state.toggle_favourite` (`core/state.py:95`) still lets an `OSError` out to a 500, unlike `write_pin`; with unique temp names that is now only a genuine disk failure, where surfacing it is defensible.
+
+**5. Codex fork toast - NOT CLEARED (inverted).** `src/core/panel.ts:1105` now reads *"That conversation is not the project's current one yet - it has no turn recorded."* That clause is Codex's reason. `_switchBranch` is shared by all four providers, and Claude's `switch` disagrees on `requested != current` for exactly one cause - `providers/claude.py:874-876`, the branch's recorded cwd not matching the project, with the pin deliberately withheld. So the copy that was wrong for Codex is now wrong for Claude, in the identical scenario. Scenario: Claude project whose folder was renamed → switch to a branch whose transcript records the old cwd → the toast tells the user the conversation has no turn recorded, when it has a full transcript and a foreign cwd. My round-1 fix was "make the copy provider-neutral"; naming neither reason is the fix.
+
+**6. Init waiter burning 5 s at 24x80 - NOT CLEARED (runtime-disproven).** `core/routes.py:746-748` passes `dimensions=(1, 1)`. terminado 0.18.1 discards it: `TermManagerBase.new_terminal` does `options.update(kwargs)` then constructs `PtyWithClients(argv, env, cwd)` - `dimensions` reaches only `make_term_env(**options)`, which absorbs it into `**kwargs` and drops it. Measured directly:
+```
+mgr.new_named_terminal(..., dimensions=(1,1))
+  -> ptyproc.getwinsize() = (24, 80)
+```
+Then, through `_wrap_with_init` and a real pty:
+```
+client renders 24x80 : attach is a no-op (terminado skips identical size)
+                       assistant appeared after 5.15s
+client renders 40x120: attach resizes
+                       assistant appeared after 0.32s
+```
+terminado makes it worse than round 1 assumed: `PtyWithClients.resize_to_smallest` (`terminado/management.py:82-84`) itself short-circuits on an unchanged size, so no `ioctl` is issued at all, let alone a SIGWINCH.
+
+The suite reports this fixed because `test_a_launch_spawns_off_the_default_pty_size` asserts against `_FakeTerminalManager.create(self, shell_command=None, cwd=None, dimensions=None)` (`tests/test_routes.py:345,378`) - a stub whose signature was widened to accept the kwarg the real manager throws away. Green test, unchanged behaviour.
+
+Fix: after `terminal_manager.create(...)` at `routes.py:746`, resolve the terminal and set the size server-side (`terminal_manager.get_terminal(name).ptyproc.setwinsize(1, 1)`) before answering - the browser attaches only after the frontend runs `terminal:open`, so the server wins the race. There is no route through `term_settings` either; it feeds `make_term_env` only.
+
+**7. `root_dir` of `/` - CLEARED.** `panel.ts:165-166` keeps `/`, `_currentFolder` at `:774-780` treats it as its own separator, `_pathUnderRoot` at `:1598` builds the prefix accordingly. `_newSession`'s `if (!projectPath) return` now sees `/`. (`_displayPath` at `:1580` still fails to strip a `/` root and returns the absolute path - correct enough to leave alone.)
+
+**8. One rejecting settings key - CLEARED.** Per-key `try/catch` at `src/index.ts:319-326`. The server-side marker still commits ahead of the frontend (`core/migrate.py:116,122`), so a key that rejects permanently is still lost - unchanged, and out of the scope of what I asked for.
+
+**On the withdrawn `reconcileColours` claim - partially revised.** The withdrawal stands while the panel is visible: `panel.ts:2206` arms the poll with `setInterval`, and `_fetch` re-enters `reconcileColours` at `:579` regardless of whether the previous pass ever settled. It does not stand while the panel is hidden. `onBeforeHide` stops the poll (`:277-279`), so the only re-entry is `TerminalManager`'s own timer, and that timer is re-armed solely in `reconcileColours`'s `finally` (`terminals.ts:385-389`). A `probe` that never settles - `requestProvider` sets no timeout - means the `finally` never runs and tinting is dead until the user reveals the panel again. Mechanism FACT; trigger (a connection that hangs rather than refuses) SUSPICION. Bounded and self-healing on the next show, so I would still not add a timeout for this alone - but it is the residual, and if you ever add one, `probe` is the call.
+
+## (b) New defects
+
+**N1. [MINOR] The 30 s poll can move keyboard focus to a different row than the one it left, and scrolls the list to it** - `src/core/panel.ts:1261-1265` and `:1314-1322`.
+
+`data-encoded-path` is not unique in the body: `_render` puts the same project into up to three sections (`:1295-1299`), all expanded by default (`:92-96`), and `_renderRow` stamps the attribute on every copy (`:1392`). `querySelector` returns the first in document order - the Favourites copy. Scenario: user tabs to a favourited project's row in the **All** section and scrolls; poll fires; focus lands on that project's **Favourites** row instead, and the bare `?.focus()` scrolls it into view, undoing `this._bodyEl.scrollTop = bodyScroll` set one line earlier. Fix: capture the section too (`closest('.jp-AiAssistantsPanel-section')?.dataset.section`) and scope the query to it, and use `focus({ preventScroll: true })` so the restored offsets stand. FACT.
+
+**N2. [MINOR] Gemini's safest launch mode wears the danger triangle, labelled with a word that does not name it** - `src/core/panel.ts:1698-1701,1725,1899-1900,1938-1941` against `src/providers/gemini.ts:68-74`.
+
+`_variantSuffix` falls back to `mode.title` because `approvalMode` declares no `menuLabel`, and `icon: () => (this._resolvedVariant() ? warningIcon : undefined)` fires for any non-default enum value. Scenario: user sets `providers.gemini.approvalMode: "plan"` - read-only, strictly safer than the default. Every plain menu item becomes `Resume (Approval mode)` / `New Gemini Session (Approval mode)` / `Normal (Approval mode)` with a warning triangle. Same rendering for `"yolo"`, which genuinely warrants it, so the marking no longer distinguishes the two. Fix: decide the glyph from a per-mode danger flag (or from the resolved *value* for an enum) rather than from "a mode resolved at all", and put the value in the suffix - `(plan)`, `(yolo)` - not the mode's title. FACT.
+
+**N3. [MINOR] The new + button tooltip reads "in ." at the file-browser root** - `src/core/panel.ts:307-311` against `:1573-1578`.
+
+`_displayPath` answers `'.'` for the root itself, and `'.'` is truthy so the `|| 'the current folder'` fallback never fires. Scenario: default JupyterLab, file browser at its root (the state every fresh session starts in) → hover + → *"New Claude Code session in ."*. The static title it replaced (`:312`) was correct there. Fix: treat `'.'` as empty at the call site, or have `_displayPath` answer `''` for the root and let the existing fallback do its job. FACT.
+
+**N4. [MINOR] The missing-CLI notification fires for assistants the user never installed, and blames PATH for a failed status probe** - `src/index.ts:241,245-261`.
+
+Two scenarios, both from `available` being false for reasons other than PATH:
+- Fresh machine, one assistant installed. All four providers default to `enabled: true` (`schema/plugin.json:36-83`), so the first `reconcile()` raises **three** 8-second warning toasts naming binaries the user has never heard of. The console line this was promoted from was the right register for that.
+- `probeStatus` fails - server extension not enabled, or a restart in flight - and sets `status = null` (`:130`). `statusFor` then answers null for every provider and `:241` reads that as `available = false`, so all four toasts claim "`claude` was not found on the Jupyter server's PATH" when the frontend never reached the server at all.
+
+Fix: notify only when the status probe SUCCEEDED and the provider's own `available` is false (`probe !== null && probe.available === false`), and consider gating the toast on the user having explicitly enabled that provider rather than on the default-on state. FACT for both paths; the fresh-machine count is arithmetic off the schema defaults.
+
+**N5. [MINOR] `SessionStore.fork`'s contract line was garbled by this sweep** - `core/store.py:313`: *"The default is unsupported by default - unsupported."* The `forkStrategy: none` it used to name is the value that was just added to the TS union (`src/core/types.ts:16-22`) and documented in `registry.py:64`, so the one docstring a provider author reads before overriding `fork` is now the one that no longer names it. Not runtime. Trivially fixed.
+
+## Tested and cleared
+
+- `dimensions=(1, 1)` reaching a real pty - **disproven at runtime**, see finding 6; terminado 0.18.1 / jupyter_server_terminals 0.5.4.
+- `pytest -q` → **149 passed**, matching the stated baseline.
+- Concurrent `write_json_atomic` from three processes → 0 exceptions, 0 unparseable reads, 0 orphan temp files (round 1: 297 exceptions, 9 empty reads).
+- `GeminiStore.owns_pid` under Node 24 and Node 26 with the real bundle in argv → True on both.
+- Claude's `_session_state_by_cwd` against a string `updatedAt` and a `True` → returns rows with `updated_at: 0`, no `TypeError`.
+- The `Reset Tab Colour` release is not undone by the next reconcile: the companion extension's `setColour` calls `releaseMenuColour` whenever `colourId` is truthy (`node_modules/jupyterlab_colourful_tab_extension/lib/index.js:381-387`), so a captured colour is already out of its localStorage before the release runs. The `_applyColour(widget, null)` calls do NOT release it, which is what the capture path relies on - both directions check out.
+- Kimi, Claude and Codex are native ELF binaries (`file -L`), so the Node-comm class of bug in finding 1 has no sibling; their `comm` names are all under the 15-char `/proc` truncation.
+- `_branchCache` cross-project leakage on a superseded menu open - the `path` guard at `panel.ts:570-573` holds for the A-slow/B-fast interleaving; the loser's write can only serve a later open of its own project.
+- `branchBadge` and `IHookContext` removal left no dangling references outside `popup.ts`'s own option (grep across `src/` and `style/`); `jp-AiAssistantsPanel-bgBadge` is still produced by `panel.ts:2189-2195` for every provider, and only Claude emits `bg_id`, so the rendering is unchanged.
+
+## Journeys I could not verify
+
+Anything needing an authenticated assistant (a real `codex fork`, a real `gemini --session-file` resume, `claude attach`); the Playwright suite, which I did not run - no claim above rests on a rendered panel. Findings N1-N3 are traced through the DOM/CSS contract rather than observed on screen.

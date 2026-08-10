@@ -13,6 +13,12 @@
  *   the id has to be discovered by diffing the branch list after launch
  * - `server-copy` - the CLI has no fork at all; the server copies the store
  *   entry, answers with the new id, and the launch resumes that id
+ *
+ * No `none` member. Python's `Capabilities` defaults `fork_strategy` to
+ * `"none"` and answers a fork against it with 400 `fork_unsupported`, but
+ * `forkStrategy` below is required, so a frontend descriptor cannot be silent
+ * about it - and the flag never crosses the wire, so no TS code could produce
+ * or read that value.
  */
 export type ForkStrategy = 'native-flag' | 'native-command' | 'server-copy';
 
@@ -48,6 +54,16 @@ export interface ILaunchMode {
   /** Menu label for the launch variant this mode produces, e.g.
    * `Skip Permissions`. Boolean modes only; absent means settings-only. */
   menuLabel?: string;
+  /** `enum` modes only: the values that WIDEN what the assistant may do
+   * without asking. The panel warns on these and names the value; every other
+   * value is a settings choice and is marked as one.
+   *
+   * Declared per provider rather than inferred, because "a mode resolved at
+   * all" is not the same question: Gemini's `plan` is read-only - stricter
+   * than the default - and marking it the same as `yolo` says nothing about
+   * either. A boolean mode needs no entry here; carrying a `menuLabel` is
+   * already its declaration that it skips approval. */
+  unsafeValues?: string[];
 }
 
 /** Everything the core needs to know about one assistant. Pure data - no
@@ -111,12 +127,11 @@ export interface ISession {
   favourite: boolean;
   /** Conversations of this project beyond the current one. */
   extra_sessions: number;
-  summary?: string;
-  first_prompt?: string;
-  created?: string | number | null;
-  modified?: string | number | null;
-  /** The conversation's own colour, for `colourSource: 'native'` providers.
-   * One of the six colour ids, or null. */
+  /** The colour the server resolved for this conversation: the user's stored
+   * override where there is one, otherwise the conversation's own colour for a
+   * `colourSource: 'native'` provider. The override half is resolved for every
+   * provider, so this is not a native-only field. One of the six colour ids,
+   * or null. */
   colour?: string | null;
   /** Remote control is active on this conversation (`hasRemoteControl`). */
   remote_control?: boolean;
@@ -153,11 +168,6 @@ export interface IStatusResponse {
   /** JupyterLab's own move-to-trash setting, read server-side, so dialogs say
    * which of the two a click means rather than reciting both. */
   delete_to_trash?: boolean;
-}
-
-export interface IFavouriteRequest {
-  project_path: string;
-  favourite: boolean;
 }
 
 export interface IFavouriteResponse {
@@ -198,12 +208,6 @@ export interface IBranchesResponse {
 export interface ISwitchResponse {
   requested: string;
   current: string | null;
-}
-
-export interface IForkRequest {
-  encoded_path: string;
-  session_id: string;
-  name?: string;
 }
 
 export interface IForkResponse {
@@ -247,7 +251,8 @@ export interface ITerminalProbeResponse {
   running: boolean;
   /** Conversation the running process holds, or null when unreadable. */
   session_id?: string | null;
-  /** That conversation's own colour (`colourSource: 'native'`). */
+  /** That conversation's colour as the server resolved it - stored override
+   * first, then its own colour for a `colourSource: 'native'` provider. */
   colour?: string | null;
   /** Working directories read from `/proc`, never from `PWD`. */
   cwds?: string[];
@@ -257,9 +262,7 @@ export interface ITerminalProbeResponse {
  * `keys` are settings this extension is to apply through the settings registry,
  * which the server has no writable handle on. */
 export interface IMigratedProvider {
-  provider_id: string;
   keys: Record<string, boolean | number | string>;
-  favourites: string[];
 }
 
 /** `POST migrate`. Idempotent - a second call reports an empty list. */
@@ -271,15 +274,14 @@ export interface IMigrateResponse {
  * by conversation id. */
 export interface IColourStoreResponse {
   colours: Record<string, string>;
+  /** Of those, the ids whose colour the user set by hand. The rest were
+   * written at fork time and are the branch's own identity. The server always
+   * sends it; a store written before the distinction existed sends an empty
+   * list, since its two origins are indistinguishable there. */
+  overrides?: string[];
 }
 
 // ------------------------------------------------------------------- hooks
-
-/** Everything a provider hook is handed about the row it is describing. */
-export interface IHookContext {
-  session: ISession;
-  descriptor: IProviderDescriptor;
-}
 
 /** Optional behaviour a provider module supplies on top of its descriptor.
  * Every hook is optional - a provider that supplies none renders the plain
@@ -289,13 +291,11 @@ export interface IProviderHooks {
    * (joining a live worker is not the same as resuming a dormant store entry). */
   resumeLabel?: (session: ISession | null) => string;
   /** Extra lines for the row tooltip. */
-  tooltipLines?: (ctx: IHookContext) => string[];
+  tooltipLines?: (session: ISession) => string[];
   /** Menu label for one branch. Defaults to `<label> (<short id>) - <time>`;
    * a provider whose titles are written in wide scripts overrides it to bound
    * the menu by display columns rather than by code units. */
   branchLabel?: (branch: IBranch, shortId: string) => string;
-  /** Chip appended to a branch row in the menu and the popup. */
-  branchBadge?: (branch: IBranch) => HTMLElement | null;
 }
 
 /** What `providers/index.ts` registers: one descriptor, optionally with hooks. */

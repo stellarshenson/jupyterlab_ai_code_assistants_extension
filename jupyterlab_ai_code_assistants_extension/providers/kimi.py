@@ -43,6 +43,7 @@ from ..core.store import (
     is_safe_segment,
     load_json,
     now_iso_z,
+    process_comm,
 )
 
 
@@ -176,13 +177,19 @@ def normalize_session_id(value: str | None) -> str | None:
 def derived_colour(session_id: str) -> str:
     """Map a conversation id onto one of the six tab colours.
 
-    FNV-1a (32-bit) over the whole id - the same hash, over the same id string
-    and the same colour order, as the frontend's own default, so a conversation
-    tints identically whichever side resolved it.
+    FNV-1a (32-bit) over the id's UTF-8 BYTES, in the same colour order as the
+    frontend's own default, so a conversation tints identically whichever side
+    resolved it. Bytes rather than characters on purpose: FNV-1a is defined
+    over an octet stream, and the idiomatic loop differs per language - ``ord``
+    walks code points here, ``charCodeAt`` walks UTF-16 units there, and the
+    two answered different colours for an id outside the BMP ("𝕏id" was peach
+    here and rose in the browser, DEF-52). Bytes are the one reading both
+    languages spell naturally, so the drift cannot return the next time either
+    loop is rewritten. Real ids are ASCII, where every reading coincides.
     """
     hash_ = 0x811C9DC5  # FNV offset basis
-    for char in session_id:
-        hash_ ^= ord(char) & 0xFFFFFFFF
+    for byte in session_id.encode("utf-8"):
+        hash_ ^= byte
         hash_ = (hash_ * 0x01000193) & 0xFFFFFFFF
     return _TAB_COLOUR_IDS[hash_ % len(_TAB_COLOUR_IDS)]
 
@@ -221,10 +228,31 @@ def _message_count(session_dir: Path) -> int:
     return count
 
 
+#: What the Kimi CLI reports as its ``comm`` once it has settled. The launched
+#: binary renames its own process: sampling ``/proc/<pid>/comm`` every 0.5ms
+#: from exec gives ``python`` -> ``kimi`` -> ``MainThread`` -> ``kimi-code``,
+#: and it stays at the last one. Matching only ``kimi`` therefore identified a
+#: Kimi terminal for the first few milliseconds of its life and never again
+#: (DEF-50). Same failure and same remedy as Gemini's ``_NODE_COMMS``: a
+#: candidate set, so the cheap pre-filter cannot fail closed on a rename.
+_KIMI_COMMS = frozenset({"kimi", "kimi-code"})
+
+
 class KimiStore(SessionStore):
     """One workspace registry, one directory per conversation."""
 
-    comm_name = "kimi"
+    comm_name = "kimi-code"
+
+    def owns_pid(self, pid: int) -> bool:
+        """Whether the process at ``pid`` is kimi, at any point in its startup.
+
+        The CLI renames its own process as it boots, so exact equality against
+        one spelling is true for a few milliseconds and false forever after
+        (DEF-50). The set is the whole override - unlike gemini there is no
+        interpreter to disambiguate from, since every spelling here is the
+        assistant naming itself.
+        """
+        return process_comm(pid) in _KIMI_COMMS
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = root

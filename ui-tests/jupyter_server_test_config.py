@@ -4,15 +4,24 @@
 opens the server to the world and provide access to JupyterLab
 JavaScript objects through the global window variable.
 
-Everything the suite touches is redirected into ``ui-tests/.scratch``: the
-HOME the providers resolve their stores from, this extension's own state
+Everything the suite touches is redirected into ``ui-tests/.scratch/<port>``:
+the HOME the providers resolve their stores from, this extension's own state
 directory, Jupyter's config/data/runtime directories, and a directory of stub
 assistant binaries placed at the front of PATH. No test reads or writes a
 developer's real assistant history, and no inherited JupyterHub credential
 reaches the spawned server.
 
-``.scratch`` is swept by ``webServer.command`` before this file runs and again
+The scratch tree is keyed by the run's port so two suites cannot alias
+(DEF-49). It is swept by ``webServer.command`` before this file runs and again
 in ``global-teardown.js`` afterwards.
+
+The ``HOME`` set below is a BACKSTOP, not the isolation itself. Jupyter has
+already resolved its config search path - and loaded any
+``~/.jupyter/jupyter_lab_config.py`` it found there - by the time this file
+executes, so the environment the process STARTS with is what decides whether
+the developer's live config reaches the run. ``playwright.config.js`` sets it
+in ``webServer.env``, and the ``start`` script in ``package.json`` sets the
+same value for a hand-launched server.
 """
 import json
 import os
@@ -22,7 +31,10 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).parent.resolve()
-SCRATCH = HERE / ".scratch"
+# Read with ``or`` and not a ``get()`` default, so an exported-but-empty
+# variable still yields a port rather than an empty path segment.
+PORT = os.environ.get("JLAB_TEST_PORT") or "8888"
+SCRATCH = Path(os.environ.get("JLAB_TEST_SCRATCH") or (HERE / ".scratch" / PORT))
 
 # Providers whose binary is stubbed onto PATH, and so appear in the shell. The
 # specs assert against the same split (`tests/shared.ts`), and cross-check it
@@ -55,6 +67,8 @@ for _dir in (_home, _root, _stub_bin):
 
 # HOME first: every other default below is derived from it, and the Gemini
 # provider resolves its store from ``Path.home()`` with no override of its own.
+# Jupyter's own search paths are NOT covered from here - see the module
+# docstring; this keeps the providers honest when the launcher forgot to.
 os.environ["HOME"] = str(_home)
 os.environ["JUPYTER_CONFIG_DIR"] = str(_home / ".jupyter")
 os.environ["JUPYTER_DATA_DIR"] = str(SCRATCH / "jupyter-data")
@@ -110,19 +124,44 @@ _pdir.mkdir(parents=True, exist_ok=True)
 _now = time.time()
 for _i in range(3):
     _jsonl = _pdir / f"branch-{_i}.jsonl"
-    _jsonl.write_text(json.dumps({"cwd": str(_project_cwd)}) + "\n", encoding="utf-8")
-    # Ascending mtimes, all recent so the row lands in the (expanded) Recent
-    # section; the newest is the project's current conversation.
+    _records = [{"cwd": str(_project_cwd)}]
+    if _i == 2:
+        # The newest conversation carries an assistant-chosen colour (`/color`),
+        # so a test comparing a hand-set colour against "what the assistant
+        # chose" measures against a real tint rather than against nothing.
+        _records.append({"type": "agent-color", "agentColor": "blue"})
+    _jsonl.write_text(
+        "".join(json.dumps(r) + "\n" for r in _records), encoding="utf-8"
+    )
+    # Ascending mtimes; the newest is the project's current conversation, and
+    # all three are recent so this project sorts to the top of the list.
     os.utime(_jsonl, (_now - 30 + _i, _now - 30 + _i))
+
+# A second Claude project whose NAME is far wider than the sidebar, holding two
+# conversations so it carries a branch badge. DEF-41 was a clipping defect -
+# the name's ellipsis ate the badges that followed it - and clipping is a
+# layout fact that only a real browser can answer, so the suite needs a row
+# whose name genuinely overflows rather than one that merely looks long.
+#
+# Its mtimes are DELIBERATELY much older than branchy's. Rows sort newest
+# first, and two existing specs resolve their subject as "the first listed
+# conversation" rather than by name; a newer second project would silently
+# move them onto this row.
+_wide_cwd = _root / "a-deliberately-very-long-project-name-that-overflows-the-sidebar"
+_wide_cwd.mkdir(parents=True, exist_ok=True)
+_wdir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(str(_wide_cwd))
+_wdir.mkdir(parents=True, exist_ok=True)
+for _i in range(2):
+    _jsonl = _wdir / f"wide-{_i}.jsonl"
+    _jsonl.write_text(json.dumps({"cwd": str(_wide_cwd)}) + "\n", encoding="utf-8")
+    os.utime(_jsonl, (_now - 600 + _i, _now - 600 + _i))
 
 from jupyterlab.galata import configure_jupyter_server  # noqa: E402
 
 configure_jupyter_server(c)
 
-# After `configure_jupyter_server`, which hard-codes 8888. Read with `or` and
-# not a `get()` default, so an exported-but-empty variable still yields a port
-# rather than raising on `int("")`.
-c.ServerApp.port = int(os.environ.get("JLAB_TEST_PORT") or "8888")
+# After `configure_jupyter_server`, which hard-codes 8888.
+c.ServerApp.port = int(PORT)
 c.ServerApp.port_retries = 0
 
 # Uncomment to set server log level to debug level

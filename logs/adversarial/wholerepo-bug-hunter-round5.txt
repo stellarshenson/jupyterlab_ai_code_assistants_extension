@@ -1,0 +1,368 @@
+BUG-HUNTER - CONFIRMING ROUND 5
+repo: /home/lab/workspace/private/jupyterlab/jupyterlab_ai_code_assistants_extension (v1.0.0, uncommitted)
+lens: runtime behaviour, races, lifecycle, error paths, library internals
+method: everything below was EXECUTED. No finding rests on reading.
+verdict: DO-NOT-SHIP
+
+====================================================================
+0. BASELINES - RE-MEASURED
+====================================================================
+
+pytest        150 passed, 38 warnings, 2.41s          MATCHES
+npx jest       82 passed, 5 suites                     MATCHES
+npx tsc --noEmit  exit 0                               MATCHES
+npx eslint . --no-cache  0 errors / 54 warnings        MATCHES
+npx stylelint "style/**/*.css"  exit 0                 MATCHES
+npx prettier --check "**/*{.ts,.tsx,.js,.jsx,.css,.json,.md}"
+                                                       FAILS (see F4)
+Galata  20 test() bodies across 5 spec files
+        (claude-regression 7, panels 6, colour-override 5,
+         resume 1, jupyterlab_..._extension 1)          count MATCHES 20/20
+        - counted statically; Galata itself was not run.
+
+The tree was left byte-identical to how I found it. Two scratch files
+(src/__tests__/zz-adv-probe.spec.ts, tmp/adv/) were created to drive the
+panel under jest and were deleted; `git status` is unchanged.
+
+====================================================================
+1. THE CLOSURES - DO THEY HOLD?
+====================================================================
+
+DEF-32  probe route reads terminal_manager.terminals, not get_terminal
+        HOLDS, and the fix is NECESSARY. Executed against the real
+        jupyter_server_terminals.TerminalManager (not the test fake):
+
+          m = TerminalManager(shell_command=["/bin/bash"])
+          m.create(shell_command=<waiter argv>, cwd="/tmp")
+          m.list()                      -> OK
+          m.get_terminal("ghost")       -> silently CREATES a PtyWithClients
+          m.list()                      -> AttributeError:
+                'PtyWithClients' object has no attribute 'last_activity'
+
+        So a single probe of an unknown name really does take
+        GET /api/terminals down for every client of the server, exactly as
+        the comment in routes.py:804-821 claims. `.terminals` is a real
+        instance attribute on the real manager (dict). The route's 404 path
+        is reachable and creates nothing.
+
+DEF-33/34  _INIT_WAITER marks its own pty 1x1 and polls
+        HOLDS for the intended path, but introduces an inverse race - see
+        F2. Executed under a real pty:
+
+          argv = _wrap_with_init(["/bin/sh","-c","stty size; echo EXECED"])
+          parent sets 24x80, then 30x120 at t+350ms
+          -> elapsed 0.42s, child sees "30 120", EXECED.   correct
+
+        And end to end with the real terminal manager and the four real
+        CLIs (resize at t+300ms):
+
+          codex   comm='codex'            _tree_assistant -> codex
+          claude  comm='claude'           _tree_assistant -> claude
+          gemini  comm='node-MainThread'  _tree_assistant -> gemini
+          kimi    comm='kimi-code'        _tree_assistant -> None   <-- F1
+
+        The script itself is sound: no SIGWINCH, no baseline read, the mark
+        is issued by the child, `exec "$@"` preserves the pid.
+
+DEF-35/39  branch item label and icon branch on _visibleVariantCount()===0
+        HOLDS. Driven by instantiating the real AssistantSessionsPanel in
+        jsdom and calling this._commands.label()/icon() on the live
+        CommandRegistry:
+
+          claude, mode OFF (count=1, item lives in the submenu)
+            label "Normal"                       icon undefined
+          claude, mode ON  (count=0, item flattened to top level)
+            label "Branch Session (Skip Permissions)"
+            icon  jupyterlab_ai_code_assistants_extension:warning
+          gemini, approvalMode=plan (count=1)
+            label "Default (plan)"
+
+        The mode's glyph wins and branchIcon is the fallback, as claimed.
+
+DEF-36/38  + button title appends _variantSuffix(), re-run from setModes
+        HOLDS. Same harness, reading newBtn.title off the live DOM:
+
+          before setModes: "New Claude Code session in the current folder"
+          after  setModes({dangerouslySkipPermissions:true}):
+                 "New Claude Code session in the current folder
+                  (Skip Permissions)"
+          gemini approvalMode=plan:
+                 "New Gemini session in the current folder (plan)"
+
+DEF-37  _resolvedVariant() is settings-only; the bg test is in _resumeVariant
+        HOLDS. With dangerouslySkipPermissions ON:
+
+          plain row   resume  -> "Resume (Skip Permissions)"
+          bg_id row   resume  -> "Attach to Background Agent"   (no mode)
+          bg_id row   new-session -> "New Claude Code Session
+                                      (Skip Permissions)"       (still named)
+          bg_id row   + title -> "... (Skip Permissions)"        (still named)
+
+        A right-click on a background-agent row no longer strips the mode
+        name off the panel-wide surfaces.
+
+DEF-40  warning icon 16x16 jp-icon-warn0
+        HOLDS (src/core/icons.ts:60-62, viewBox 0 0 24 24, width/height 16,
+        class jp-icon-warn0). Resolved through the CommandRegistry above as
+        the icon actually returned for the marked items.
+
+Deletions: 'No matches.' still exists in _renderSection for the only
+reachable empty section (a filter that empties Favorites while the user
+still has favourites) - the two deleted strings were genuinely dead.
+yarn.lock: no mkdirp entry remains.
+
+====================================================================
+2. FINDINGS
+====================================================================
+
+--------------------------------------------------------------------
+F1  CRITICAL  Kimi never recognises its own terminal - comm is
+              "kimi-code", the store matches "kimi"
+    jupyterlab_ai_code_assistants_extension/providers/kimi.py:227
+--------------------------------------------------------------------
+
+KimiStore sets `comm_name = "kimi"` and does NOT override `owns_pid`, so
+identity is exact equality against /proc/<pid>/comm. The shipping CLI
+renames itself.
+
+Measured against the installed kimi 0.34.0
+(/home/lab/.local/bin/kimi -> ELF), sampling /proc/<pid>/comm every 0.5ms
+from exec:
+
+  long-lived kimi comm sequence:
+    [(0.2ms,'python'), (5.4ms,'kimi'), (10.6ms,'MainThread'),
+     (674.5ms,'kimi-code')]
+  owns_pid at steady state: False    comm_name = 'kimi'
+
+The "kimi" window is 5ms wide and closes ~675ms after exec. Every probe the
+extension ever issues lands after that.
+
+End to end, launched exactly as LaunchHandler does
+(routes._wrap_with_init([...]) under a pty, browser-style resize at +300ms,
+sampled after 3s, no saved settings so all four providers are enabled):
+
+  enabled providers: ['claude','codex','gemini','kimi']
+  pty root comm: kimi-code
+  _tree_assistant -> None None
+
+The same harness identifies the other three correctly, which rules out an
+artefact of the harness:
+
+  codex  comm='codex'           -> codex
+  claude comm='claude'          -> claude
+  gemini comm='node-MainThread' -> gemini   (argv confirmation, DEF-24)
+
+Blast radius, all of it silent:
+
+  * TerminalHandler answers running:false, session_id:null, colour:null for
+    EVERY Kimi terminal (routes.py:832-851).
+  * TerminalManager.findForSession never matches, so step 2 of the reuse
+    ladder is dead: every click on a Kimi row that is not a repeat click on
+    the identical conversation inside one panel lifetime spawns ANOTHER
+    terminal (terminals.ts:218-231, 130-142).
+  * _eachAssistantTerminal returns early on !info.running, so the colour
+    pass never touches a Kimi tab (terminals.ts:443). Kimi's descriptor is
+    colour_source:'derived' - the whole point of that flag is a per-
+    conversation hashed tint, and none of it will ever render. The tab
+    write-back (readUserSetTabColour -> _colours.set) never fires either,
+    so a colour the user sets by hand on a Kimi tab is never captured.
+
+This is the identical failure gemini.py documents at length as DEF-24 and
+solves with a comm CANDIDACY set plus an argv confirmation. Kimi got
+neither. No test catches it: test_registry.py:138 only asserts
+`isinstance(store.comm_name, str)`, and test_provider_stores.py monkey-
+patches process_comm, so the suite certifies the wrong string.
+
+Note the shape of the fix matters: "kimi-code" alone is as brittle as
+"kimi" - the binary wore three different names inside 700ms. The gemini
+pattern (candidacy set + argv element whose basename IS the CLI) is the
+one that survives a rename.
+
+REPRO
+  python - <<'PY'
+  import os,sys,time,pty,signal,tempfile,fcntl,termios,struct
+  os.environ["JUPYTER_CONFIG_DIR"]=tempfile.mkdtemp()
+  os.environ["KIMI_CODE_HOME"]=tempfile.mkdtemp()
+  sys.path.insert(0,"<repo>")
+  from jupyterlab_ai_code_assistants_extension.core import routes
+  from jupyterlab_ai_code_assistants_extension.core.store import process_comm
+  argv=routes._wrap_with_init(["/home/lab/.local/bin/kimi"])
+  pid,fd=pty.fork()
+  if pid==0: os.execv(argv[0],argv)
+  fcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack("HHHH",24,80,0,0)); time.sleep(.3)
+  fcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack("HHHH",40,140,0,0)); time.sleep(3)
+  print(process_comm(pid), routes._tree_assistant(pid))
+  os.kill(pid,signal.SIGKILL); os.waitpid(pid,0)
+  PY
+  -> kimi-code (None, None)
+
+--------------------------------------------------------------------
+F2  MAJOR  DEF-33 traded a 1-in-5 race for a narrower one that fails
+           SILENTLY and PERMANENTLY: a client resize landing before the
+           1x1 mark stalls 5s and execs the assistant at 1x1
+    jupyterlab_ai_code_assistants_extension/core/routes.py:53-62
+--------------------------------------------------------------------
+
+The waiter's break condition is "the size is no longer 1x1". If the
+browser's first set_size lands BEFORE the child's `stty rows 1 cols 1`, the
+mark overwrites the client's size, nothing changes it again (the widget
+sends one size on attach), the loop burns all 50 iterations and execs into
+a 1x1 pty - with a client fully attached and rendering.
+
+Reproduced deterministically (parent sets 30x120 immediately, never again):
+
+  elapsed 5.15s
+  child sees: "1 1"   then EXECED
+
+versus the intended interleaving (resize at t+350ms): 0.42s, "30 120".
+
+This is NOT DEF-47. DEF-47 is the no-client-ever-connects path, where 1x1
+is a cosmetic consequence of an empty tab. Here the tab is live, the user
+is looking at it, and the assistant renders into one cell for the rest of
+its life - xterm only re-sends a size on a window/tab resize, so nothing
+self-heals. The user's report will be "the terminal opened blank and hung
+for five seconds".
+
+Window width, measured on an idle box over 15 launches through the real
+jupyter_server_terminals.TerminalManager:
+
+  ms from create() returning to pty==1x1:
+    [0.02, 1.59, 1.65, 1.59, 1.56, 1.58, 1.66, 1.74, 1.83, 1.84,
+     1.42, 1.70, 1.65, 1.25, 1.68]        median 1.65ms
+
+  ms from pty.fork() to pty==1x1, 20 runs: median 3.6, max 4.8
+
+So the child must lose a ~1.6ms race against [serialize response -> HTTP to
+browser -> terminal:open -> WS upgrade -> xterm mount -> fit -> set_size].
+On an idle localhost the child wins comfortably. It is not structurally
+guaranteed to: bash's startup is the part that gets delayed under CPU
+pressure (CI, parallel Galata workers, a cgroup-throttled container), while
+the already-queued HTTP response is not.
+
+The mark is a level, not an edge, which is why the race is one-sided.
+An edge the client cannot forge - e.g. wait for ANY size change from a
+value the child records after marking, or have the child re-mark once if it
+is still 1x1 after the first second - would close it without reintroducing
+DEF-33's server-side resize.
+
+Severity is MAJOR rather than CRITICAL only because the probability on a
+healthy machine is low; the consequence when it fires is a dead terminal
+with no error anywhere.
+
+REPRO
+  python - <<'PY'
+  import os,pty,select,sys,time,fcntl,termios,struct
+  sys.path.insert(0,"<repo>")
+  from jupyterlab_ai_code_assistants_extension.core.routes import _wrap_with_init
+  argv=_wrap_with_init(["/bin/sh","-c","stty size; echo EXECED"])
+  pid,fd=pty.fork()
+  if pid==0: os.execvp(argv[0],argv)
+  fcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack("HHHH",30,120,0,0))  # BEFORE the mark
+  t0=time.time(); buf=b""
+  while time.time()-t0<10:
+      r,_,_=select.select([fd],[],[],0.2)
+      if r:
+          d=os.read(fd,4096)
+          if not d: break
+          buf+=d
+          if b"EXECED" in buf: break
+  print(round(time.time()-t0,2), buf[-40:])
+  PY
+  -> 5.15 b'1 1\r\nEXECED\r\n'
+
+--------------------------------------------------------------------
+F3  MINOR  Gemini "Resume" silently starts a NEW conversation when the
+           project's chats dir has gone, and the frontend then tags that
+           terminal with the id it did not open
+    jupyterlab_ai_code_assistants_extension/providers/gemini.py:832-837
+--------------------------------------------------------------------
+
+launch_argv degrades to a bare `gemini` when chat_file() cannot find the
+conversation. That is documented as deliberate ("rather than opening the
+wrong conversation") and LaunchHandler's pre-flight
+(routes.py:714-719) is supposed to catch the stale-row case first. It
+cannot, because the pre-flight is `if known and session_id not in known` -
+and when the whole chats directory is gone, `known` is EMPTY, so the guard
+is skipped rather than tripped.
+
+Executed:
+
+  resume argv (file present):
+    ['/usr/bin/gemini', '--session-file', '.../session-...-403cb64d.jsonl']
+  project_session_ids: ['403cb64d-3e62-4ac9-aad3-b571414f120b']
+  -- rmtree(tmp/proj1/chats) --
+  project_session_ids after removal: []
+  resume argv (file gone): ['/usr/bin/gemini']
+
+So the user clicks Resume on a row and gets a blank new Gemini session with
+no error. Worse, terminals.ts:147-155 passes `wanted` as `tagSessionId`, so
+_byProject now maps the project to a widget labelled with a conversation it
+is not running; the next click on that row hits the microcache
+(terminals.ts:124-128) and focuses that terminal instead of launching.
+
+Narrow trigger (the chats dir has to vanish between the 30s poll and the
+click), which is why this is MINOR - but the failure is silent in both
+halves.
+
+--------------------------------------------------------------------
+F4  MINOR  The prettier baseline does not hold
+    .claude/workflows/confirming-round-v1.0.0.js (untracked)
+--------------------------------------------------------------------
+
+  npx prettier --check "**/*{.ts,.tsx,.js,.jsx,.css,.json,.md}"
+    [warn] .claude/workflows/confirming-round-v1.0.0.js
+    Code style issues found in the above file.
+
+Measured with my own scratch files removed, so it is not my residue.
+.prettierignore covers node_modules, lib, package.json, eslint.config.mjs,
+.venv, tmp and graphify-out - not .claude/. The repo's own lint gate and
+the CI prettier step therefore fail on the tree as it stands. Either the
+file should not be committed, or .claude/ belongs in .prettierignore.
+
+====================================================================
+3. WHAT I LOOKED AT AND FOUND CLEAN
+====================================================================
+
+* ColourStore's write/read sequencing (colour.ts:161-372) - the
+  _writeSeq/_readAbsorbed/_writeStart interlock is internally consistent;
+  a superseded write neither applies its own result nor blocks the newer
+  one; forget() filters on cache-or-pending so a capture on the wire cannot
+  outlive the delete. _writeStart is never pruned (documented, one int per
+  conversation).
+* write_json_atomic - unique mkstemp name per write, fsync before replace,
+  tmp unlinked on any exception. Orphan `<name>.XXXX.tmp` files after a
+  SIGKILL are never swept, but nothing globs the state dir, so they are
+  clutter only.
+* set_colour / drop_colours / inherit_colour - the overrides set is always
+  re-derived under `sid in colours`, so it cannot name an id the map lost.
+  Read-modify-write is not cross-process atomic; within one server the
+  handlers are synchronous on the IOLoop so it is serialised.
+* index.ts lifecycle - stop() disposes both the command and the panel
+  before any re-start, so addCommand cannot collide; LayoutRestorer.add is
+  a Map set, not a throw; the 60s status interval is page-lifetime.
+* Panel dispose ordering - clearColours() races ahead of _disposed=true by
+  design; startColourLoop() re-checks _disposed so the timer cannot be
+  rearmed after dispose.
+* _render / _renderSection empty states - the only reachable empty section
+  is Favorites under a filter, and it still renders 'No matches.'
+* popup.ts delete path - `deleting` guard, arm/disarm timer, isAttached
+  checks before touching shared state after the refetch await. Timers that
+  fire after close touch detached DOM harmlessly.
+* Settings gate cost - _enabled_providers() re-parses the user-settings
+  file once per provider (4 parses; 0.27ms total with a realistic
+  200-comment-line file). Negligible even on the synchronous probe route.
+* gemini owns_pid against the real CLI on Node 26: comm 'node-MainThread',
+  argv ['node','/home/lab/.local/bin/gemini'] -> True. The _NODE_COMMS
+  candidacy set is correct for the Node actually installed.
+
+====================================================================
+4. VERDICT
+====================================================================
+
+DO-NOT-SHIP.
+
+F1 alone is disqualifying: one of the four assistants cannot identify its
+own terminal against the CLI that is actually installed, which kills
+terminal reuse, tab tinting and the colour write-back for that provider -
+and the suite passes because it asserts the wrong thing. F2 is a residual
+of this round's own fix and should be closed before the fix is called done.

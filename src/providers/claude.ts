@@ -9,12 +9,7 @@
 // Nothing here touches the DOM outside its own badge element, and nothing here
 // reaches into core internals - the hooks are the whole seam.
 
-import {
-  IBranch,
-  IProviderDescriptor,
-  IProviderHooks,
-  ISession
-} from '../core/types';
+import { IProviderDescriptor, IProviderHooks, ISession } from '../core/types';
 
 // Claude's own mark, drawn as a single path group so the theme's `jp-icon3`
 // fill drives it in both light and dark.
@@ -48,8 +43,8 @@ export const descriptor: IProviderDescriptor = {
   // branch watcher waits for.
   forkStrategy: 'native-flag',
   // `/color` is Claude's own surface for a conversation's colour, recorded in
-  // its transcript, so the assistant owns the tint and the extension's
-  // write-back store stays out of it.
+  // its transcript, so the assistant supplies the DEFAULT tint - a colour the
+  // user then sets on the tab diverges from it deliberately and wins.
   colourSource: 'native',
   // `-n <name>` at launch: Claude stamps the name itself and re-stamps it on
   // every turn, which is the only way a fork's name survives - a title written
@@ -77,26 +72,9 @@ export const descriptor: IProviderDescriptor = {
   legacyPluginId: 'jupyterlab_claude_code_extension'
 };
 
-/** The `bg` chip: this conversation belongs to a live background agent, so
- * opening it joins the running agent instead of resuming a dormant transcript.
- * Display only - the server picks the verb at launch, where it cannot be
- * stale. */
-function bgChip(): HTMLElement {
-  const chip = document.createElement('span');
-  chip.className = 'jp-AiAssistantsPanel-bgBadge';
-  chip.textContent = 'bg';
-  return chip;
-}
-
 export const hooks: IProviderHooks = {
   // Joining a live agent and resuming a dormant conversation are different
   // verbs, so the item says which one this row gets before the click.
   resumeLabel: (session: ISession | null) =>
-    session?.bg_id ? 'Attach to Background Agent' : 'Resume',
-
-  // In the manage-sessions popup the chip replaces the fork badge for an
-  // agent-held conversation: both are identity hints, and the one that changes
-  // what a click does is the one worth the column. Returning null elsewhere
-  // leaves the shared fork badge in place.
-  branchBadge: (branch: IBranch) => (branch.bg_id ? bgChip() : null)
+    session?.bg_id ? 'Attach to Background Agent' : 'Resume'
 };

@@ -11,6 +11,7 @@ import {
   readUserSetTabColour,
   sessionForCwds
 } from './colour';
+import { LOG_PREFIX } from './registry';
 import { requestProvider } from './request';
 import {
   ILaunchRequest,
@@ -28,7 +29,7 @@ const COLOUR_INTERVAL_MS = 30_000;
 /** Show a modal spinner while a terminal is being launched. The caller
  * dismisses it with `.dispose()` when the launch settles.
  *
- * Cancel does not abort the request - it only takes the app-wide scrim away, so
+ * Hide does not abort the request - it only takes the app-wide scrim away, so
  * a stalled launch cannot leave the user staring at a modal with no exit. If
  * the launch later succeeds the terminal simply appears. */
 export function showLaunchSpinner(title: string): Dialog<unknown> {
@@ -43,7 +44,11 @@ export function showLaunchSpinner(title: string): Dialog<unknown> {
   const dialog = new Dialog<unknown>({
     title,
     body,
-    buttons: [Dialog.cancelButton()]
+    // `Hide`, not `Cancel`. The button takes the scrim away and nothing else -
+    // the request is already on the wire and the terminal will still open and
+    // take focus. A button named Cancel that does not cancel is worse than no
+    // button.
+    buttons: [Dialog.okButton({ label: 'Hide' })]
   });
   // `launch()` returns a promise nobody awaits - disposing an open Lumino
   // dialog rejects it with `undefined`, so swallow that here and keep a benign
@@ -306,17 +311,53 @@ export class TerminalManager {
           null;
         const terminalName: string = widget?.content?.session?.name ?? '';
 
-        // Write-back. Native-colour assistants own their colour, so their
-        // tabs are read-only here; for the others the tab IS the control
-        // surface.
-        if (
-          sessionId &&
-          terminalName &&
-          this._descriptor.colourSource !== 'native'
-        ) {
-          const userSet = readUserSetTabColour(terminalName);
-          if (userSet && userSet !== this._colours.get(sessionId)) {
-            await this._colours.set(sessionId, userSet);
+        // Write-back. The tab is the control surface for EVERY assistant,
+        // native-colour ones included: setting a colour there diverges from
+        // whatever the CLI's own colour said, and that later choice is the one
+        // remembered from here on.
+        //
+        // Keyed on the OBSERVED conversation only. `sessionId` above may be the
+        // project's representative conversation resolved from a cwd, which is
+        // good enough to paint with but not to write against: filing the user's
+        // colour under a guessed id recolours a conversation they never touched.
+        const userSet = terminalName
+          ? readUserSetTabColour(terminalName)
+          : null;
+        if (userSet) {
+          const observedId = info.session_id ?? null;
+          // Held by the store already (an earlier pass captured it), or
+          // captured right now with the write confirmed by the server.
+          // Held AS THE USER'S OWN. Matching the colour alone is not enough: a
+          // branch born wearing this tint holds it as inherited, so re-picking
+          // the same colour on that tab would be swallowed and the choice
+          // would never become releasable. The cache carries only values the
+          // server confirmed, so reading it is the confirmation - which is why
+          // it is never written ahead of the answer.
+          let held =
+            !!observedId &&
+            this._colours.get(observedId) === userSet &&
+            this._colours.isOverride(observedId);
+          if (observedId && !held) {
+            // Strip OUR tint from `title.className` first. The companion
+            // extension's menu writes its own storage and the tab ELEMENT's
+            // classes, never the title - and Lumino rebuilds that element's
+            // class attribute from the title whenever the current tab changes,
+            // so a tint of ours still sitting there comes back over the colour
+            // the user just picked. With the title bare, the companion's own
+            // refresh holds their choice until this write confirms.
+            this._applyColour(widget, null);
+            held = await this._colours.set(observedId, userSet);
+          }
+          if (!held) {
+            // Nothing remembers this colour yet, so painting one would destroy
+            // it: any colour applied makes the colourful-tab extension release
+            // its menu entry. Strip OUR tint instead and stop - Lumino rebuilds
+            // the tab's classes from `title.className`, so a tint left there by
+            // an earlier pass would otherwise keep showing in place of the
+            // colour the user just picked, and the companion repaints its own
+            // once the class is gone. The next pass retries the capture.
+            this._applyColour(widget, null);
+            return;
           }
         }
 
@@ -336,6 +377,17 @@ export class TerminalManager {
           )
         );
       });
+    } catch (err) {
+      // Tinting reaches into another extension and a probe per terminal, so
+      // this pass has several ways to throw. Swallowed so that every caller
+      // can await it plainly rather than each carrying its own rejection
+      // discipline. Logged rather than silent - a failed pass just stops
+      // applying tints, which is indistinguishable from a panel that has no
+      // colours to draw.
+      console.warn(
+        `${LOG_PREFIX}[${this._descriptor.id}] tab colour pass failed.`,
+        err
+      );
     } finally {
       // Always rearm, even after a failed pass - one bad probe must not end
       // tinting for the rest of the session.
@@ -343,8 +395,14 @@ export class TerminalManager {
     }
   }
 
-  /** Effective colour of one conversation right now, for branch inheritance
-   * at the fork sites. */
+  /** Effective colour of one conversation as the cache currently reads it, for
+   * branch inheritance at the fork sites.
+   *
+   * A snapshot, not the last word: the cache holds only server-confirmed
+   * values, so a colour still being written is not in it. The fork path settles
+   * the store and re-reads before it copies anything, and keeps this answer as
+   * the fallback for a conversation the store holds nothing for - see
+   * `_inheritColour` (DEF-31). */
   colourFor(session: ISession, sessionId?: string): string | null {
     const id = sessionId ?? session.session_id;
     return effectiveColour(
@@ -356,11 +414,19 @@ export class TerminalManager {
   }
 
   /** Drop the tint from this assistant's terminals. Only its own terminals are
-   * touched, so a tint the user set by hand on another tab survives. */
+   * touched, so a tint the user set by hand on another tab survives.
+   *
+   * Swallows like `reconcileColours`, and for the same reason: both reach into
+   * another extension, both are called as `void`, and turning tab colouring
+   * off must not spill an unhandled rejection. */
   async clearColours(): Promise<void> {
-    await this._eachAssistantTerminal(async widget => {
-      this._applyColour(widget, null);
-    });
+    try {
+      await this._eachAssistantTerminal(async widget => {
+        this._applyColour(widget, null);
+      });
+    } catch (_err) {
+      // Nothing to retry - the setting is off either way.
+    }
   }
 
   private _applyColour(widget: any, colourId: string | null): void {

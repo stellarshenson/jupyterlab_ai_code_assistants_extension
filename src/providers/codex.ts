@@ -14,11 +14,7 @@
 // * `hasLiveProcess: true` - a project row shows a dot when a `codex` process
 //   is running in it, which is the only liveness signal Codex exposes
 
-import {
-  IHookContext,
-  IProviderDescriptor,
-  IProviderHooks
-} from '../core/types';
+import { IProviderDescriptor, IProviderHooks, ISession } from '../core/types';
 
 // The OpenAI "blossom" mark - Codex is OpenAI's CLI, so the panel wears its
 // vendor's logo. Single path, `jp-icon3` so it picks up the theme's foreground
@@ -76,7 +72,7 @@ export const hooks: IProviderHooks = {
   // Codex's thread store records the model and the token spend of every
   // conversation; no other assistant here does, so they are a provider line
   // rather than a core one.
-  tooltipLines: ({ session }: IHookContext): string[] => {
+  tooltipLines: (session: ISession): string[] => {
     const lines: string[] = [];
     if (session.model) {
       lines.push(`Model: ${session.model}`);

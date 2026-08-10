@@ -1,6 +1,6 @@
 import { expect, test } from '@jupyterlab/galata';
 
-import { panelId, waitForApplication } from './shared';
+import { openPanelTab, panelId, waitForApplication } from './shared';
 
 test.use({ autoGoto: false, waitForApplication });
 
@@ -13,7 +13,7 @@ test.use({ autoGoto: false, waitForApplication });
  */
 test('clicking a seeded session row opens a terminal', async ({ page }) => {
   await page.goto();
-  await page.sidebar.openTab(panelId('claude'));
+  await openPanelTab(page, 'claude');
 
   const panel = page.locator('#' + panelId('claude'));
   await expect(panel).toBeVisible();

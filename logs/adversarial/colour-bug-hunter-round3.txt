@@ -1,0 +1,56 @@
+I'll start by reading the adversary persona file, then my round-2 report.
+
+## Verdict
+`VERDICT: DO-NOT-SHIP (3 findings)` - the server answers HTTP 200 for a colour write it failed to persist, so the "confirmed by the server" gate the whole capture path was rebuilt around (round-2 fix 2, round-1 finding 2) can be satisfied by a write that never landed - and the paint that follows destroys the user's colour.
+
+## (a) Round-2 findings, re-confirmed
+
+**R1-1 write-back keyed on a guessed conversation - CLEARED.** `src/core/terminals.ts:322` `const observedId = info.session_id ?? null`; the write at `:328` uses only it. The cwd fallback survives at `:303-306` and feeds the paint alone (`:343-357`).
+
+**R1-2 failed POST destroys the colour - CLEARED, with a hole (see MAJOR-1).** `src/core/colour.ts:173-201` returns `boolean` and rolls the cache back at `:194-200`. Now unit-covered: `src/__tests__/colour.spec.ts:135-184`, five cases (Jest 66, re-run green). The rollback is correct for a *rejected* request; it does nothing for an *accepted-but-not-persisted* one.
+
+**R1-3 / NEW-1 the override is a one-way door - CLEARED.** `src/core/panel.ts:1964-1973` settles `_resettableColours` from the row's conversation plus every branch carrying an override, after `await this._colours.load()` at `:1967`; the command reads it at `:1746-1751`. `_resetColours` at `:931-940` writes the set. Galata drives the branch-only case at `ui-tests/tests/colour-override.spec.ts:158-175`. No conversation of a listed project can now hold an unreachable override: `extra_sessions = len(sessions) - 1` (e.g. `providers/kimi.py:374`) so a project holding a second coloured conversation always fetches its branch list, and `BranchesHandler` (`core/routes.py:360-383`) caps nothing.
+
+**R1-4 stale docstrings - CLEARED.** `core/colour_store.py:3-8`, `core/routes.py:190-198`, `:446-449`, `:511-514`.
+
+**R1-5 BranchHandler native guard - CLEARED.** `core/routes.py:546-557` (`parent_default=None`) mirrors `panel.ts:955-959` (`this._colours.get(parentId)`); `colour_store.inherit_colour:101` resolves both to the same value.
+
+**R1-6 orphaned `import tornado` - CLEARED.** No match in `tests/test_colour_store.py`.
+
+**R1-7 early return leaves a stale tint on screen - CLEARED.** `src/core/terminals.ts:338` `this._applyColour(widget, null);` before the `return`. Verified safe: `api.setColour` guards the destructive call with `if (colourId && ...)` (`node_modules/jupyterlab_colourful_tab_extension/lib/index.js:381-386`), so a null paint strips only `title.className` (`lib/colours.js:20-37`) and never touches the localStorage record - the companion's `refreshAllTabColours` then repaints (`lib/index.js:156-164`).
+
+**NEW-4 vacuous Galata assertions - CLEARED.** `ui-tests/jupyter_server_test_config.py:114-118` seeds `agent-color: blue`; `colour-override.spec.ts:30,140,155` compare against `'sky'`. The capture path (localStorage → write-back → release) is still driven by no test at any tier - which is how MAJOR-1 survived three rounds.
+
+## (b) New defects
+
+**1. [MAJOR] A colour write the server could not persist is answered 200, and `set()` believes it - the paint then destroys the colour** - `jupyterlab_ai_code_assistants_extension/core/colour_store.py:46-52` (`except OSError: pass`) and `core/routes.py:478-479` (`set_colour(...)` then `_finish_store(...)` unconditionally); client side `src/core/colour.ts:183-193` returns `true` on any non-throwing response and discards the body.
+
+TESTED, FACT. With `write_json_atomic` raising `OSError(ENOSPC)`, `POST providers/claude/colours {"session_id":"abc","colour":"mint"}` returns **200** with body `{"colours": {}}` and `get_colour("claude","abc") is None`. (Scratch test at `/tmp/claude-1000/-home-lab-workspace-private-jupyterlab-jupyterlab-ai-code-assistants-extension/0257fef0-9212-4c10-ab11-3a300a3b5938/scratchpad/conc/test_save_fail.py`, passed.)
+
+Failure scenario - state dir full, read-only, or root-owned after one `sudo jupyter` run:
+1. User right-clicks a Claude terminal tab → Green. Companion stores `terminal:N`→3 and paints mint on the tab element (`lib/index.js:310-316`).
+2. Within 30 s `reconcileColours` runs: `userSet='mint'`, `observedId=C`, cache empty → `set(C,'mint')` → POST → `_save` swallows the OSError → 200 → **`set` returns `true`** → `held=true` (`terminals.ts:325-329`).
+3. `_applyColour(widget,'mint')` → `api.setColour` with a truthy colour → `releaseMenuColour(widget.id)` deletes the localStorage entry (`lib/index.js:172-182`) - the last surviving record of the choice.
+4. Next poll (`POLL_INTERVAL_MS = 30_000`, `panel.ts:56`): `_fetch` → `colours.load()` → server answers `{}` → cache wiped → repaint from `/color`. The colour is gone, nothing reports anything, and no server log line exists either (`colour_store.py:52` is a bare `pass`).
+
+Same hole on the release: "Reset Tab Colour" reports success, the override stays on disk, and the tab flips back at the next `load()`.
+
+Fix: the response body already carries the authoritative map for exactly this purpose (`routes.py:440-442`) - have `ColourStore.set` verify against it (`data.colours[sessionId] === colour`, or absence when `colour` is null) instead of treating "did not throw" as confirmation. Cheaper still, make `_save` propagate: `colour_store._save` swallowing `OSError` and `ColoursHandler.post` answering 200 regardless is the actual lie. Either fix is testable at the Jest tier with a mocked `requestProvider` returning a map that omits the id - which is also the test that would have caught this in round 1.
+
+**2. [MINOR] A failed reset is silent - `_resetColours` erases its own error two lines later** - `src/core/panel.ts:936` sets the inline error, `:939` calls `_fetch()`, and `_fetch` clears it unconditionally at `:536` (`this._setInlineError(null)`).
+
+FACT, traced. Scenario: long-lived Lab tab whose `_xsrf` cookie has rotated - GETs still succeed, POSTs return 403. User clicks Reset → `set(id,null)` rejects → cache rolled back (`colour.ts:194-200`) → message set → `reconcileColours` repaints the *same* colour → `_fetch()` succeeds and blanks the message. The user sees the colour unchanged and no explanation. Every other action error in this panel survives up to 30 s (`_toggleFavourite:563`, `_removeProject:602`, `_branchByNativeFlag:834` - none call `_fetch` afterwards); this one is visible for one round trip. Fix: skip the `_fetch()`/`reconcileColours` tail when `written.some(ok => !ok)`, which is what the round-2 predecessor did, or re-set the message after the fetch.
+
+**3. [MINOR] The context menu is now gated on a network round trip for every row, including single-conversation ones** - `src/core/panel.ts:1967` `await this._colours.load()`, unconditional, after the (already awaited) `_fetchBranches` at `:1927`. The handler at `:1400-1407` calls `e.preventDefault()` and then awaits.
+
+FACT for the path, traced not run. Scenario: server unreachable (laptop resumed, kernel gateway restarting, VPN drop). Before this change a project with `extra_sessions === 0` opened its menu synchronously - no await between `preventDefault` and `_contextMenu.open`. Now `requestProvider` uses `fetch` with no timeout, so right-click yields neither the panel menu nor the browser's own until the request settles; on a hung socket, never. Fix: `Promise.all` the two fetches (they are independent - the branch list does not feed `load()`), which also halves the latency in the healthy case, or race the load against a short timeout and fall back to the cached map.
+
+SUSPICION, same line: the window in which `_activeSession` (set at `:1405`) can be overwritten by a second right-click before the first `open()` lands now exists for every row, not just branchy ones. Two rapid right-clicks on different rows can leave the *visible* menu built from row A (`_resettableColours`, submenus) while `active()`-driven items - including **Remove** - resolve to row B. Settling test: throttle the server to ~500 ms and right-click two rows in succession.
+
+## Tested and cleared
+- **The concurrent `Promise.all` of `set(id, null)` is safe** - `ColoursHandler.post` is a plain `def` with no await between `load_colours` and `_save` (`routes.py:462-479`), so Tornado's loop serialises the read-modify-write. Tested: 8 concurrent POSTs dropping 8 seeded keys leave `{}`; 8 concurrent writes all land. Both passed.
+- **`_applyColour(widget, null)` cannot destroy a colour.** `api.setColour` guards `releaseMenuColour` on a truthy `colourId` (`lib/index.js:381-386`), and the bail is only reachable while the localStorage record still exists (once released, `readUserSetTabColour` returns null and `terminals.ts:321` is never entered). The strip is therefore always recoverable by the companion's refresh.
+- **No await between the localStorage read (`terminals.ts:318`) and the paint (`:349`)** when `userSet` is null, so a pass cannot release a colour the user picked mid-pass. The only window is across the `set()` POST, and it requires two menu picks inside one round trip.
+- **`_lastBranches` cross-project bleed** - the stale value from a previous row is gated by `hasBranches` (`panel.ts:1971`), which the catch at `:1960-1962` forces false.
+- **`_colouredTabs` default** - `applySharedSettings` calls `setColouredTabs` at panel construction (`src/index.ts:173`), so the field never sits on its `true` initialiser against a `false` setting.
+- Re-ran at the current tree: pytest 134 passed, Jest 66 passed, `npx tsc --noEmit` clean. Galata not re-run (needs a rebuilt wheel in `ui-tests/.venv`); the seed change at `jupyter_server_test_config.py:111-124` was read, not executed.

@@ -51,8 +51,14 @@ export const removeIcon = new LabIcon({
 // Marks the unsafe launch variants. A shield reads as "protected", which is
 // the inverse of what these entries do, so the caution triangle carries them
 // instead. Material "warning" outline.
-const warningSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13">
-  <path class="jp-icon3" fill="#616161" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+//
+// 16x16 and `jp-icon-warn0`, like every other icon in these menus and unlike
+// them in colour: authored at 13x13 in `jp-icon3` it rendered smaller than
+// its neutral siblings AND in the identical grey, measured rgb(97,97,97) in
+// the light theme and rgb(189,189,189) in the dark one - the one glyph whose
+// whole job is to say "this differs" was the least conspicuous in the menu.
+const warningSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
+  <path class="jp-icon-warn0" fill="#f57c00" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
 </svg>`;
 
 export const warningIcon = new LabIcon({

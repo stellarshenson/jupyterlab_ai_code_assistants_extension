@@ -20,7 +20,7 @@ from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 
 from . import colour_store, migrate, registry, state
-from .store import load_jsonc
+from .store import SessionNotFound, load_jsonc
 
 
 URL_PREFIX = "jupyterlab-ai-code-assistants-extension"
@@ -29,6 +29,13 @@ URL_PREFIX = "jupyterlab-ai-code-assistants-extension"
 # writes this extension's saved settings into.
 SETTINGS_PLUGIN_ID = "jupyterlab_ai_code_assistants_extension"
 
+# The Tornado application this extension's routes were added to, kept so the
+# saved settings are read from the folder the RUNNING server writes them to.
+# Captured rather than resolved at setup time: extension load order is not
+# fixed, so JupyterLab's own app may not be in the settings dict yet when these
+# handlers are registered - the lookup below happens per request instead.
+_web_app = None
+
 
 # bash one-liner that waits until the JL WebSocket client has resized the pty
 # from its initial default before clearing and `exec`ing the real argv. A
@@ -36,20 +43,44 @@ SETTINGS_PLUGIN_ID = "jupyterlab_ai_code_assistants_extension"
 # default is 24x80, so `c=80 >= 80` passes on the first iteration and nothing
 # ever waits.
 #
-# Strategy: capture the initial size, install a SIGWINCH trap, and loop until
-# either SIGWINCH fires OR the size has visibly changed. 5 s timeout fallback so
-# we still launch if no client ever connects. After exec, bash is replaced by
-# the assistant on the same pid - auto-close on exit and the process-tree reuse
-# filter still work.
+# Strategy: the child marks its OWN pty 1x1, then polls until that is no longer
+# the size. 5 s timeout fallback so we still launch if no client ever connects.
+# After exec, bash is replaced by the assistant on the same pid - auto-close on
+# exit and the process-tree reuse filter still work.
+#
+# The timeout path RESTORES the size it marked over, because otherwise the
+# waiter produces the very outcome it exists to prevent: 50 idle iterations and
+# then an assistant exec'd into a 1x1 window, unusable and unrecoverable without
+# a resize the user has no reason to make (DEF-47). The same restore is what
+# saves a REAL attached client whose resize landed BEFORE the marking - nothing
+# will ever change the size again, so that client also runs out the 5 s - and
+# because the baseline is captured before the marking, what it gets back is the
+# browser's own size rather than a default. Worst case is now a stall into a
+# working terminal instead of a fast path into a broken one.
+#
+# The marking has to happen HERE rather than server-side after ``create``. A
+# SIGWINCH trap plus a captured baseline is the differential form of this test,
+# and it has to be told the server's own resize apart from the browser's - two
+# processes with no ordering between them, so whenever the resize lands after
+# the child's baseline read, the trap fires on the server's resize, the loop
+# breaks on its first iteration and the assistant execs into a 1x1 window with
+# no client attached (DEF-33, measured 1 in 5). Marking and polling in one
+# process, in that order, removes the interleaving rather than narrowing it,
+# and no browser ever renders 1x1, so every real attach is a change.
 _INIT_WAITER = (
-    "trap 'CHANGED=1' WINCH; "
-    "read R0 C0 < <(stty size 2>/dev/null || echo '0 0'); "
+    "read r0 c0 < <(stty size 2>/dev/null || echo '24 80'); "
+    '[ "$r0" -gt 1 ] 2>/dev/null || r0=24; '
+    '[ "$c0" -gt 1 ] 2>/dev/null || c0=80; '
+    "stty rows 1 cols 1 2>/dev/null; "
     "for i in $(seq 1 50); do "
-    'if [ -n "$CHANGED" ]; then break; fi; '
     "read r c < <(stty size 2>/dev/null || echo '0 0'); "
-    'if [ "$r" != "$R0" ] || [ "$c" != "$C0" ]; then break; fi; '
+    'if [ "$r" != "1" ] || [ "$c" != "1" ]; then break; fi; '
     "sleep 0.1; "
     "done; "
+    # Still the size we marked, so nothing ever resized this pty: put the
+    # baseline back rather than exec into 1x1 (DEF-47).
+    'if [ "$r" = "1" ] && [ "$c" = "1" ]; then '
+    'stty rows "$r0" cols "$c0" 2>/dev/null; fi; '
     "clear; "
     'exec "$@"'
 )
@@ -124,6 +155,12 @@ def _tree_assistant(root_pid: int) -> tuple[registry.Provider | None, str | None
     Each store answers for its own process (``owns_pid``), because what makes a
     pid this assistant differs per assistant: a native binary is its comm, an
     interpreted one needs its argv confirmed as well.
+
+    SHALLOWEST WINS, and that is the whole reason every enabled provider is
+    asked rather than just the one that called: a claude terminal that spawned
+    ``codex`` as a tool must answer "not yours" to the codex panel, or that
+    panel reuses a terminal it does not own. Narrowing the candidate list to
+    the caller looks free and quietly breaks exactly that.
     """
     candidates = [
         provider
@@ -142,9 +179,31 @@ def _tree_assistant(root_pid: int) -> tuple[registry.Provider | None, str | None
     return None, None
 
 
+def _user_settings_dir() -> Path:
+    """The folder JupyterLab saves user settings into on THIS server.
+
+    ``user_settings_dir`` is a configurable trait (``--LabApp.user_settings_dir``
+    or ``JUPYTERLAB_SETTINGS_DIR``), and a server that moved it writes the
+    provider toggles somewhere the hardcoded default never looks - so every
+    provider would read as enabled whatever the user turned off. JupyterLab
+    registers itself in the web application's settings under its extension name,
+    which is how the configured value is reached from here.
+
+    The default stays as the fallback, so a server with no JupyterLab app in it
+    - the bare ``jupyter server`` the tests run against - behaves exactly as it
+    did before.
+    """
+    settings = getattr(_web_app, "settings", None)
+    lab = settings.get("lab") if isinstance(settings, dict) else None
+    configured = getattr(lab, "user_settings_dir", None)
+    if isinstance(configured, str) and configured:
+        return Path(configured)
+    return Path(jupyter_config_dir()) / "lab" / "user-settings"
+
+
 def _user_settings() -> dict:
     """This extension's saved settings, or empty when never saved."""
-    folder = Path(jupyter_config_dir()) / "lab" / "user-settings" / SETTINGS_PLUGIN_ID
+    folder = _user_settings_dir() / SETTINGS_PLUGIN_ID
     for path in sorted(folder.glob("*.jupyterlab-settings")) if folder.is_dir() else []:
         data = load_jsonc(path)
         if data is not None:
@@ -183,21 +242,26 @@ def _enabled_providers() -> dict[str, registry.Provider]:
 
 
 def _effective_colour(
-    provider: registry.Provider, session_id: str | None, default: str | None
+    session_id: str | None,
+    default: str | None,
+    stored: dict[str, str],
 ) -> str | None:
     """The tint a conversation should carry now.
 
     ``default`` is the conversation's own colour as its source produced it -
     the value the store already read while building the row, so a listing never
     re-derives it once per row. The extension's own store overrides it for
-    every provider except a ``native`` one, where the assistant owns its colour
-    and a write-back would fight it.
+    EVERY provider, ``native`` included: a colour the user set by hand on the
+    tab is a later expression of intent than the one the assistant's own
+    ``/color`` produced, so it wins and is remembered.
+
+    ``stored`` is the override map, passed in rather than read here: a listing
+    resolves every row from one file read, and a required parameter means one
+    lookup path rather than two for the same question.
     """
     if not session_id:
         return None
-    if provider.descriptor.capabilities.colour_source == "native":
-        return default
-    return colour_store.get_colour(provider.id, session_id) or default
+    return stored.get(session_id) or default
 
 
 class _ProviderHandler(APIHandler):
@@ -305,18 +369,28 @@ class SessionsHandler(_ProviderHandler):
             None, provider.store.list_sessions, str(root_dir)
         )
         favourites = set(state.load_favourites(provider.id))
+        # Read once for the whole listing, not once per row.
+        stored = colour_store.load_colours(provider.id)
         for row in rows:
             row["favourite"] = row.get("project_path") in favourites
             # British spelling throughout - the store emits ``colour`` and the
             # frontend's `ISession.colour` reads it; the row's own value is the
             # conversation's default here, resolved against the user-set store.
             row["colour"] = _effective_colour(
-                provider, row.get("session_id"), row.get("colour")
+                row.get("session_id"), row.get("colour"), stored
             )
         self.finish(json.dumps({"sessions": rows}))
 
     @tornado.web.authenticated
-    def delete(self, provider_id: str) -> None:
+    async def delete(self, provider_id: str) -> None:
+        """Off the IOLoop, like the listing above and for a harder reason.
+
+        Disposal is per conversation for a store whose CLI owns the verb: one
+        subprocess each, measured at ~0.7s, so a project holding twenty of them
+        blocks every kernel, terminal and notebook save in the server for the
+        length of the sweep. The other stores reach ``send2trash`` here, which
+        copies across devices when the trash is on another filesystem.
+        """
         provider = self.resolve(provider_id)
         if provider is None:
             return
@@ -335,8 +409,11 @@ class SessionsHandler(_ProviderHandler):
                 return
             # The store answers with the ids that actually went, so a refused
             # deletion never costs the surviving conversation its colour.
-            removed = provider.store.delete_branches(
-                encoded_path, session_ids, to_trash=self.to_trash
+            removed = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: provider.store.delete_branches(
+                    encoded_path, session_ids, to_trash=self.to_trash
+                ),
             )
             count = len(removed) if removed is not None else 0
         else:
@@ -344,7 +421,10 @@ class SessionsHandler(_ProviderHandler):
             # that disposes of conversations one by one can come back partly
             # refused, and a survivor whose colour was dropped anyway loses its
             # tint.
-            removed = provider.store.remove(encoded_path, to_trash=self.to_trash)
+            removed = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: provider.store.remove(encoded_path, to_trash=self.to_trash),
+            )
             # One project removed, whatever it held - the count the panel
             # reports for this shape has always been the project, not its
             # conversations.
@@ -388,7 +468,7 @@ class SwitchHandler(_ProviderHandler):
     """Make another conversation the project's current one."""
 
     @tornado.web.authenticated
-    def post(self, provider_id: str) -> None:
+    async def post(self, provider_id: str) -> None:
         provider = self.resolve(provider_id)
         if provider is None:
             return
@@ -400,7 +480,12 @@ class SwitchHandler(_ProviderHandler):
         if not isinstance(encoded_path, str) or not isinstance(session_id, str):
             self.bad_request()
             return
-        result = provider.store.switch(encoded_path, session_id)
+        # Off the IOLoop for the same reason as the listing: a store whose
+        # index is unreadable falls back to walking every conversation file of
+        # every project to find the one asked for.
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, provider.store.switch, encoded_path, session_id
+        )
         if result is None:
             self.bad_request()
             return
@@ -437,19 +522,34 @@ class FavouriteHandler(_ProviderHandler):
 class ColoursHandler(_ProviderHandler):
     """One provider's user-set terminal tab colours, keyed by conversation id.
 
-    The write-back that makes a tab colour settable on an assistant whose CLI
-    has no colour concept, and durable across a reload. All three verbs answer
-    the whole store (``{"colours": {...}}``), so the frontend's cache is
+    The write-back that makes a tab colour settable for EVERY provider, and
+    durable across a reload. All three verbs answer the whole store
+    (``{"colours": {...}, "overrides": [...]}``), so the frontend's cache is
     reconciled by the same payload whichever call it made: ``GET`` reloads,
     ``POST`` records one conversation's colour (a null drops it), ``DELETE``
-    forgets the conversations named in ``session_ids``.
+    forgets the conversations named in ``session_ids``. ``overrides`` names the
+    hand-set colours among them - the release affordance offers only those,
+    since an inherited tint is a branch's identity rather than a preference to
+    take back.
 
-    A ``native`` provider owns its own colour, so a write against one is
-    refused rather than kept as a shadow value that would never win.
+    Every provider is writable, ``native`` ones included. An assistant that
+    owns conversation colours only supplies the DEFAULT tint; a colour the user
+    then sets by hand on the tab diverges from it deliberately, and that later
+    preference is what the store keeps.
+
+    A write that cannot be persisted answers 500 rather than 200. Elsewhere a
+    colour is decoration and a failed write costs only the tint, but here the
+    colour IS the request - and the frontend releases the tab's own record of
+    the choice once it believes the store holds it.
     """
 
     def _finish_store(self, provider: registry.Provider) -> None:
-        self.finish(json.dumps({"colours": colour_store.load_colours(provider.id)}))
+        colours, overrides = colour_store.load_store(provider.id)
+        self.finish(json.dumps({"colours": colours, "overrides": overrides}))
+
+    def _store_unwritable(self) -> None:
+        self.set_status(500)
+        self.finish(json.dumps({"error": "colour_store_unwritable"}))
 
     @tornado.web.authenticated
     def get(self, provider_id: str) -> None:
@@ -471,13 +571,20 @@ class ColoursHandler(_ProviderHandler):
         if not isinstance(session_id, str) or not session_id:
             self.bad_request()
             return
-        if colour is not None and not isinstance(colour, str):
+        if colour is not None and not colour_store.is_colour(colour):
+            # A colour the store would refuse is a bad request, not a storage
+            # failure - the 500 below means the state dir could not be written.
+            self.bad_request("colour_invalid")
+            return
+        # A fork writes its inherited tint through this same route; only the
+        # tab write-back is the user's own choice.
+        hand_set = body.get("hand_set", True)
+        if not isinstance(hand_set, bool):
             self.bad_request()
             return
-        if provider.descriptor.capabilities.colour_source == "native":
-            self.bad_request("colour_owned_by_assistant")
+        if not colour_store.set_colour(provider.id, session_id, colour, hand_set):
+            self._store_unwritable()
             return
-        colour_store.set_colour(provider.id, session_id, colour)
         self._finish_store(provider)
 
     @tornado.web.authenticated
@@ -492,9 +599,11 @@ class ColoursHandler(_ProviderHandler):
         if not isinstance(session_ids, list):
             self.bad_request()
             return
-        colour_store.drop_colours(
+        if not colour_store.drop_colours(
             provider.id, [sid for sid in session_ids if isinstance(sid, str)]
-        )
+        ):
+            self._store_unwritable()
+            return
         self._finish_store(provider)
 
 
@@ -513,9 +622,10 @@ class BranchHandler(_ProviderHandler):
     shadowed by the parent, whose file keeps being appended and whose mtime
     overtakes it. It also inherits the parent's effective colour, written now
     rather than resolved later so it survives the parent being recoloured or
-    deleted - except against a ``native`` provider, whose colour store refuses
-    every write (``ColoursHandler``) and would otherwise be seeded here with an
-    entry only this route can create.
+    deleted. A ``native`` provider inherits only what this extension's own
+    store holds for the parent - never the assistant's own tint, which would
+    pin the fork and shadow its own ``/color``. An inherited entry counts: a
+    branch of a branch takes what its parent actually shows.
     """
 
     @tornado.web.authenticated
@@ -548,13 +658,15 @@ class BranchHandler(_ProviderHandler):
             self.bad_request("fork_failed")
             return
         state.write_pin(provider.id, encoded_path, new_id)
-        if provider.descriptor.capabilities.colour_source != "native":
-            colour_store.inherit_colour(
-                provider.id,
-                session_id,
-                new_id,
-                provider.store.default_colour(session_id),
-            )
+        # A native provider hands the fork its own colour, so only what this
+        # store already holds is worth inheriting - passing no default makes
+        # ``inherit_colour`` write exactly that, or nothing.
+        parent_default = (
+            None
+            if provider.descriptor.capabilities.colour_source == "native"
+            else provider.store.default_colour(session_id)
+        )
+        colour_store.inherit_colour(provider.id, session_id, new_id, parent_default)
         self.finish(json.dumps({"session_id": new_id}))
 
 
@@ -659,24 +771,39 @@ class LaunchHandler(_ProviderHandler):
             return
 
         loop = asyncio.get_running_loop()
-        argv = await loop.run_in_executor(
-            None,
-            lambda: provider.store.launch_argv(
-                self.cli_path,
-                session_id=session_id,
-                new_session_id=new_session_id,
-                fork_session_id=fork_session_id,
-                fork_from=fork_from,
-                mode=mode,
-                name=name.strip() if isinstance(name, str) else None,
-            ),
-        )
+        try:
+            argv = await loop.run_in_executor(
+                None,
+                lambda: provider.store.launch_argv(
+                    self.cli_path,
+                    session_id=session_id,
+                    new_session_id=new_session_id,
+                    fork_session_id=fork_session_id,
+                    fork_from=fork_from,
+                    mode=mode,
+                    name=name.strip() if isinstance(name, str) else None,
+                ),
+            )
+        except SessionNotFound:
+            # The store re-checked at launch time and the conversation was not
+            # there. Same answer as the pre-flight above, because it is the same
+            # outcome - the pre-flight simply cannot see every store's version
+            # of "gone" (a project whose whole history directory has been
+            # removed enumerates as nothing rather than as a miss).
+            self.set_status(404)
+            self.finish(json.dumps({"error": "session_not_found"}))
+            return
         if not argv:
             self.bad_request("launch_unsupported")
             return
         model = terminal_manager.create(
             shell_command=_wrap_with_init(argv), cwd=project_path
         )
+        # The pty is sized by ``_INIT_WAITER`` inside the child, not from here:
+        # a resize issued at this point is indistinguishable from the client
+        # attach the child is waiting for, and would end its poll before any
+        # client arrived.
+        #
         # ``model`` from jupyter_server_terminals is dict-like with at least a
         # ``name`` field; some versions return an object with a ``.name``
         # attribute - handle both.
@@ -730,7 +857,25 @@ class TerminalHandler(_ProviderHandler):
             self.set_status(503)
             self.finish(json.dumps({"error": "terminal_service_unavailable"}))
             return
-        terminal = terminal_manager.get_terminal(terminal_name)
+        # Looked up in the registry rather than through ``get_terminal``, which
+        # is get-OR-CREATE in both terminado's NamedTermManager and
+        # jupyter_server_terminals' TerminalManager. A probe of a name the
+        # manager has never seen - a widget outliving its pty, or the
+        # enumerate-to-probe race the frontend already expects - would SPAWN a
+        # terminal, and one born that way never gets the ``last_activity``
+        # attribute ``TerminalManager.create`` patches on, so the very next
+        # ``TerminalManager.list()`` raises for every terminal in the list and
+        # ``GET /api/terminals`` 500s for every client of this server until it
+        # restarts (DEF-32). Upstream guards the same call in its own websocket
+        # handler for this reason. The 404 below is live only because of this.
+        #
+        # Read straight off the attribute, with no `getattr` default: every
+        # terminal the manager legitimately creates is registered there by
+        # terminado itself, so a manager without it is a shape this route
+        # cannot answer for - and a default of `{}` would turn that into every
+        # probe quietly answering 404, which reads as "no terminals" and takes
+        # tab colours and session identification down without a word.
+        terminal = terminal_manager.terminals.get(terminal_name)
         if terminal is None:
             self.set_status(404)
             self.finish(json.dumps({"error": "terminal_not_found"}))
@@ -753,9 +898,9 @@ class TerminalHandler(_ProviderHandler):
             # probed terminal, never per row.
             "colour": (
                 _effective_colour(
-                    provider,
                     session_id,
                     provider.store.default_colour(session_id) if session_id else None,
+                    colour_store.load_colours(provider.id),
                 )
                 if running
                 else None
@@ -768,11 +913,17 @@ class MigrateHandler(APIHandler):
 
     @tornado.web.authenticated
     def post(self) -> None:
-        migrated = migrate.migrate(registry.providers().values())
+        # The retired extensions' settings sit beside this one's, so migration
+        # reads the folder THIS server writes to rather than the default.
+        migrated = migrate.migrate(
+            registry.providers().values(), _user_settings_dir()
+        )
         self.finish(json.dumps({"migrated": migrated}))
 
 
 def setup_route_handlers(web_app) -> None:
+    global _web_app
+    _web_app = web_app
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]
     provider = r"([a-z0-9-]+)"

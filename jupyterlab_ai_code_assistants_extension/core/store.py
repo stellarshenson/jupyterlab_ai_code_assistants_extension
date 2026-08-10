@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,14 +75,29 @@ def write_json_atomic(path: Path, payload: dict) -> None:
     The fsync matters: without it a crash between write and rename can publish
     a truncated file, and ``load_json`` swallows the decode error - so every
     favourite, pin and colour would vanish silently.
+
+    The temp name is UNIQUE per write. One shared ``<name>.tmp`` makes the
+    rename atomic only against itself: two servers under one data directory -
+    the default ``~/.local/share/jupyter`` - open the same inode, the loser's
+    buffered write lands inside the file the winner already renamed into
+    place, and its own replace then fails on a path that is gone. Measured at
+    a third of writes lost with three writers, and a reader landing in that
+    window reads the state as EMPTY, which silently drops every pin.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, indent=2))
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def pid_alive(pid: int) -> bool:
@@ -205,6 +221,18 @@ def dispose_path(target: Path, to_trash: bool = False) -> None:
         target.unlink()
 
 
+class SessionNotFound(Exception):
+    """A launch named a conversation the store cannot open.
+
+    Raised out of ``launch_argv``. The alternative - dropping the id and
+    launching the assistant bare - starts a BRAND-NEW conversation that then
+    occupies the row the user clicked, so the loss of the old one is invisible
+    until they look for its history. The route turns this into the same 404
+    ``session_not_found`` its pre-flight answers, which the panel already
+    renders as "that conversation no longer exists".
+    """
+
+
 class SessionStore(ABC):
     """Per-provider access to one assistant's conversation history."""
 
@@ -225,8 +253,7 @@ class SessionStore(ABC):
 
         Each row carries at least ``project_path``, ``encoded_path``,
         ``session_id``, ``name``, ``name_source``, ``message_count``,
-        ``file_mtime``, ``extra_sessions``; optionally ``summary``,
-        ``first_prompt``, ``created``, ``modified``, ``git_branch``,
+        ``file_mtime``, ``extra_sessions``; optionally ``git_branch``,
         ``colour``, ``remote_control``. ``colour`` is British on the wire and
         inside the store alike, and carries the conversation's OWN colour for
         an assistant that records one. ``favourite`` is added by the core, not
@@ -295,7 +322,8 @@ class SessionStore(ABC):
     ) -> str | None:
         """Branch ``session_id``, returning the new conversation id.
 
-        The default is the ``forkStrategy: none`` behaviour - unsupported. A
+        Unsupported by default: a store that cannot fork inherits this and the
+        route answers 400 ``fork_unsupported``. A
         ``native`` store mints the id the CLI will be handed at launch without
         touching disk; a ``server`` store copies the conversation on disk and
         returns the copy's id. None means "cannot fork", which the core turns
@@ -333,7 +361,9 @@ class SessionStore(ABC):
         Resolved here rather than by the caller: the panel's view of a
         conversation is only as fresh as its last poll, so a verb chosen in the
         browser can be wrong by the time the launch lands. The store re-checks
-        at launch time (the base extension's resume-versus-attach decision).
+        at launch time (the base extension's resume-versus-attach decision) -
+        and a re-check that cannot find the named conversation raises
+        :class:`SessionNotFound` rather than launching without it.
         """
 
     # -- terminal identity ----------------------------------------------
@@ -380,9 +410,15 @@ class SessionStore(ABC):
         """The conversation's tint before any user override.
 
         Read from the assistant for a ``native`` colour source, derived from
-        the id for a ``derived`` one, None for ``none``. Precedence between
-        this and the extension's own colour store is the core's call, off the
-        descriptor's ``colour_source`` flag.
+        the id for a ``derived`` one, None for ``none``.
+
+        Precedence is NOT off the ``colour_source`` flag: the extension's own
+        colour store beats this value for every provider alike
+        (``routes._effective_colour``), because a colour set by hand on the tab
+        is a later expression of intent than whatever produced the default. The
+        flag decides only what a FORK inherits - a ``native`` parent's own tint
+        is left behind so the branch's own ``/color`` is not shadowed
+        (``routes.BranchHandler``).
         """
         return None
 

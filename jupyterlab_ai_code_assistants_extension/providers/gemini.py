@@ -52,6 +52,7 @@ from typing import Any
 from ..core.registry import Capabilities, ProviderDescriptor
 from ..core.state import read_pin
 from ..core.store import (
+    SessionNotFound,
     SessionStore,
     cmdline_args,
     dispose_path,
@@ -61,7 +62,16 @@ from ..core.store import (
     load_json,
     now_iso_z,
     process_cmdline,
+    process_comm,
 )
+
+
+# What Node reports as its main thread's ``comm``, across the releases the
+# Gemini CLI supports. Node 24 and earlier write ``MainThread``; Node 26 writes
+# ``node-MainThread``; a build that names the process itself writes ``node``.
+# The argv check is the real discriminator (docs/defects.md DEF-24) - this set
+# only keeps the cheap pre-filter from failing closed on a version skew.
+_NODE_COMMS = frozenset({"node", "MainThread", "node-MainThread"})
 
 
 # A refused deletion is otherwise invisible: the count simply comes back short
@@ -98,7 +108,7 @@ _META_MARKERS = ('"$set"', '"sessionId"')
 
 # The metadata keys carried by the first line of a chat file, and re-sent inside
 # ``$set`` records as the conversation grows.
-_META_KEYS = ("sessionId", "startTime", "lastUpdated", "summary", "kind")
+_META_KEYS = ("sessionId", "summary", "kind")
 
 # Per-file metadata cache: path -> (st_mtime_ns, st_size, parsed). A chat file
 # is re-read only when its mtime or size changed, so the 30s sessions poll stops
@@ -293,8 +303,6 @@ def _parse_chat(raw: bytes) -> dict | None:
     return {
         "session_id": session_id,
         "summary": summary.strip() if isinstance(summary, str) else None,
-        "created": meta.get("startTime"),
-        "modified": meta.get("lastUpdated"),
         "kind": meta.get("kind"),
         "message_count": count,
         "first_prompt": first_prompt,
@@ -409,6 +417,14 @@ class GeminiStore(SessionStore):
     # node`` shebang. Node names its main thread, which is what ``/proc/<pid>/
     # comm`` reports - and EVERY node process on the machine reports the same
     # thing, which is why ``owns_pid`` below confirms the argv as well.
+    #
+    # Only a candidacy marker here, never an equality test: what Node writes
+    # to ``comm`` CHANGED between releases - ``MainThread`` up to Node 24,
+    # ``node-MainThread`` from 26 - and the shebang resolves against the
+    # Jupyter server's PATH, not the author's. Matching one spelling exactly
+    # made every Gemini terminal unidentifiable on the Node versions the CLI
+    # actually supports (``engines: >=20``), which costs duplicate terminals
+    # and untinted tabs, silently. ``owns_pid`` accepts the set below.
     comm_name = "node-MainThread"
 
     @property
@@ -591,10 +607,6 @@ class GeminiStore(SessionStore):
                 "file_mtime": self._activity(path),
                 "git_branch": git_cache[project_path],
                 "extra_sessions": max(len(chats) - 1, 0),
-                "summary": summary,
-                "first_prompt": meta.get("first_prompt"),
-                "created": meta.get("created"),
-                "modified": meta.get("modified"),
             })
 
         rows.sort(key=lambda row: row["file_mtime"], reverse=True)
@@ -809,9 +821,17 @@ class GeminiStore(SessionStore):
         The conversation is named by its FILE, never by ``--resume``: that flag
         takes ``latest`` or a listing index, a position in a list re-sorted by
         start time, so it is stale the moment another conversation lands and
-        would open a different conversation than the row that was clicked. A
-        session id whose file cannot be found degrades to a bare launch rather
-        than opening the wrong conversation.
+        would open a different conversation than the row that was clicked.
+
+        A session id whose file cannot be found REFUSES the launch. Dropping
+        the flag instead leaves a bare ``gemini``, which starts a brand-new
+        conversation that immediately becomes the project's current one - the
+        clicked row keeps its place, the terminal looks like the resume that
+        was asked for, and the conversation the user meant to continue is
+        simply not in it. The route's pre-flight cannot catch this: it asks the
+        store which conversations the project holds, and a project whose
+        ``chats/`` directory has gone answers none at all, which reads as "this
+        store cannot enumerate" and is let through.
 
         A fork is an ordinary resume - the copy is already on disk under its own
         id by the time this runs, so ``fork_session_id`` and ``fork_from`` never
@@ -819,8 +839,10 @@ class GeminiStore(SessionStore):
         into the copied file.
         """
         argv = [cli_path]
-        chat = self.chat_file(session_id) if session_id else None
-        if chat is not None:
+        if session_id:
+            chat = self.chat_file(session_id)
+            if chat is None:
+                raise SessionNotFound(session_id)
             argv += ["--session-file", str(chat)]
         elif new_session_id and SESSION_ID_RE.fullmatch(new_session_id):
             argv += ["--session-id", new_session_id]
@@ -837,7 +859,7 @@ class GeminiStore(SessionStore):
     def owns_pid(self, pid: int) -> bool:
         """Whether the node process at ``pid`` is gemini rather than any script.
 
-        The comm every node process reports is identical (``node-MainThread``),
+        Every node process reports the same comm, whatever this Node spells it,
         so a comm match alone claims ``npm run dev`` in a registered project as
         a running conversation: the colour loop then tints that terminal and
         writes the tab colour the user set on it into gemini's colour store
@@ -850,7 +872,7 @@ class GeminiStore(SessionStore):
         ELEMENT that IS the CLI - the ``gemini`` binary on PATH or the
         ``gemini.js`` bundle behind it.
         """
-        if not super().owns_pid(pid):
+        if process_comm(pid) not in _NODE_COMMS:
             return False
         cmdline = process_cmdline(pid)
         if cmdline is None:

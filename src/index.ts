@@ -11,10 +11,10 @@ import { ITerminalTracker } from '@jupyterlab/terminal';
 import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
 import { IDisposable } from '@lumino/disposable';
 
+import { DEFAULT_RECENT_LIMIT } from './core/limits';
 import {
   AssistantSessionsPanel,
   DEFAULT_PRESENTATION_MODE,
-  DEFAULT_RECENT_LIMIT,
   PresentationMode,
   commandId,
   panelWidgetId

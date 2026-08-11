@@ -35,13 +35,23 @@ import {
   warningIcon
 } from './icons';
 import {
+  DEFAULT_RECENT_LIMIT,
+  MAX_RECENT_LIMIT,
+  MIN_RECENT_LIMIT
+} from './limits';
+import {
   IResolvedLaunchMode,
   resolveLaunchMode,
   resolvedLaunchModeEntry
 } from './modes';
 import { showManageSessionsPopup } from './popup';
 import { LOG_PREFIX } from './registry';
-import { isResponseStatus, requestProvider, withQuery } from './request';
+import {
+  isRequestTimeout,
+  isResponseStatus,
+  requestProvider,
+  withQuery
+} from './request';
 import { TerminalManager } from './terminals';
 import {
   IBranch,
@@ -83,13 +93,6 @@ const REFRESH_SPIN_FLOOR_MS = 500;
 // faster cadence (bounded) so a new branch surfaces in seconds.
 const BRANCH_WATCH_INTERVAL_MS = 2_000;
 const BRANCH_WATCH_MAX_ATTEMPTS = 90; // ~3 minutes
-/** Default and bounds for the Recent section's size. Exported because
- * `src/index.ts` reads the same setting and used to restate all three as
- * literals; `schema/plugin.json` declares the identical default, minimum and
- * maximum, so a change here is a change there. */
-export const DEFAULT_RECENT_LIMIT = 10;
-export const MIN_RECENT_LIMIT = 1;
-export const MAX_RECENT_LIMIT = 100;
 /** Conversations listed inline in a branch submenu before the popup takes over. */
 const INLINE_BRANCH_LIMIT = 5;
 
@@ -601,10 +604,17 @@ export class AssistantSessionsPanel extends Widget {
     this._errorEl.hidden = !message;
   }
 
+  /** A polled or refreshed fetch failed. Only these two paths own a retry, so
+   * only they may promise one. DEF-81: a client-side timeout means the server
+   * was REACHED and did not answer in time, which is a different thing to
+   * report than a server that is gone. */
   private _showError(err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     this._logError(message);
-    this._setInlineError(`Could not reach the server - retrying. ${message}`);
+    const copy = isRequestTimeout(err)
+      ? 'The server is not answering - retrying.'
+      : 'Could not reach the server - retrying.';
+    this._setInlineError(`${copy} ${message}`);
   }
 
   /** A one-shot action failed. Nothing retries it, so the copy names what did
@@ -815,7 +825,6 @@ export class AssistantSessionsPanel extends Widget {
       message.textContent = `Cleanup failed: ${
         err instanceof Error ? err.message : String(err)
       }`;
-      this._showError(err);
     }
   }
 
@@ -916,7 +925,7 @@ export class AssistantSessionsPanel extends Widget {
     const parentColour = this._terminals.colourFor(session);
 
     let name: string | undefined;
-    if (this._descriptor.namingStrategy !== 'none') {
+    if (this._descriptor.promptsForBranchName) {
       const named = await InputDialog.getText({
         title: 'Branch Session',
         label: 'Name for the new session',
@@ -1019,6 +1028,18 @@ export class AssistantSessionsPanel extends Widget {
     name: string | undefined,
     force: string | undefined
   ): Promise<void> {
+    // Let the parent's colour settle before the server reads it (DEF-74). The
+    // server copies the store entry while minting the fork, so a colour picked
+    // on the parent's tab moments earlier - still queued in this store's
+    // request chain, unsent - is not in the server's store yet and the branch
+    // is born wearing the PREVIOUS tint. Same gate as `_inheritColour`
+    // (DEF-31): a reload is a queued request like every other of this store's
+    // (DEF-30), so it is not sent until the capture ahead of it has been
+    // answered, and awaiting it is what makes the server's read fresh. Only
+    // inside the capture window, so an ordinary fork still costs no request.
+    if (this._colours.isPending(session.session_id)) {
+      await this._colours.load();
+    }
     try {
       const fork = await requestProvider<IForkResponse>(
         this._descriptor.id,
@@ -2065,7 +2086,12 @@ export class AssistantSessionsPanel extends Widget {
         }
         this._app.commands
           .execute('terminal:create-new', { cwd: rel })
-          .catch(err => this._showError(err));
+          .catch(err =>
+            this._showActionError(
+              'Could not open a terminal for this session - try again.',
+              err
+            )
+          );
       }
     });
 
@@ -2087,7 +2113,12 @@ export class AssistantSessionsPanel extends Widget {
         }
         this._app.commands
           .execute('filebrowser:go-to-path', { path: rel })
-          .catch(err => this._showError(err));
+          .catch(err =>
+            this._showActionError(
+              'Could not open the project folder - try again.',
+              err
+            )
+          );
       }
     });
 

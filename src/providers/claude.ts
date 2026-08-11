@@ -49,7 +49,7 @@ export const descriptor: IProviderDescriptor = {
   // `-n <name>` at launch: Claude stamps the name itself and re-stamps it on
   // every turn, which is the only way a fork's name survives - a title written
   // after the fact loses to the parent title the fork inherits.
-  namingStrategy: 'launch-flag',
+  promptsForBranchName: true,
   mintsNewSessionId: true,
   launchModes: [
     {

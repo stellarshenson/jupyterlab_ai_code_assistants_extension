@@ -15,12 +15,19 @@ shadowed by the actively-written parent it branched from. The pin outlives both.
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 from jupyter_core.paths import jupyter_data_dir
 
 from .store import load_json, write_json_atomic
+
+
+# A pin that could not be persisted is otherwise invisible: the action that
+# triggered the write succeeded, the panel shows the switch, and the only trace
+# of why the row snaps back to recency is the errno swallowed below.
+_log = logging.getLogger(__name__)
 
 
 STATE_DIRNAME = "ai-code-assistants"
@@ -133,8 +140,13 @@ def write_pin(provider_id: str, encoded_path: str, session_id: str) -> None:
     state["pins"][encoded_path] = session_id
     try:
         save_state(provider_id, state)
-    except OSError:
-        pass
+    except OSError as err:
+        _log.warning(
+            "cannot write %s pin to %s: %s",
+            provider_id,
+            _state_path(provider_id),
+            err,
+        )
 
 
 def clear_pin(provider_id: str, encoded_path: str) -> None:
@@ -150,5 +162,10 @@ def clear_pin(provider_id: str, encoded_path: str) -> None:
         return
     try:
         save_state(provider_id, state)
-    except OSError:
-        pass
+    except OSError as err:
+        _log.warning(
+            "cannot clear %s pin in %s: %s",
+            provider_id,
+            _state_path(provider_id),
+            err,
+        )

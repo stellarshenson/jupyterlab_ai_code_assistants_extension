@@ -635,6 +635,55 @@ async def test_resuming_a_conversation_leaves_the_pin_alone(
     assert state.read_pin("kimi", encoded) == pinned
 
 
+async def test_a_switch_writes_the_pin_on_the_route_side(
+    jp_fetch, present, monkeypatch
+):
+    """The stores only touch mtimes on switch - the ROUTE owns the pin.
+
+    Since DEF-101 no store writes a pin (state writes are loop-serialised,
+    DEF-99), so the causal link "a switch pins its target" lives on exactly
+    one route line - and this test is the only thing that reddens if that
+    line is dropped, which would silently snap every switch back to recency
+    on the rival's next append.
+    """
+    encoded = "wd-demo"
+    target = "session_11111111-2222-3333-4444-555555555555"
+    assert state.read_pin("kimi", encoded) is None
+    store = registry.providers()["kimi"].store
+    monkeypatch.setattr(
+        store,
+        "switch",
+        # The store answers `current` from the pin as it stood BEFORE the
+        # route pins - the steady state of an already-switched project - which
+        # is exactly the answer the route must not repeat (DEF-102); and since
+        # DEF-103 the stores return no `current` at all, so this deliberately
+        # nonconforming key proves the route overwrites whatever it is handed.
+        lambda encoded_path, session_id: {
+            "requested": session_id,
+            "current": "the-stale-pre-pin-answer",
+        },
+    )
+    monkeypatch.setattr(
+        store,
+        "resolve_current",
+        lambda encoded_path: state.read_pin("kimi", encoded_path),
+    )
+    response = await jp_fetch(
+        URL,
+        "providers",
+        "kimi",
+        "switch",
+        method="POST",
+        body=json.dumps({"encoded_path": encoded, "session_id": target}),
+    )
+    assert response.code == 200
+    assert state.read_pin("kimi", encoded) == target
+    # The response's `current` is re-resolved AFTER the pin lands, so a
+    # pinned project's second switch no longer answers the old pin and the
+    # panel no longer toasts a failure for a switch that succeeded (DEF-102).
+    assert json.loads(response.body)["current"] == target
+
+
 def test_the_shallowest_assistant_in_the_tree_wins(monkeypatch):
     """A terminal running one assistant that spawned another is the FIRST's.
 

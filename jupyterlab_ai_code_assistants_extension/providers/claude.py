@@ -846,14 +846,14 @@ class ClaudeStore(SessionStore):
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
         """Make ``session_id`` the project's current conversation.
 
-        Two writes, for two different readers: the transcript's mtime is touched
-        so Claude's own ``--resume`` picker stays roughly aligned, and the pin is
-        written so this store's resolution sticks even after later activity in
-        another conversation bumps its mtime higher. The pin is written only
-        when the branch can actually become current - a cwd-foreign branch
-        cannot, so pinning it would clobber a valid pin and silently fall back
-        to recency. ``current`` is re-resolved after both writes, so it differs
-        from ``requested`` exactly when the switch could not take.
+        One write: the transcript's mtime is touched so Claude's own
+        ``--resume`` picker stays roughly aligned. The PIN is the route's job,
+        written on the IOLoop thread after this returns - state writes are
+        loop-serialised (docs/defects.md DEF-99/DEF-101), and this store used
+        to be the one of four whose switch also pinned, from the executor. Its
+        old cwd-eligibility condition went with the write: the route pinned
+        unconditionally right after, so the condition was unreachable through
+        the wire since the port (DEF-101 records the intent it once carried).
         """
         if not is_safe_segment(session_id):
             return None
@@ -867,13 +867,7 @@ class ClaudeStore(SessionStore):
             os.utime(jsonl, None)
         except OSError:
             pass
-        cwd = _jsonl_cwd(jsonl)
-        if cwd and _project_path_for_cwd(cwd, project_dir.name):
-            state.write_pin(self.provider_id, encoded_path, session_id)
-        return {
-            "requested": session_id,
-            "current": self.resolve_current(encoded_path),
-        }
+        return {"requested": session_id}
 
     # -- mutation --------------------------------------------------------
 

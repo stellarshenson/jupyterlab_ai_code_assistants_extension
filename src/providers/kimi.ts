@@ -9,8 +9,8 @@
 // * `colourSource: 'derived'` - kimi has no `/color`, so the default tint is a
 //   stable hash of the conversation id (a user-set colour still wins, per the
 //   Colour section of the acceptance criteria)
-// * `namingStrategy: 'server-side'` - the name is stamped into the copied
-//   `state.json`, not passed to the CLI
+// * `promptsForBranchName: true` - the branch flow asks for a name, which the
+//   server stamps into the copied `state.json`, not passed to the CLI
 // * one launch mode, `--yolo`, under kimi's own name
 //
 // The only hook is the branch label: kimi's conversation titles are
@@ -124,7 +124,7 @@ export const descriptor: IProviderDescriptor = {
   colourSource: 'derived',
   // The fork's name is written into the copy's `state.json` by the server; the
   // CLI has no naming flag to take it.
-  namingStrategy: 'server-side',
+  promptsForBranchName: true,
   // A bare `kimi` mints its own id and writes it on the first turn, and `-S`
   // only ever resumes - so a new conversation cannot be launched under an id
   // we chose, and is identified from the store on the next poll instead.

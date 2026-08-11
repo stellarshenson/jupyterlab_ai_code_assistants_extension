@@ -84,7 +84,12 @@ const CORE_DIR = path.resolve(__dirname, '..', 'core');
 /** Drop block and line comments, leaving code and string literals. */
 function stripComments(source: string): string {
   return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, match =>
+      // DEF-80: keep the comment's newlines, or every line after a block
+      // comment is reported at the wrong number - the licence header alone
+      // shifts a real violation by the length of the header.
+      '\n'.repeat((match.match(/\n/g) ?? []).length)
+    )
     .replace(/^[^\n]*?\/\/.*$/gm, line =>
       // Keep the part before a trailing `//`, so code on a commented line is
       // still scanned - but drop a whole-line comment entirely.
@@ -199,5 +204,15 @@ describe('the comment-stripping the scan relies on', () => {
     expect(stripComments("const id = 'claude'; // the base")).toMatch(
       ASSISTANT_NAMES
     );
+  });
+
+  it('reports a violation at its real line number, past a block comment', () => {
+    // DEF-80: the block comment used to be replaced by nothing, so every line
+    // after it was reported short by the comment's height - a violation under
+    // a header comment pointed at unrelated code.
+    const source = `/**\n * ported\n * from a comment\n */\nconst id = 'claude';`;
+    expect(offenders(source, ASSISTANT_NAMES)).toEqual([
+      [5, "const id = 'claude';"]
+    ]);
   });
 });

@@ -45,7 +45,7 @@ export const descriptor: IProviderDescriptor = {
   colourSource: 'none',
   // Forks are unnamed - Codex has no naming flag and no writable title field,
   // so the panel never asks for a name it could not stamp anywhere.
-  namingStrategy: 'none',
+  promptsForBranchName: false,
   // A bare `codex` mints its own thread id; there is no `--session-id`.
   mintsNewSessionId: false,
   launchModes: [

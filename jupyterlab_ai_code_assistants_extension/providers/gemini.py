@@ -112,8 +112,10 @@ _META_KEYS = ("sessionId", "summary", "kind")
 
 # Per-file metadata cache: path -> (st_mtime_ns, st_size, parsed). A chat file
 # is re-read only when its mtime or size changed, so the 30s sessions poll stops
-# re-scanning transcripts that did not move.
+# re-scanning transcripts that did not move. Cleared wholesale rather than
+# evicted: the map is a memo, and rebuilding it costs one read per file in use.
 _meta_cache: dict[str, tuple[int, int, dict | None]] = {}
+_META_CACHE_MAX = 1024
 
 # Bound on the first-prompt preview, which is a tooltip line rather than a
 # document - an unbounded first turn would carry a whole pasted file into every
@@ -324,6 +326,8 @@ def read_chat_meta(path: Path) -> dict | None:
     except OSError:
         return None
     meta = _parse_chat(raw)
+    if len(_meta_cache) >= _META_CACHE_MAX:
+        _meta_cache.clear()
     _meta_cache[key] = (st.st_mtime_ns, st.st_size, meta)
     return meta
 
@@ -658,11 +662,12 @@ class GeminiStore(SessionStore):
         return current[1]["session_id"] if current else None
 
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
-        """Make ``session_id`` current by touching its chat file's mtime.
+        """Validate ``session_id`` and stamp its chat file's mtime.
 
-        The durable half of the switch is the core's pin, written after this
-        returns; the touch is what makes the re-resolution below agree with the
-        request instead of answering with the recency winner.
+        The route's pin, written after this returns, is what decides
+        ``current``; the touch is read back through mtime - the project row's
+        ``file_mtime`` and ordering, the branch list's ordering, and the
+        recency fallback when no pin resolves.
         """
         if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
             return None
@@ -678,10 +683,7 @@ class GeminiStore(SessionStore):
             # The pin still carries the switch; only the recency alignment is
             # lost, and a failed touch must not fail the action.
             pass
-        return {
-            "requested": session_id,
-            "current": self.resolve_current(encoded_path),
-        }
+        return {"requested": session_id}
 
     # -- mutation --------------------------------------------------------
 

@@ -283,10 +283,12 @@ class SessionStore(ABC):
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
         """Make ``session_id`` the project's current conversation.
 
-        Returns ``{"requested", "current"}`` with ``current`` re-resolved after
-        the write - the two differ when the requested conversation cannot
-        become current. ``{"error": "branch_not_found"}`` when it no longer
-        exists (removed between menu display and click), None on invalid input.
+        Returns ``{"requested"}`` on success - the store's job is validation
+        plus, where the provider has one, a recency-aligning touch. The route
+        writes the pin and resolves ``current`` once this returns
+        (docs/defects.md DEF-102/DEF-103). ``{"error": "branch_not_found"}``
+        when it no longer exists (removed between menu display and click),
+        None on invalid input.
         """
 
     # -- mutation --------------------------------------------------------

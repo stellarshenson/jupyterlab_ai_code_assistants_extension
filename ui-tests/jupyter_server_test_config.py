@@ -42,6 +42,18 @@ SCRATCH = Path(os.environ.get("JLAB_TEST_SCRATCH") or (HERE / ".scratch" / PORT)
 # apart silently.
 STUBBED = ("claude", "codex", "kimi")
 
+# The ONE background agent the stubbed roster answers with, and the
+# conversation it owns (DEF-88). Without it the roster was empty, so the "bg"
+# chip - the second badge the name line has to keep unclipped - was never
+# rendered in a browser at all.
+#
+# It owns the WIDE project's newest conversation, seeded below under this id,
+# and deliberately not one of "branchy"'s: a conversation a live worker holds
+# is attached to rather than resumed, and every spec that clicks, launches or
+# right-clicks works on "branchy", which stays unowned.
+_BG_SESSION_ID = "wide-1"
+_BG_AGENT_ID = "bg-wide"
+
 # A JupyterHub-spawned shell exports credentials for the developer's live
 # server. Inherited into the test server they would let it - and any test -
 # talk to that server; dropped here they cannot.
@@ -89,13 +101,27 @@ os.environ["JUPYTERLAB_GALATA_ROOT_DIR"] = str(_root)
 # ``agents`` is answered because the Claude provider probes it on every
 # listing; left to the sleeping branch it would stall each poll for the
 # subprocess timeout.
+#
+# The roster carries one live background agent. ``pid`` is this server's own
+# process: the provider trusts an entry only while it can verify the worker
+# alive, so a made-up pid would be filtered out and the answer would be empty
+# again.
 _STUB = """#!/bin/sh
 case "$1" in
-  agents) echo '[]'; exit 0 ;;
+  agents) echo '%s'; exit 0 ;;
 esac
 echo "stub $0 running"
 sleep 120
-"""
+""" % json.dumps(
+    [
+        {
+            "id": _BG_AGENT_ID,
+            "kind": "background",
+            "pid": os.getpid(),
+            "sessionId": _BG_SESSION_ID,
+        }
+    ]
+)
 for _name in STUBBED:
     _path = _stub_bin / _name
     _path.write_text(_STUB, encoding="utf-8")
@@ -151,8 +177,10 @@ _wide_cwd = _root / "a-deliberately-very-long-project-name-that-overflows-the-si
 _wide_cwd.mkdir(parents=True, exist_ok=True)
 _wdir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(str(_wide_cwd))
 _wdir.mkdir(parents=True, exist_ok=True)
-for _i in range(2):
-    _jsonl = _wdir / f"wide-{_i}.jsonl"
+# Newest last, so the bg-owned conversation is the project's current one and
+# the chip lands on the row rather than only in the branch submenus.
+for _i, _wide_id in enumerate(("wide-0", _BG_SESSION_ID)):
+    _jsonl = _wdir / f"{_wide_id}.jsonl"
     _jsonl.write_text(json.dumps({"cwd": str(_wide_cwd)}) + "\n", encoding="utf-8")
     os.utime(_jsonl, (_now - 600 + _i, _now - 600 + _i))
 

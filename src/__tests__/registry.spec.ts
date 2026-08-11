@@ -17,7 +17,6 @@ const EXPECTED_IDS = ['claude', 'codex', 'kimi', 'gemini'];
 
 const FORK_STRATEGIES = ['native-flag', 'native-command', 'server-copy'];
 const COLOUR_SOURCES = ['native', 'derived', 'none'];
-const NAMING_STRATEGIES = ['launch-flag', 'server-side', 'none'];
 
 function stub(id: string): IProviderModule {
   return {
@@ -30,7 +29,7 @@ function stub(id: string): IProviderModule {
       cliBinary: id,
       forkStrategy: 'server-copy',
       colourSource: 'none',
-      namingStrategy: 'none',
+      promptsForBranchName: false,
       mintsNewSessionId: false,
       launchModes: [],
       hasRemoteControl: false,
@@ -65,7 +64,7 @@ describe('the providers barrel', () => {
       expect(descriptor.iconSvg).toContain('<svg');
       expect(FORK_STRATEGIES).toContain(descriptor.forkStrategy);
       expect(COLOUR_SOURCES).toContain(descriptor.colourSource);
-      expect(NAMING_STRATEGIES).toContain(descriptor.namingStrategy);
+      expect(typeof descriptor.promptsForBranchName).toBe('boolean');
       expect(typeof descriptor.mintsNewSessionId).toBe('boolean');
       expect(typeof descriptor.hasRemoteControl).toBe('boolean');
       expect(typeof descriptor.hasBgAgents).toBe('boolean');

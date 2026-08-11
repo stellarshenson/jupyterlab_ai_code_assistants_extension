@@ -9,9 +9,9 @@
 // * `colourSource: 'none'` - no colour command, and nothing in the chat store
 //   records one, so a tab tint only ever comes from the extension's own
 //   write-back store
-// * `namingStrategy: 'server-side'` - a fork's name is stamped into the copied
-//   chat file's `summary`, which is the field the CLI itself displays a
-//   conversation under; there is no naming flag to pass it to
+// * `promptsForBranchName: true` - the branch flow asks for a name, which the
+//   server stamps into the copied chat file's `summary`, the field the CLI
+//   itself displays a conversation under; there is no naming flag to pass it to
 // * `mintsNewSessionId: true` - `--session-id <uuid>` starts a fresh
 //   conversation under an id we chose, so a new session is identifiable from
 //   its argv on the first poll instead of being an unknown terminal
@@ -51,7 +51,7 @@ export const descriptor: IProviderDescriptor = {
   colourSource: 'none',
   // The fork's name is written into the copy by the server; the CLI has no
   // naming flag to take it.
-  namingStrategy: 'server-side',
+  promptsForBranchName: true,
   // `--session-id <uuid>` starts a conversation under an id we mint.
   mintsNewSessionId: true,
   launchModes: [

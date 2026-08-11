@@ -107,6 +107,38 @@ test('DEF-41 - a name too wide for the sidebar does not clip its badges', async 
   expect(overflowing).toBe(true);
 });
 
+test('DEF-88 - the background-agent chip renders inside its row', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // The seeded roster owns exactly this project's current conversation, so the
+  // chip belongs to this row and to no other.
+  const row = page
+    .locator(PANEL)
+    .locator('.jp-AiAssistantsPanel-row', { hasText: WIDE_NAME })
+    .first();
+  await expect(row).toBeVisible({ timeout: 15000 });
+
+  const chip = row.locator('.jp-AiAssistantsPanel-bgBadge');
+  await expect(chip).toHaveText('bg');
+  await expect(chip).toBeVisible();
+
+  // Same box comparison as DEF-41 above, and for the same reason: the chip is
+  // the SECOND badge on the name line, so it is the one an ellipsising name
+  // pushes out of the row first.
+  const chipBox = await chip.boundingBox();
+  const rowBox = await row.boundingBox();
+  expect(chipBox).not.toBeNull();
+  expect(rowBox).not.toBeNull();
+  expect(chipBox!.width).toBeGreaterThan(0);
+  expect(chipBox!.x).toBeGreaterThanOrEqual(rowBox!.x);
+  expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(
+    rowBox!.x + rowBox!.width + 1
+  );
+});
+
 test('DEF-42 - submenus draw a caret', async ({ page }) => {
   await page.goto();
   await openPanelTab(page, 'claude');

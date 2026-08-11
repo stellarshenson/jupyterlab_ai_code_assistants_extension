@@ -17,6 +17,12 @@ const root = join(here, '..');
 const providersDir = join(root, 'lib', 'providers');
 const target = join(root, 'schema', 'plugin.json');
 
+// The Recent-section bounds have ONE home - `src/core/limits.ts`. Read the
+// compiled module (import-free, so Node can load it) instead of restating the
+// numbers here, where they would drift from the clamp the panel applies.
+const { DEFAULT_RECENT_LIMIT, MIN_RECENT_LIMIT, MAX_RECENT_LIMIT } =
+  await import(pathToFileURL(join(root, 'lib', 'core', 'limits.js')).href);
+
 /** Settings shared by every panel - the part that is not per provider. */
 const SHARED = {
   presentationMode: {
@@ -32,9 +38,9 @@ const SHARED = {
     title: 'Recent items count',
     description:
       'Number of sessions listed in the Recent section, sorted by last activity (descending). The section displays up to 10 rows and scrolls for the rest.',
-    default: 10,
-    minimum: 1,
-    maximum: 100
+    default: DEFAULT_RECENT_LIMIT,
+    minimum: MIN_RECENT_LIMIT,
+    maximum: MAX_RECENT_LIMIT
   },
   colouredTabs: {
     type: 'boolean',

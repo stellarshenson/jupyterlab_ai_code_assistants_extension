@@ -69,8 +69,11 @@ _BARE_UUID_RE = re.compile(r"[0-9a-f-]{36}")
 _MESSAGE_PATTERN = b'"type":"context.append_message"'
 # Per-wire-file message-count cache: path -> (st_mtime_ns, st_size, count). A
 # wire log is re-read only when its mtime or size changed, so the 30s sessions
-# poll stops re-scanning transcripts that did not move.
+# poll stops re-scanning transcripts that did not move. Cleared wholesale rather
+# than evicted: the map is a memo, and rebuilding it costs one read per file in
+# use.
 _message_count_cache: dict[str, tuple[int, int, int]] = {}
+_MESSAGE_COUNT_CACHE_MAX = 1024
 
 # The colour vocabulary of ``jupyterlab_colourful_tab_extension``, in its own
 # order. Kimi has no ``/color``, so a conversation's default tint is a hash onto
@@ -223,6 +226,8 @@ def _message_count(session_dir: Path) -> int:
                         file_count += 1
         except OSError:
             continue
+        if len(_message_count_cache) >= _MESSAGE_COUNT_CACHE_MAX:
+            _message_count_cache.clear()
         _message_count_cache[key] = (st.st_mtime_ns, st.st_size, file_count)
         count += file_count
     return count
@@ -455,11 +460,12 @@ class KimiStore(SessionStore):
         return current[0].name if current else None
 
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
-        """Make ``session_id`` current by touching its ``state.json`` mtime.
+        """Validate ``session_id`` and stamp its ``state.json`` mtime.
 
-        The durable half of the switch is the core's pin, written after this
-        returns; the touch is what makes the re-resolution below agree with the
-        request instead of answering with the recency winner.
+        The route's pin, written after this returns, is what decides
+        ``current``; the touch is read back through mtime - the project row's
+        ``file_mtime`` and ordering, the branch list's ordering, and the
+        recency fallback when no pin resolves.
         """
         if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
             return None
@@ -475,10 +481,7 @@ class KimiStore(SessionStore):
             # The pin still carries the switch; only the recency alignment is
             # lost, and a failed touch must not fail the action.
             pass
-        return {
-            "requested": session_id,
-            "current": self.resolve_current(encoded_path),
-        }
+        return {"requested": session_id}
 
     # -- mutation --------------------------------------------------------
 

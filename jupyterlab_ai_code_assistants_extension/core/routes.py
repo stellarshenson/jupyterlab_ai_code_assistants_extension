@@ -223,21 +223,29 @@ def enabled_setting_key(provider_id: str) -> str:
     return f"providers.{provider_id}.enabled"
 
 
-def _provider_enabled(provider_id: str) -> bool:
+def _provider_enabled(provider_id: str, settings: dict | None = None) -> bool:
     """Whether the user has left a provider on.
 
     An absent key reads as on - only an explicit ``false`` disables, so a fresh
     install with no saved settings runs every provider (acc-crit "Missing key
     reads as on").
+
+    ``settings`` lets a caller asking about SEVERAL providers hand in the saved
+    settings it already read, so one request parses the file once instead of
+    once per provider (docs/defects.md DEF-91). Omitted, it reads them itself,
+    which is what a single-provider gate does.
     """
-    return _user_settings().get(enabled_setting_key(provider_id)) is not False
+    if settings is None:
+        settings = _user_settings()
+    return settings.get(enabled_setting_key(provider_id)) is not False
 
 
 def _enabled_providers() -> dict[str, registry.Provider]:
+    settings = _user_settings()
     return {
         pid: provider
         for pid, provider in registry.providers().items()
-        if _provider_enabled(pid)
+        if _provider_enabled(pid, settings)
     }
 
 
@@ -320,22 +328,32 @@ class StatusHandler(APIHandler):
     """
 
     @tornado.web.authenticated
-    def get(self) -> None:
+    async def get(self) -> None:
         # ``server_root_dir`` is the root path Jupyter serves from; fall back to
         # home when unset. Expand a leading ``~`` - some deployments leave the
         # setting as ``~/workspace``, and the frontend compares it against
         # absolute session paths, so an unexpanded ``~`` never matches.
         root_dir = os.path.expanduser(self.settings.get("server_root_dir") or "~")
-        providers = []
-        for pid, provider in registry.providers().items():
-            cli_path = provider.cli_path()
-            providers.append({
-                "id": pid,
-                "label": provider.descriptor.label,
-                "enabled": _provider_enabled(pid),
-                "cli_path": cli_path,
-                "available": cli_path is not None,
-            })
+
+        def roster() -> list[dict]:
+            # The saved settings read ONCE for the whole roster rather than once
+            # per provider (docs/defects.md DEF-91).
+            settings = _user_settings()
+            rows = []
+            for pid, provider in registry.providers().items():
+                cli_path = provider.cli_path()
+                rows.append({
+                    "id": pid,
+                    "label": provider.descriptor.label,
+                    "enabled": _provider_enabled(pid, settings),
+                    "cli_path": cli_path,
+                    "available": cli_path is not None,
+                })
+            return rows
+
+        # Off the IOLoop: the roster globs and parses the settings file and
+        # stats PATH for every provider's binary.
+        providers = await asyncio.get_running_loop().run_in_executor(None, roster)
         self.finish(json.dumps({
             "root_dir": str(root_dir),
             "providers": providers,
@@ -495,7 +513,20 @@ class SwitchHandler(_ProviderHandler):
             return
         # The pin outlives recency: without it, continuing to work in the
         # conversation the user switched away from drags the row back to it.
+        # Written HERE on the loop for every provider - the store's switch only
+        # touches mtimes, never the state file, so no pin write can run on the
+        # executor thread above (docs/defects.md DEF-99/DEF-101).
         state.write_pin(provider.id, encoded_path, session_id)
+        # `current` is answered HERE, after the pin is on disk - the stores no
+        # longer compute it at all (docs/defects.md DEF-103). Answering before
+        # the pin landed served the OLD pin for a project that already carried
+        # one - deterministically, on every switch after the first - and the
+        # panel reads `current != requested` as a failed switch (DEF-102).
+        # This is a READ, so it is pooled, and it applies the store's own pin
+        # validation rather than assuming the answer.
+        result["current"] = await asyncio.get_running_loop().run_in_executor(
+            None, provider.store.resolve_current, encoded_path
+        )
         self.finish(json.dumps(result))
 
 
@@ -503,7 +534,7 @@ class FavouriteHandler(_ProviderHandler):
     """Star or unstar a project, per provider."""
 
     @tornado.web.authenticated
-    def post(self, provider_id: str) -> None:
+    async def post(self, provider_id: str) -> None:
         provider = self.resolve(provider_id)
         if provider is None:
             return
@@ -515,6 +546,11 @@ class FavouriteHandler(_ProviderHandler):
         if not isinstance(project_path, str) or not isinstance(favourite, bool):
             self.bad_request()
             return
+        # ON the loop DELIBERATELY: every WRITE to a state or colour file runs
+        # on the IOLoop thread, so the loop itself serialises the unlocked
+        # read-modify-rewrite - a pooled write races the loop-thread pin
+        # writes and silently loses one (docs/defects.md DEF-99). Only READS
+        # go to the executor (DEF-82).
         favs = state.toggle_favourite(provider.id, project_path, favourite)
         self.finish(json.dumps({"favourites": favs}))
 
@@ -543,8 +579,11 @@ class ColoursHandler(_ProviderHandler):
     the choice once it believes the store holds it.
     """
 
-    def _finish_store(self, provider: registry.Provider) -> None:
-        colours, overrides = colour_store.load_store(provider.id)
+    async def _finish_store(self, provider: registry.Provider) -> None:
+        # Off the IOLoop: the store is a file read (docs/defects.md DEF-82).
+        colours, overrides = await asyncio.get_running_loop().run_in_executor(
+            None, colour_store.load_store, provider.id
+        )
         self.finish(json.dumps({"colours": colours, "overrides": overrides}))
 
     def _store_unwritable(self) -> None:
@@ -552,14 +591,14 @@ class ColoursHandler(_ProviderHandler):
         self.finish(json.dumps({"error": "colour_store_unwritable"}))
 
     @tornado.web.authenticated
-    def get(self, provider_id: str) -> None:
+    async def get(self, provider_id: str) -> None:
         provider = self.resolve(provider_id)
         if provider is None:
             return
-        self._finish_store(provider)
+        await self._finish_store(provider)
 
     @tornado.web.authenticated
-    def post(self, provider_id: str) -> None:
+    async def post(self, provider_id: str) -> None:
         provider = self.resolve(provider_id)
         if provider is None:
             return
@@ -582,13 +621,17 @@ class ColoursHandler(_ProviderHandler):
         if not isinstance(hand_set, bool):
             self.bad_request()
             return
+        # ON the loop: state/colour WRITES are loop-serialised (docs/defects.md
+        # DEF-99); only reads use the executor. Provider-store work (fork,
+        # switch, delete) legitimately stays pooled - it never WRITES these
+        # files, and its pooled reads are safe against the atomic rename.
         if not colour_store.set_colour(provider.id, session_id, colour, hand_set):
             self._store_unwritable()
             return
-        self._finish_store(provider)
+        await self._finish_store(provider)
 
     @tornado.web.authenticated
-    def delete(self, provider_id: str) -> None:
+    async def delete(self, provider_id: str) -> None:
         provider = self.resolve(provider_id)
         if provider is None:
             return
@@ -599,12 +642,15 @@ class ColoursHandler(_ProviderHandler):
         if not isinstance(session_ids, list):
             self.bad_request()
             return
+        # ON the loop, like the write above: state/colour WRITES are
+        # loop-serialised (docs/defects.md DEF-99).
         if not colour_store.drop_colours(
-            provider.id, [sid for sid in session_ids if isinstance(sid, str)]
+            provider.id,
+            [sid for sid in session_ids if isinstance(sid, str)],
         ):
             self._store_unwritable()
             return
-        self._finish_store(provider)
+        await self._finish_store(provider)
 
 
 class BranchHandler(_ProviderHandler):
@@ -850,12 +896,13 @@ class TerminalHandler(_ProviderHandler):
     answers ``running: false`` with no conversation, so one provider's panel can
     never read another's session ids out of a shared terminal.
 
-    Deliberately synchronous, unlike the listing handlers: this reads ``/proc``
-    and at most one store lookup - bounded filesystem work with no subprocess.
+    Off the IOLoop like the listing handlers: the probe walks ``/proc`` for the
+    whole process tree and reaches the store, bounded work but still filesystem
+    work, and it runs once per probed terminal (docs/defects.md DEF-82).
     """
 
     @tornado.web.authenticated
-    def get(self, provider_id: str, terminal_name: str) -> None:
+    async def get(self, provider_id: str, terminal_name: str) -> None:
         provider = self.resolve(provider_id)
         if provider is None:
             return
@@ -892,27 +939,35 @@ class TerminalHandler(_ProviderHandler):
             self.set_status(500)
             self.finish(json.dumps({"error": "terminal_has_no_pty"}))
             return
-        found, session_id = _tree_assistant(ptyproc.pid)
-        running = found is not None and found.id == provider.id
-        self.finish(json.dumps({
-            "terminal_name": terminal_name,
-            "running": running,
-            "cwds": _terminal_cwds(ptyproc.pid),
-            "session_id": session_id if running else None,
-            # The conversation's own colour, not the row's: a row carries only
-            # the project's current conversation, which flips to any newer one,
-            # so the store is asked for THIS conversation's default - once per
-            # probed terminal, never per row.
-            "colour": (
-                _effective_colour(
-                    session_id,
-                    provider.store.default_colour(session_id) if session_id else None,
-                    colour_store.load_colours(provider.id),
-                )
-                if running
-                else None
-            ),
-        }))
+        pid = ptyproc.pid
+
+        def probe() -> dict:
+            found, session_id = _tree_assistant(pid)
+            running = found is not None and found.id == provider.id
+            return {
+                "terminal_name": terminal_name,
+                "running": running,
+                "cwds": _terminal_cwds(pid),
+                "session_id": session_id if running else None,
+                # The conversation's own colour, not the row's: a row carries
+                # only the project's current conversation, which flips to any
+                # newer one, so the store is asked for THIS conversation's
+                # default - once per probed terminal, never per row.
+                "colour": (
+                    _effective_colour(
+                        session_id,
+                        provider.store.default_colour(session_id)
+                        if session_id
+                        else None,
+                        colour_store.load_colours(provider.id),
+                    )
+                    if running
+                    else None
+                ),
+            }
+
+        payload = await asyncio.get_running_loop().run_in_executor(None, probe)
+        self.finish(json.dumps(payload))
 
 
 class MigrateHandler(APIHandler):
@@ -922,6 +977,9 @@ class MigrateHandler(APIHandler):
     def post(self) -> None:
         # The retired extensions' settings sit beside this one's, so migration
         # reads the folder THIS server writes to rather than the default.
+        # Synchronous ON the loop DELIBERATELY: migrate WRITES provider state
+        # (favourites merge into state files), and state/colour writes are
+        # loop-serialised (docs/defects.md DEF-99).
         migrated = migrate.migrate(
             registry.providers().values(), _user_settings_dir()
         )

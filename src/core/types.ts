@@ -26,14 +26,6 @@ export type ForkStrategy = 'native-flag' | 'native-command' | 'server-copy';
  * the extension's own write-back store always wins over all three. */
 export type ColourSource = 'native' | 'derived' | 'none';
 
-/** Who owns a branched conversation's name.
- *
- * - `launch-flag` - the CLI is told the name at launch and stamps it itself
- * - `server-side` - the server writes the name into the copied store entry
- * - `none` - the assistant has no naming surface, so no name is asked for
- */
-export type NamingStrategy = 'launch-flag' | 'server-side' | 'none';
-
 /** One launch-behaviour setting of an assistant, in that assistant's own
  * terminology. `boolean` modes are the unsafe/skip-approval switches: they get
  * a settings toggle (off by default) AND a context-menu launch variant.
@@ -86,7 +78,9 @@ export interface IProviderDescriptor {
   cliBinary: string;
   forkStrategy: ForkStrategy;
   colourSource: ColourSource;
-  namingStrategy: NamingStrategy;
+  /** Whether the branch flow asks the user to name the new conversation.
+   * Where that name then GOES is `forkStrategy`'s job. */
+  promptsForBranchName: boolean;
   /** The CLI starts a brand-new conversation under an id we give it, so a
    * fresh session is identifiable from its argv on the first poll instead of
    * being an unknown terminal until it writes its store entry. Independent of
@@ -235,7 +229,7 @@ export interface ILaunchRequest {
   fork_session_id?: string;
   /** Parent conversation to fork from (`forkStrategy: 'native-command'`). */
   fork_from?: string;
-  /** Name to stamp on the new conversation (`namingStrategy: 'launch-flag'`). */
+  /** Name to stamp on the new conversation (`promptsForBranchName: true`). */
   name?: string;
   /** The launch mode this action runs under, as one token in the assistant's
    * own terminology: a boolean mode is its bare `ILaunchMode.id`, an enum mode

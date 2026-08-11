@@ -144,16 +144,32 @@ def test_claude_branches_exclude_the_current_conversation(claude):
     assert set(store.project_session_ids(CLAUDE_ENCODED)) == {first, second}
 
 
-def test_claude_switch_pins_and_reresolves(claude):
+def test_claude_switch_touches_and_the_route_side_pin_outlives_recency(claude):
     store, root = claude
     first, second = new_uuid(), new_uuid()
-    write_claude_tree(
+    project_dir = write_claude_tree(
         root, [{"id": first, "cwd": PROJECT_PATH}, {"id": second, "cwd": PROJECT_PATH}]
     )
+    # Age the rival: with no store-side pin, `current` resolves by recency,
+    # and both transcripts are written in the same second - the switch's own
+    # utime must be the unambiguous newest.
+    touch(project_dir / f"{second}.jsonl", -600)
+    # The target is aged too, so the touch assertion below compares against a
+    # clearly-older stamp rather than racing the clock on a same-instant one.
+    touch(project_dir / f"{first}.jsonl", -300)
+    before = (project_dir / f"{first}.jsonl").stat().st_mtime
     result = store.switch(CLAUDE_ENCODED, first)
-    assert result == {"requested": first, "current": first}
+    assert result == {"requested": first}
+    # The touch is the switch's one remaining side effect - it aligns Claude's
+    # own --resume picker - so its loss must redden something.
+    assert (project_dir / f"{first}.jsonl").stat().st_mtime > before
+    # The route writes the pin once the store's switch returns (state writes
+    # are loop-owned, DEF-99/DEF-101), so the fixture reproduces both halves -
+    # the same split kimi's test below documents.
+    state.write_pin("claude", CLAUDE_ENCODED, first)
     # The pin outlives recency: the other transcript being newer must not drag
     # the row back to it.
+    touch(project_dir / f"{second}.jsonl", 60)
     assert store.resolve_current(CLAUDE_ENCODED) == first
     assert store.switch(CLAUDE_ENCODED, new_uuid()) == {"error": "branch_not_found"}
 
@@ -161,9 +177,14 @@ def test_claude_switch_pins_and_reresolves(claude):
 def test_claude_delete_never_touches_the_current_conversation(claude):
     store, root = claude
     keep, drop = new_uuid(), new_uuid()
-    write_claude_tree(
+    project_dir = write_claude_tree(
         root, [{"id": keep, "cwd": PROJECT_PATH}, {"id": drop, "cwd": PROJECT_PATH}]
     )
+    # Age the rival: with no store-side pin (DEF-101), `resolve_current` here
+    # rides on recency, and both transcripts are written in the same instant -
+    # the switch's utime must be the unambiguous newest or glob order decides
+    # which conversation the delete protects.
+    touch(project_dir / f"{drop}.jsonl", -600)
     store.switch(CLAUDE_ENCODED, keep)
     # The ids that ACTUALLY went, so the core drops exactly those colours.
     assert store.delete_branches(CLAUDE_ENCODED, [keep, drop]) == [drop]
@@ -327,10 +348,7 @@ def test_codex_switch_answers_without_writing(codex):
             {"id": other, "preview": "b", "recency_ms": 1000},
         ],
     )
-    assert store.switch(PROJECT_PATH, other) == {
-        "requested": other,
-        "current": other,
-    }
+    assert store.switch(PROJECT_PATH, other) == {"requested": other}
     assert store.switch(PROJECT_PATH, new_uuid()) == {"error": "branch_not_found"}
     # Not a thread id at all - refused before it can reach an argv.
     assert store.switch(PROJECT_PATH, "--all") is None

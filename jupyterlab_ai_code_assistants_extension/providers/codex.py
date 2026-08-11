@@ -417,7 +417,7 @@ class CodexStore(SessionStore):
         return threads[0]
 
     def _resolve_project_current(
-        self, project_path: str, threads: list[dict], pin: str | None = None
+        self, project_path: str, threads: list[dict]
     ) -> dict:
         """The conversation the PANEL calls current for this project.
 
@@ -429,8 +429,7 @@ class CodexStore(SessionStore):
         but husks, where there is no visible thread to prefer.
         """
         visible = [t for t in threads if _is_visible(t)]
-        if pin is None:
-            pin = self._pin(project_path)
+        pin = self._pin(project_path)
         return self._resolve(visible or threads, pin)
 
     # -- listing ---------------------------------------------------------
@@ -524,15 +523,12 @@ class CodexStore(SessionStore):
         return self._resolve_project_current(encoded_path, threads)["id"]
 
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
-        """Answer what pinning ``session_id`` will make current.
+        """Validate that ``session_id`` can be switched to.
 
-        The core writes the pin itself once this returns, so nothing is written
-        here - ``current`` is resolved as if the pin were already in place. The
-        two fields DIFFER when the pin will be written but the panel will still
-        show something else: the current conversation resolves over the VISIBLE
-        population, and a thread with no turns yet is not part of it. The
-        frontend depends on that disagreement to say the switch has not taken
-        effect, so the pair must not be collapsed.
+        Nothing is written here, and nothing is resolved: the route writes the
+        pin and resolves ``current`` once this returns (docs/defects.md
+        DEF-102/DEF-103), so this store's whole contribution is the checks
+        below.
         """
         if not is_thread_id(session_id):
             return None
@@ -541,8 +537,7 @@ class CodexStore(SessionStore):
             return None
         if not any(t["id"] == session_id for t in threads):
             return {"error": "branch_not_found"}
-        current = self._resolve_project_current(encoded_path, threads, session_id)
-        return {"requested": session_id, "current": current["id"]}
+        return {"requested": session_id}
 
     # -- disposal --------------------------------------------------------
 

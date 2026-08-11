@@ -59,7 +59,7 @@ const DESCRIPTOR: IProviderDescriptor = {
   cliBinary: 'testbed',
   forkStrategy: 'native-flag',
   colourSource: 'derived',
-  namingStrategy: 'launch-flag',
+  promptsForBranchName: true,
   mintsNewSessionId: true,
   launchModes: [
     {

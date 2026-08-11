@@ -1,5 +1,13 @@
-# Makefile for Jupyterlab extensions version 1.36
+# Makefile for Jupyterlab extensions version 1.37
 # changelog:
+#   1.37 - pin the global install prefix to the nodeenv when installing yarn + rimraf.
+#          `npm install -g` honours a user-level `prefix=` in ~/.npmrc even when run
+#          from the nodeenv's own npm, so on any machine that sets one the binaries
+#          landed in that prefix instead of $(NODEENV)/bin. check_dependencies tests
+#          for $(NODEENV)/bin/yarn, which then never became true, so every make
+#          invocation re-ran install_dependencies and reinstalled yarn - it never
+#          reported "All dependencies are installed". Passing --prefix explicitly
+#          overrides the config for that one command and leaves ~/.npmrc untouched.
 #   1.36 - `test` runs the Python suite too, not just jlpm. It ran `jlpm test` alone,
 #          so on any extension with a server side a Python regression passed local
 #          verification and only failed in CI. pytest now runs whenever the package
@@ -139,7 +147,7 @@ install_dependencies:
 	fi
 	@if [ ! -x "$(NODEENV)/bin/yarn" ]; then \
 		echo "Installing yarn + rimraf into $(NODEENV)..."; \
-		"$(NODEENV)/bin/npm" install -g yarn rimraf; \
+		"$(NODEENV)/bin/npm" install -g --prefix "$(NODEENV)" yarn rimraf; \
 	fi
 	@if [ ! -d node_modules ] || [ -z "$$(ls -A node_modules 2>/dev/null)" ]; then \
 		echo "Installing project node_modules (jlpm install)..."; \

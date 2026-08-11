@@ -4,6 +4,30 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.17] - 2026-08-11
+
+### Added
+
+- Single home for the recent-conversations limit constants (`src/core/limits.ts`), shared by the panel, the settings plugin and the schema generator
+- Migration end-to-end test against a real standalone-extension settings and favourites shape, plus tests pinning the state-write logging, the CLI timeout parity floor and the route-side switch pin
+- Background-agent chip rendered proof in the Galata suite (now 27 checks)
+
+### Changed
+
+- Store `switch()` contract slimmed to `{"requested"}` - the route owns both the pin write (IOLoop thread) and the post-pin `current` resolution; four dead store-side resolutions deleted and every switch docstring made truthful
+- State and colour file writes serialised on the IOLoop again after an executor conversion had de-serialised them (lost update reproduced 200/200)
+- `namingStrategy` union collapsed to `promptsForBranchName: boolean`; saved settings parsed once per request instead of four to five times
+- Per-file metadata caches capped in gemini and kimi to match claude's
+
+### Fixed
+
+- Every switch after the first in a pinned project answered the OLD pin as `current` and toasted a failure for a switch that succeeded (kimi and gemini since the port)
+- Claude's store-internal pin write raced the loop-side writers from the executor pool
+- Command rejection toasts for terminal-open and folder-open now name the failed command; request timeouts read as a slow server, not a dead one
+- Swallowed `OSError`s in the state store now log provider, path and errno
+- Block-comment stripping in the core-neutrality guard preserved line numbers (a measured ~141-line report skew)
+- Defect ledger grown to 110 entries, 0 open, across adversarial rounds 8-20 ending in a clean two-lens pair
+
 ## [1.0.10] - 2026-08-10
 
 ### Added

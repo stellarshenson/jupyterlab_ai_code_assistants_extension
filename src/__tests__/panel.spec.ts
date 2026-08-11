@@ -42,7 +42,7 @@ jest.mock('../core/request', () => ({
 }));
 
 import { TAB_COLOUR_IDS, fnv1aColour } from '../core/colour';
-import { addIcon, branchIcon, warningIcon } from '../core/icons';
+import { addIcon, branchIcon, shieldIcon } from '../core/icons';
 import { AssistantSessionsPanel, commandId } from '../core/panel';
 import { requestProvider } from '../core/request';
 import { IProviderDescriptor, ISession } from '../core/types';
@@ -284,7 +284,7 @@ describe('the + button names and marks the launch it performs', () => {
     expect(glyphs()).toEqual([addIcon.name]);
     panel.setModes({ skip: true });
     expect((panel as any)._visibleVariantCount()).toEqual(0);
-    expect(glyphs()).toEqual([warningIcon.name]);
+    expect(glyphs()).toEqual([shieldIcon.name]);
     // `LabIcon.element` appends, so a button that is not cleared collects one
     // svg per settings change.
     panel.setModes({ skip: false });
@@ -314,7 +314,7 @@ describe('DEF-35 / DEF-39 - the branch entry with no visible variants', () => {
     panel.setModes({ skip: true });
     // The suffix names the mode in words, but the icon slot is what marks
     // danger everywhere else in this menu.
-    expect(cmds(panel).icon(id(panel, 'branch-session'), {})).toBe(warningIcon);
+    expect(cmds(panel).icon(id(panel, 'branch-session'), {})).toBe(shieldIcon);
   });
 
   it('goes back to naming the launch alone while the variants render', () => {
@@ -354,7 +354,7 @@ describe('DEF-40 - the warning glyph is sized and coloured to stand out', () => 
   it('renders at 16x16, like its neutral siblings', () => {
     // Authored at 13x13 it rendered SMALLER than every icon beside it - the one
     // glyph whose job is to say "this differs" was also the least visible.
-    for (const icon of [warningIcon, addIcon, branchIcon]) {
+    for (const icon of [shieldIcon, addIcon, branchIcon]) {
       const el = svg(icon.svgstr);
       expect([
         icon.name,
@@ -365,11 +365,11 @@ describe('DEF-40 - the warning glyph is sized and coloured to stand out', () => 
   });
 
   it('paints in jp-icon-warn0 and not the neutral grey', () => {
-    // `jp-icon3` is the theme's neutral: in it the triangle measured the same
+    // `jp-icon3` is the theme's neutral: in it the glyph measured the same
     // rgb(97,97,97) as the icons it was supposed to differ from.
-    const path = svg(warningIcon.svgstr).querySelector('path')!;
+    const path = svg(shieldIcon.svgstr).querySelector('path')!;
     expect(path.getAttribute('class')).toEqual('jp-icon-warn0');
-    expect(warningIcon.svgstr).not.toContain('jp-icon3');
+    expect(shieldIcon.svgstr).not.toContain('jp-icon3');
   });
 });
 
@@ -380,7 +380,7 @@ describe('DEF-45 - both destructive menu entries are marked alike', () => {
     const commands = (panel as any)._commands;
     expect(
       commands.icon(commandId(DESCRIPTOR.id, 'cleanup-parallel'), {})
-    ).toBe(warningIcon);
+    ).toBe(shieldIcon);
     expect(commands.icon(commandId(DESCRIPTOR.id, 'remove'), {})).toBeDefined();
   });
 });

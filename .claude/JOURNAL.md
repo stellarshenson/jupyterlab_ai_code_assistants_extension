@@ -75,3 +75,9 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 24. **Task [Short] - Release of the campaign tree** (v1.0.17): Shipped the close-19 campaign work to npm and PyPI via the release lane<br>
     **Result**: First release since v1.0.10 - carries the 19 ledger closures, the switch-path contract truth work (`DEF-99`..`DEF-110`) and the round-20 clean adversarial pair. Makefile refreshed 1.36 → 1.37 (nodeenv-pinned global installs) from the canonical copy in the same pass.
+
+25. **Task - Shield glyph on unsafe launch variants** (v1.0.18): User-directed swap of the caution triangle for the reference implementation's shield on `Resume (Skip Permissions)` and the other danger-marked menu entries<br>
+    **Result**: User overruled the port-time rationale ("a shield reads as protected") - the shield is the established marker for an action touching the permission system (UAC pattern), and the reference `jupyterlab_claude_code_extension` used it. `warningIcon` renamed `shieldIcon` in `src/core/icons.ts` with the reference's shield path; DEF-40's conspicuousness fix deliberately kept (16x16, `jp-icon-warn0` orange), so the reference's 13x13 grey was not copied verbatim. All seven `panel.ts` call sites follow, including the DEF-45 destructive-pair marker on `Clean Up Parallel Sessions` - one danger glyph for the menu, not two. Jest 121 green, Galata 27/27 at v1.0.18 (includes DEF-40's computed-fill probe), shield rendered in the context menu on the 8931 test server and screenshotted. Ledger note appended under DEF-40.
+
+26. **Task [Short] - Release of the shield glyph** (v1.0.19): Shipped entry 25's glyph swap to npm and PyPI via the release lane<br>
+    **Result**: Single-change release on top of v1.0.17 - the unsafe-launch marker is now the shield, DEF-40's sizing and colour kept. Makefile already current at 1.37.

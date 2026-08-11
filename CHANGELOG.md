@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.19] - 2026-08-11
+
+### Changed
+
+- The danger marker on the unsafe launch entries (`Resume (Skip Permissions)` and its New/Branch variants, plus the destructive `Clean Up Parallel Sessions`) is now the shield - the established glyph for an action touching the permission system - replacing the caution triangle; its conspicuous 16x16 orange rendering is unchanged
+
 ## [1.0.17] - 2026-08-11
 
 ### Added

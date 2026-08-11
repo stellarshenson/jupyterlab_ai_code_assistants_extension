@@ -30,9 +30,9 @@ import {
   providerIcon,
   refreshIcon,
   removeIcon,
+  shieldIcon,
   starFilledIcon,
-  switchIcon,
-  warningIcon
+  switchIcon
 } from './icons';
 import {
   DEFAULT_RECENT_LIMIT,
@@ -1996,7 +1996,7 @@ export class AssistantSessionsPanel extends Widget {
 
   /** The glyph, only where the mode WIDENS what runs without asking. */
   private _variantIcon(): LabIcon | undefined {
-    return this._resolvedVariant()?.unsafe ? warningIcon : undefined;
+    return this._resolvedVariant()?.unsafe ? shieldIcon : undefined;
   }
 
   private _setupCommands(): void {
@@ -2024,7 +2024,7 @@ export class AssistantSessionsPanel extends Widget {
         const verb = this._hooks.resumeLabel?.(active()) ?? 'Resume';
         return variant ? `${verb} (${variant.label})` : verb;
       },
-      icon: () => (this._resumeVariant()?.unsafe ? warningIcon : undefined),
+      icon: () => (this._resumeVariant()?.unsafe ? shieldIcon : undefined),
       execute: () => {
         const s = active();
         if (s) {
@@ -2036,7 +2036,7 @@ export class AssistantSessionsPanel extends Widget {
     for (const mode of this._variantModes) {
       this._commands.addCommand(this._cmd(`resume-${mode.id}`), {
         label: `Resume (${mode.menuLabel})`,
-        icon: warningIcon,
+        icon: shieldIcon,
         // Absent while the plain item already resolves to this same mode - it
         // would be a second entry building an identical launch.
         isVisible: () => !this._buildsSameLaunch(mode),
@@ -2053,13 +2053,13 @@ export class AssistantSessionsPanel extends Widget {
       });
       this._commands.addCommand(this._cmd(`new-session-${mode.id}`), {
         label: `New ${this._descriptor.label} Session (${mode.menuLabel})`,
-        icon: warningIcon,
+        icon: shieldIcon,
         isVisible: () => !this._buildsSameLaunch(mode),
         execute: () => void this._newSession(mode.id)
       });
       this._commands.addCommand(this._cmd(`branch-session-${mode.id}`), {
         label: mode.menuLabel as string,
-        icon: warningIcon,
+        icon: shieldIcon,
         isVisible: () => !this._buildsSameLaunch(mode),
         execute: () => void this._branchSession(mode.id)
       });
@@ -2171,7 +2171,7 @@ export class AssistantSessionsPanel extends Widget {
       // separator was added to protect, and both delete history that cannot be
       // recovered; leaving this one bare made the pair read as one dangerous
       // item beside an ordinary one (DEF-45).
-      icon: warningIcon,
+      icon: shieldIcon,
       isVisible: () => (active()?.extra_sessions ?? 0) > 0,
       execute: () => {
         const s = active();
@@ -2244,7 +2244,7 @@ export class AssistantSessionsPanel extends Widget {
       // danger everywhere else in this menu - spending it on a branch glyph
       // left `Branch Session (Skip Permissions)` looking exactly as safe as
       // Show in File Browser while `Resume (Skip Permissions)` beside it wore
-      // the triangle. The branch glyph is the fallback, not the winner.
+      // the shield. The branch glyph is the fallback, not the winner.
       icon: () =>
         this._variantIcon() ??
         (this._visibleVariantCount() === 0 ? branchIcon : undefined),

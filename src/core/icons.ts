@@ -48,22 +48,24 @@ export const removeIcon = new LabIcon({
   svgstr: removeSvgStr
 });
 
-// Marks the unsafe launch variants. A shield reads as "protected", which is
-// the inverse of what these entries do, so the caution triangle carries them
-// instead. Material "warning" outline.
+// Marks the unsafe launch variants. The shield is the established marker for
+// an action that touches the permission system (the UAC pattern), and it is
+// what the reference implementation used; Material "shield" half-fill, kept
+// per user direction 2026-08-11 over the earlier caution triangle.
 //
 // 16x16 and `jp-icon-warn0`, like every other icon in these menus and unlike
 // them in colour: authored at 13x13 in `jp-icon3` it rendered smaller than
 // its neutral siblings AND in the identical grey, measured rgb(97,97,97) in
 // the light theme and rgb(189,189,189) in the dark one - the one glyph whose
-// whole job is to say "this differs" was the least conspicuous in the menu.
-const warningSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
-  <path class="jp-icon-warn0" fill="#f57c00" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+// whole job is to say "this differs" was the least conspicuous in the menu
+// (DEF-40, and the reason the reference's 13x13 grey is not copied verbatim).
+const shieldSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
+  <path class="jp-icon-warn0" fill="#f57c00" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
 </svg>`;
 
-export const warningIcon = new LabIcon({
-  name: `${ICON_PREFIX}:warning`,
-  svgstr: warningSvgStr
+export const shieldIcon = new LabIcon({
+  name: `${ICON_PREFIX}:shield`,
+  svgstr: shieldSvgStr
 });
 
 const addSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">

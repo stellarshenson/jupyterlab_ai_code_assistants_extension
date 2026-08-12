@@ -26,6 +26,7 @@ import { ColourStore } from './colour';
 import {
   addIcon,
   branchIcon,
+  cleanupIcon,
   filterIcon,
   providerIcon,
   refreshIcon,
@@ -2170,8 +2171,9 @@ export class AssistantSessionsPanel extends Widget {
       // Marked, like `Remove from ...` below it. The two share the group the
       // separator was added to protect, and both delete history that cannot be
       // recovered; leaving this one bare made the pair read as one dangerous
-      // item beside an ordinary one (DEF-45).
-      icon: shieldIcon,
+      // item beside an ordinary one (DEF-45). The sweep variant of the trash
+      // glyph, because this one deletes several at once.
+      icon: cleanupIcon,
       isVisible: () => (active()?.extra_sessions ?? 0) > 0,
       execute: () => {
         const s = active();

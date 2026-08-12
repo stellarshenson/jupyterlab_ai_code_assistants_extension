@@ -81,3 +81,9 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 26. **Task [Short] - Release of the shield glyph** (v1.0.19): Shipped entry 25's glyph swap to npm and PyPI via the release lane<br>
     **Result**: Single-change release on top of v1.0.17 - the unsafe-launch marker is now the shield, DEF-40's sizing and colour kept. Makefile already current at 1.37.
+
+27. **Task - Neutral shield and sweep-trash cleanup glyph** (v1.0.20): Two user rulings on v1.0.19's icons - the shield goes standard colour, and `Clean Up Parallel Sessions` gets its own trash-variant glyph<br>
+    **Result**: The shield now paints in the theme's neutral `jp-icon3` grey like every sibling - the user ruled the shape alone marks a permission-touching action, reversing DEF-40's orange half while keeping its 16x16 size half. `Clean Up Parallel Sessions` no longer shares the unsafe-launch marker: new `cleanupIcon` in `src/core/icons.ts` (Material `delete_sweep` - trash with sweep strokes, "with something extra" per the user), same family as `Remove from ...`'s plain trash but visibly the bulk delete. Unit colour test flipped to assert `jp-icon3` parity; the Galata probe now finds the glyph by its path data since colour no longer distinguishes it, fill-differs assertion deleted. Jest 121, Galata 27/27 at v1.0.20, rendered proof screenshotted on the 8931 server. Ledger notes under DEF-40 and DEF-45.
+
+28. **Task [Short] - Release of the neutral shield and cleanup glyph** (v1.0.21): Shipped entry 27's two icon rulings to npm and PyPI via the release lane<br>
+    **Result**: Single-scope release on top of v1.0.19 - the shield in standard `jp-icon3` grey on the permission-skipping entries, the `delete_sweep` trash on `Clean Up Parallel Sessions`. Makefile current at 1.37.

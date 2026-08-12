@@ -4,6 +4,13 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.21] - 2026-08-12
+
+### Changed
+
+- The shield on the permission-skipping entries paints in the theme's standard grey like every other menu icon - the shape alone marks the entry, replacing the orange fill
+- `Clean Up Parallel Sessions` wears its own sweep-trash glyph (the bulk variant of the trash `Remove from ...` carries) instead of sharing the unsafe-launch shield
+
 ## [1.0.19] - 2026-08-11
 
 ### Changed

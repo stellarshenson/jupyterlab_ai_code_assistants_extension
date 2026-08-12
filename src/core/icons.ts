@@ -48,19 +48,30 @@ export const removeIcon = new LabIcon({
   svgstr: removeSvgStr
 });
 
+// `Clean Up Parallel Sessions` - deletes several at once, so it wears the
+// sweep variant of the trash glyph (Material "delete_sweep"), same family as
+// `Remove from ...`'s plain trash but visibly the bulk one (user direction
+// 2026-08-11, replacing the shared danger marker it wore under DEF-45).
+const cleanupSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
+  <path class="jp-icon3" fill="#616161" d="M15 16h4v2h-4zm0-8h7v2h-7zm0 4h6v2h-6zM3 18c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2V8H3v10zM14 5h-3l-1-1H6L5 5H2v2h12z"/>
+</svg>`;
+
+export const cleanupIcon = new LabIcon({
+  name: `${ICON_PREFIX}:cleanup`,
+  svgstr: cleanupSvgStr
+});
+
 // Marks the unsafe launch variants. The shield is the established marker for
 // an action that touches the permission system (the UAC pattern), and it is
 // what the reference implementation used; Material "shield" half-fill, kept
 // per user direction 2026-08-11 over the earlier caution triangle.
 //
-// 16x16 and `jp-icon-warn0`, like every other icon in these menus and unlike
-// them in colour: authored at 13x13 in `jp-icon3` it rendered smaller than
-// its neutral siblings AND in the identical grey, measured rgb(97,97,97) in
-// the light theme and rgb(189,189,189) in the dark one - the one glyph whose
-// whole job is to say "this differs" was the least conspicuous in the menu
-// (DEF-40, and the reason the reference's 13x13 grey is not copied verbatim).
+// 16x16 like its siblings (DEF-40's size half - authored at 13x13 it
+// rendered smaller than every icon beside it), and in the standard `jp-icon3`
+// like them too: the user ruled 2026-08-11 that the shield shape alone marks
+// the difference, reversing DEF-40's colour half (the orange `jp-icon-warn0`).
 const shieldSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
-  <path class="jp-icon-warn0" fill="#f57c00" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+  <path class="jp-icon3" fill="#616161" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
 </svg>`;
 
 export const shieldIcon = new LabIcon({

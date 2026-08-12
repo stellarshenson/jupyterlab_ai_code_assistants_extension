@@ -162,7 +162,7 @@ test('DEF-42 - submenus draw a caret', async ({ page }) => {
   await page.keyboard.press('Escape');
 });
 
-test('DEF-54 and DEF-40 - an approval-bypassing new-session button is marked, and the mark is not the neutral grey', async ({
+test('DEF-54 and DEF-40 - an approval-bypassing new-session button is marked with the shield', async ({
   page
 }) => {
   await page.goto();
@@ -178,28 +178,17 @@ test('DEF-54 and DEF-40 - an approval-bypassing new-session button is marked, an
 
   // Neutral before the mode is armed.
   await expect(newButton.locator('svg')).toHaveCount(1);
-  const neutralFill = await newButton
-    .locator('svg path')
-    .first()
-    .evaluate((el: SVGPathElement) => getComputedStyle(el).fill);
 
   await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', true);
 
   // The glyph is repainted from `setModes`, with no hover and no reload -
-  // DEF-38's lesson, applied to the icon.
-  const warned = newButton.locator('svg .jp-icon-warn0');
-  await expect(warned).toHaveCount(1, { timeout: 10000 });
+  // DEF-38's lesson, applied to the icon. The mark is the SHIELD SHAPE, not a
+  // colour: DEF-40's orange was reversed by user ruling 2026-08-11 and the
+  // glyph paints in the same neutral `jp-icon3` as its siblings, so it is
+  // identified by its path data ("M12 1L3 5..." - the Material shield).
+  const marked = newButton.locator('svg path[d^="M12 1L3 5"]');
+  await expect(marked).toHaveCount(1, { timeout: 10000 });
   await expect(newButton.locator('svg')).toHaveCount(1);
-
-  // DEF-40: the caution glyph rendered in the SAME grey as its neutral
-  // siblings, measured rgb(97,97,97) light and rgb(189,189,189) dark, so the
-  // one glyph whose job is to say "this differs" was the least conspicuous in
-  // the menu. Assert the painted colour differs from the neutral one rather
-  // than pinning a hex value the theme is entitled to change.
-  const warnFill = await warned.evaluate(
-    (el: SVGElement) => getComputedStyle(el).fill
-  );
-  expect(warnFill).not.toBe(neutralFill);
 
   // ...and at the size of its siblings, not smaller. Measured against a LIVE
   // sibling rather than a constant: `.jp-AiAssistantsPanel-iconButton svg` is

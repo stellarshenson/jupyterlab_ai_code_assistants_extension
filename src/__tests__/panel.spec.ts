@@ -42,7 +42,7 @@ jest.mock('../core/request', () => ({
 }));
 
 import { TAB_COLOUR_IDS, fnv1aColour } from '../core/colour';
-import { addIcon, branchIcon, shieldIcon } from '../core/icons';
+import { addIcon, branchIcon, cleanupIcon, shieldIcon } from '../core/icons';
 import { AssistantSessionsPanel, commandId } from '../core/panel';
 import { requestProvider } from '../core/request';
 import { IProviderDescriptor, ISession } from '../core/types';
@@ -346,7 +346,7 @@ describe('DEF-35 / DEF-39 - the branch entry with no visible variants', () => {
 
 // --------------------------------------------------------------- DEF-40
 
-describe('DEF-40 - the warning glyph is sized and coloured to stand out', () => {
+describe('DEF-40 - the shield glyph matches its siblings in size and colour', () => {
   const svg = (svgstr: string): SVGElement =>
     new DOMParser().parseFromString(svgstr, 'image/svg+xml')
       .documentElement as unknown as SVGElement;
@@ -364,23 +364,27 @@ describe('DEF-40 - the warning glyph is sized and coloured to stand out', () => 
     }
   });
 
-  it('paints in jp-icon-warn0 and not the neutral grey', () => {
-    // `jp-icon3` is the theme's neutral: in it the glyph measured the same
-    // rgb(97,97,97) as the icons it was supposed to differ from.
+  it('paints in the standard jp-icon3, like its siblings', () => {
+    // DEF-40's orange (`jp-icon-warn0`) was reversed by user ruling
+    // 2026-08-11: the shield SHAPE alone marks the difference, the colour
+    // stays the theme's neutral like every other icon in the menu.
     const path = svg(shieldIcon.svgstr).querySelector('path')!;
-    expect(path.getAttribute('class')).toEqual('jp-icon-warn0');
-    expect(shieldIcon.svgstr).not.toContain('jp-icon3');
+    expect(path.getAttribute('class')).toEqual('jp-icon3');
+    expect(shieldIcon.svgstr).not.toContain('jp-icon-warn0');
   });
 });
 
 // ------------------------------------------------- DEF-45 / DEF-46 (lane A)
 
 describe('DEF-45 - both destructive menu entries are marked alike', () => {
-  it('gives Clean Up Parallel Sessions the same glyph Remove carries', () => {
+  it('gives Clean Up Parallel Sessions the sweep variant of the trash glyph', () => {
+    // Same family as Remove's plain trash - marked alike, per DEF-45 - but
+    // the bulk variant, because this one deletes several at once (user
+    // direction 2026-08-11; it no longer shares the unsafe-launch shield).
     const commands = (panel as any)._commands;
     expect(
       commands.icon(commandId(DESCRIPTOR.id, 'cleanup-parallel'), {})
-    ).toBe(shieldIcon);
+    ).toBe(cleanupIcon);
     expect(commands.icon(commandId(DESCRIPTOR.id, 'remove'), {})).toBeDefined();
   });
 });

@@ -276,11 +276,9 @@ export class AssistantSessionsPanel extends Widget {
   setModes(modes: Record<string, boolean | string>): void {
     this._modes = { ...modes };
     // Menu labels are lazy and re-read this on every open; the button's title
-    // is a written string, so it has to be rewritten here.
+    // is a written string, so it has to be rewritten here. The glyph needs no
+    // such hook - it is always "+", whatever mode is armed (DEF-112).
     this._renameNewButton?.();
-    // Same for its glyph - a menu item re-reads its icon on every open, a
-    // painted button does not.
-    this._repaintNewIcon?.();
   }
 
   setColouredTabs(on: boolean): void {
@@ -344,26 +342,11 @@ export class AssistantSessionsPanel extends Widget {
     // after turning an approval-free mode on (DEF-38).
     this._renameNewButton = nameNewButton;
     nameNewButton();
-    // The glyph follows the same rule the menu entries follow: where a mode
-    // WIDENS what runs without asking, the mode's warning glyph wins over the
-    // action's own (DEF-35). It matters most here - with a mode in force the
-    // variants suppress themselves and this button launches on click, so a
-    // plain "+" would be the only one-click approval-free launch in the panel
-    // wearing no warning at all.
-    const paintNewIcon = (): void => {
-      const icon =
-        (this._visibleVariantCount() === 0 ? this._variantIcon() : undefined) ??
-        addIcon;
-      // `LabIcon.element` appends into the container, so the previous glyph
-      // has to go or the button would collect one svg per settings change.
-      newBtn.replaceChildren();
-      icon.element({ container: newBtn });
-    };
-    // Held for the same reason the title is: the shell is built before
-    // settings arrive, so what is drawn here can only say "no mode in force"
-    // and `setModes` has to repaint it (DEF-38).
-    this._repaintNewIcon = paintNewIcon;
-    paintNewIcon();
+    // The glyph is always "+", whatever mode is armed (DEF-112): the shield
+    // marks the menu ENTRIES that skip approval, while the button that offers
+    // or launches stays neutral - an armed mode is still named in the title
+    // above, so the launch never goes unnamed.
+    addIcon.element({ container: newBtn });
     newBtn.addEventListener('click', () => {
       // With a mode in force the variant items suppress themselves, leaving a
       // dropdown with one entry - two clicks for its only outcome. Do it.
@@ -1928,12 +1911,10 @@ export class AssistantSessionsPanel extends Widget {
     return commandId(this._descriptor.id, action);
   }
 
-  /** Boolean launch modes that produce a menu variant - the assistant's own
+  /** Launch modes that produce a menu variant - the assistant's own
    * skip-approval switch, under the assistant's own name. */
   private get _variantModes(): ILaunchMode[] {
-    return this._descriptor.launchModes.filter(
-      m => m.kind === 'boolean' && !!m.menuLabel
-    );
+    return this._descriptor.launchModes.filter(m => !!m.menuLabel);
   }
 
   /** The launch mode a PLAIN action resolves to right now, or null.
@@ -2656,8 +2637,6 @@ export class AssistantSessionsPanel extends Widget {
   private _newSessionMenu!: Menu;
   /** Re-writes the `+` button's title. Set once the shell exists. */
   private _renameNewButton: (() => void) | null = null;
-  /** Re-draws the `+` button's glyph. Set once the shell exists. */
-  private _repaintNewIcon: (() => void) | null = null;
   private _lastBranches: IBranch[] = [];
   private _lastBranchesCurrent = '';
   private _colouredTabs = true;

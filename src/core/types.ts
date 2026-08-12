@@ -27,9 +27,8 @@ export type ForkStrategy = 'native-flag' | 'native-command' | 'server-copy';
 export type ColourSource = 'native' | 'derived' | 'none';
 
 /** One launch-behaviour setting of an assistant, in that assistant's own
- * terminology. `boolean` modes are the unsafe/skip-approval switches: they get
- * a settings toggle (off by default) AND a context-menu launch variant.
- * `enum` modes are settings-only choices passed through on every launch. */
+ * terminology. A launch mode is a boolean skip-approval switch: it gets a
+ * settings toggle (off by default) AND a context-menu launch variant. */
 export interface ILaunchMode {
   /** Settings key under `providers.<id>.` and launch-payload key. Uses the
    * assistant's own terminology, never a normalised core name. */
@@ -38,24 +37,12 @@ export interface ILaunchMode {
   title: string;
   /** Settings description. */
   description: string;
-  kind: 'boolean' | 'enum';
-  /** Allowed values, `enum` modes only. */
-  values?: string[];
-  /** Default value. Boolean modes default to `false` without exception. */
-  default: boolean | string;
+  /** Default value - `false` without exception. */
+  default: boolean;
   /** Menu label for the launch variant this mode produces, e.g.
-   * `Skip Permissions`. Boolean modes only; absent means settings-only. */
+   * `Skip Permissions`. Carrying one IS the mode's declaration that it skips
+   * approval - it is what puts a variant in the menu. */
   menuLabel?: string;
-  /** `enum` modes only: the values that WIDEN what the assistant may do
-   * without asking. The panel warns on these and names the value; every other
-   * value is a settings choice and is marked as one.
-   *
-   * Declared per provider rather than inferred, because "a mode resolved at
-   * all" is not the same question: Gemini's `plan` is read-only - stricter
-   * than the default - and marking it the same as `yolo` says nothing about
-   * either. A boolean mode needs no entry here; carrying a `menuLabel` is
-   * already its declaration that it skips approval. */
-  unsafeValues?: string[];
 }
 
 /** Everything the core needs to know about one assistant. Pure data - no

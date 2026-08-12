@@ -66,7 +66,6 @@ const DESCRIPTOR: IProviderDescriptor = {
       id: 'skip',
       title: 'Skip approvals',
       description: 'Run without asking.',
-      kind: 'boolean',
       default: false,
       menuLabel: 'Skip Permissions'
     }
@@ -277,16 +276,14 @@ describe('the + button names and marks the launch it performs', () => {
     expect(newBtn().title).not.toContain('(Skip Permissions)');
   });
 
-  it('DEF-35 / DEF-38 - the glyph follows the mode, one svg at a time', () => {
-    // With the mode in force every variant suppresses itself, so this button
-    // stops dropping a menu and launches on click - a plain + would be the one
-    // one-click approval-free launch in the panel wearing no warning.
+  it('DEF-112 - the glyph is always +, one svg at a time', () => {
+    // The shield marks the menu entries that skip approval; the button that
+    // offers or launches stays neutral in every mode state. The mode is still
+    // named in the title, per DEF-36 above.
     expect(glyphs()).toEqual([addIcon.name]);
     panel.setModes({ skip: true });
     expect((panel as any)._visibleVariantCount()).toEqual(0);
-    expect(glyphs()).toEqual([shieldIcon.name]);
-    // `LabIcon.element` appends, so a button that is not cleared collects one
-    // svg per settings change.
+    expect(glyphs()).toEqual([addIcon.name]);
     panel.setModes({ skip: false });
     expect(glyphs()).toEqual([addIcon.name]);
   });

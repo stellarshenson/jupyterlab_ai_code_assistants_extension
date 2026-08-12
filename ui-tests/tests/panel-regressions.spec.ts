@@ -162,7 +162,7 @@ test('DEF-42 - submenus draw a caret', async ({ page }) => {
   await page.keyboard.press('Escape');
 });
 
-test('DEF-54 and DEF-40 - an approval-bypassing new-session button is marked with the shield', async ({
+test('DEF-54 and DEF-112 - an approval-bypassing new-session button still wears +', async ({
   page
 }) => {
   await page.goto();
@@ -176,38 +176,58 @@ test('DEF-54 and DEF-40 - an approval-bypassing new-session button is marked wit
     .locator('.jp-AiAssistantsPanel-iconButton')
     .first();
 
-  // Neutral before the mode is armed.
+  // Neutral before the mode is armed: the add glyph's plus path.
   await expect(newButton.locator('svg')).toHaveCount(1);
+  const plus = 'svg path[d^="M19 13h-6"]';
+  await expect(newButton.locator(plus)).toHaveCount(1);
 
   await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', true);
 
-  // The glyph is repainted from `setModes`, with no hover and no reload -
-  // DEF-38's lesson, applied to the icon. The mark is the SHIELD SHAPE, not a
-  // colour: DEF-40's orange was reversed by user ruling 2026-08-11 and the
-  // glyph paints in the same neutral `jp-icon3` as its siblings, so it is
-  // identified by its path data ("M12 1L3 5..." - the Material shield).
-  const marked = newButton.locator('svg path[d^="M12 1L3 5"]');
-  await expect(marked).toHaveCount(1, { timeout: 10000 });
+  // DEF-112: arming a mode repaints the TITLE (DEF-36) but never the glyph -
+  // the shield marks the menu entries that skip approval, not the button
+  // that offers or launches. The mode is still named on the button.
+  await expect(newButton).toHaveAttribute('title', /Skip Permissions/, {
+    timeout: 10000
+  });
   await expect(newButton.locator('svg')).toHaveCount(1);
-
-  // ...and at the size of its siblings, not smaller. Measured against a LIVE
-  // sibling rather than a constant: `.jp-AiAssistantsPanel-iconButton svg` is
-  // pinned to 14px in base.css, so an absolute `>= 14` floor is satisfied by
-  // the very 13x13 glyph this defect was about - the assertion could not fail,
-  // and its own comment said "siblings" while the code compared to a number.
-  const box = await newButton.locator('svg').boundingBox();
-  const siblingBox = await page
-    .locator(`${PANEL} .jp-AiAssistantsPanel-header`)
-    .locator('.jp-AiAssistantsPanel-iconButton')
-    .nth(1)
-    .locator('svg')
-    .boundingBox();
-  expect(box).not.toBeNull();
-  expect(siblingBox).not.toBeNull();
-  expect(box!.width).toBeGreaterThanOrEqual(siblingBox!.width);
-  expect(box!.height).toBeGreaterThanOrEqual(siblingBox!.height);
+  await expect(newButton.locator(plus)).toHaveCount(1);
 
   await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', false);
+});
+
+test('DEF-40 and DEF-112 - the shield marks the skip-permissions menu entry', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // The shield's rendered home is the menu entry, at its siblings' size -
+  // identified by its path data ("M12 1L3 5..." - the Material shield)
+  // because it paints in the same neutral `jp-icon3` as every other icon.
+  const menu = await openRowMenu(page, 'branchy');
+  const item = menu
+    .locator('.lm-Menu-item', { hasText: 'Resume (Skip Permissions)' })
+    .first();
+  await expect(item).toBeVisible();
+  const shield = item.locator('.lm-Menu-itemIcon svg path[d^="M12 1L3 5"]');
+  await expect(shield).toHaveCount(1);
+
+  // ...and at the size of its siblings, not smaller (DEF-40's size half).
+  // Measured against a LIVE sibling in the same menu rather than a constant:
+  // an absolute pixel floor is satisfied by the very 13x13 glyph this defect
+  // was about, and the assertion could not fail.
+  const glyphBox = await item.locator('.lm-Menu-itemIcon svg').boundingBox();
+  const siblingBox = await menu
+    .locator('.lm-Menu-item', { hasText: 'Open Terminal' })
+    .first()
+    .locator('.lm-Menu-itemIcon svg')
+    .boundingBox();
+  expect(glyphBox).not.toBeNull();
+  expect(siblingBox).not.toBeNull();
+  expect(glyphBox!.width).toBeGreaterThanOrEqual(siblingBox!.width);
+  expect(glyphBox!.height).toBeGreaterThanOrEqual(siblingBox!.height);
+
+  await page.keyboard.press('Escape');
 });
 
 test('DEF-45 - both destructive context-menu entries carry a glyph', async ({

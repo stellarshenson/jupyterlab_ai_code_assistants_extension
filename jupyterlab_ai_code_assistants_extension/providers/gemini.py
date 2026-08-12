@@ -122,12 +122,8 @@ _META_CACHE_MAX = 1024
 # poll response.
 FIRST_PROMPT_CHARS = 200
 
-# Gemini's approval ladder, in the CLI's own vocabulary. ``default`` is the
-# CLI's own default and is passed through explicitly, so a project that set
-# another mode is returned to prompting by choosing it back.
-APPROVAL_MODES = ("default", "auto_edit", "yolo", "plan")
+# Gemini's approval switch, in the CLI's own vocabulary.
 YOLO_MODE = "yoloMode"
-APPROVAL_MODE = "approvalMode"
 
 
 def gemini_home() -> Path:
@@ -850,10 +846,6 @@ class GeminiStore(SessionStore):
             argv += ["--session-id", new_session_id]
         if mode == YOLO_MODE:
             argv.append("--yolo")
-        elif isinstance(mode, str) and mode.startswith(APPROVAL_MODE + "="):
-            value = mode.split("=", 1)[1]
-            if value in APPROVAL_MODES:
-                argv += ["--approval-mode", value]
         return argv
 
     # -- terminal identity ----------------------------------------------
@@ -929,11 +921,8 @@ DESCRIPTOR = ProviderDescriptor(
         # No colour concept anywhere in Gemini - the extension's write-back
         # store is the only source of a tint.
         colour_source="none",
-        # Two launch surfaces: the unsafe switch, and the approval ladder, whose
-        # chosen value rides in the token because a mode reaches the store as a
-        # single string.
-        launch_modes=(YOLO_MODE,)
-        + tuple(f"{APPROVAL_MODE}={value}" for value in APPROVAL_MODES),
+        # One approval switch, like every other provider.
+        launch_modes=(YOLO_MODE,),
     ),
     # No standalone extension preceded this provider, so there is no state to
     # carry over.

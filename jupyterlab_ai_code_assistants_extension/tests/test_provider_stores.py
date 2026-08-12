@@ -637,13 +637,9 @@ def test_gemini_launch_argv_starts_and_modes(gemini):
         "/bin/gemini",
         "--yolo",
     ]
+    # The approval ladder is gone (DEF-111): an old `approvalMode` token a
+    # stale client could still send is ignored, never passed to the CLI.
     assert store.launch_argv("/bin/gemini", mode="approvalMode=plan") == [
-        "/bin/gemini",
-        "--approval-mode",
-        "plan",
-    ]
-    # An unknown approval value is dropped rather than passed through.
-    assert store.launch_argv("/bin/gemini", mode="approvalMode=nonsense") == [
         "/bin/gemini"
     ]
 

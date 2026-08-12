@@ -88,8 +88,10 @@ One settings section for all assistants, replacing the three separate sections. 
   - log: 2026-08-07 closed - conformance review (v0.1.7)
 - [x] **Per-provider settings** - assistant-specific keys live under `providers.<id>.*` and appear only for registered providers
   - log: 2026-08-07 closed - conformance review (v0.1.7)
-- [x] **Unsafe mode per provider, own name** - every provider exposes its assistant's skip-permissions equivalent under `providers.<id>.*` using the assistant's own terminology (Claude `dangerouslySkipPermissions`, Codex `dangerouslyBypassApprovalsAndSandbox`, Kimi `yoloMode`, Gemini `yoloMode` + `approvalMode`), each off by default, each with matching context-menu launch variants
+- [x] **Unsafe mode per provider, own name** - every provider exposes its assistant's skip-permissions equivalent under `providers.<id>.*` using the assistant's own terminology (Claude `dangerouslySkipPermissions`, Codex `dangerouslyBypassApprovalsAndSandbox`, Kimi `yoloMode`, Gemini `yoloMode`), exactly one approval control per provider, each off by default, each with matching context-menu launch variants
   - log: 2026-08-07 closed - conformance review (v0.1.7)
+  - log: 2026-08-12 reopened - Gemini's second control (`approvalMode` enum) removed per DEF-111, one switch per provider (v1.0.21)
+  - log: 2026-08-12 closed: closed - Gemini back to one switch (yoloMode), enum deleted per DEF-111 (v1.0.22)
 - [x] **Sidebar move** - changing `sidebar` re-docks every enabled panel to the chosen side
   - log: 2026-08-07 closed - conformance review (v0.1.7)
 - [x] **Edge: disable while terminal open** - disabling a provider leaves its running terminals alive and untouched, only the panel and tint go
@@ -129,6 +131,21 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - log: 2026-08-07 closed - conformance review (v0.1.7)
 - [x] **Edge: server unreachable** - a failed poll shows an inline error in that panel and retries, leaving other panels unaffected
   - log: 2026-08-07 closed - conformance review (v0.1.7)
+- [x] **Header button glyph** - the header new-session button wears the + glyph in every launch-mode state, armed or not, never the mode's shield (DEF-112)
+  - log: 2026-08-12 criterion added (v1.0.21)
+  - log: 2026-08-12 closed: closed - addIcon unconditional, _repaintNewIcon deleted; Galata asserts + survives arming (v1.0.22)
+- [x] **Header menu when unarmed** - with no launch mode on, the header + drops a menu offering the normal session and each skip-permissions variant
+  - log: 2026-08-12 criterion added (v1.0.21)
+  - log: 2026-08-12 closed: closed - pre-existing variant-menu behaviour, unchanged by DEF-112 (v1.0.22)
+- [x] **Header direct launch when armed** - with a launch mode on, the header + launches it directly on click with no menu, and the tooltip names the mode
+  - log: 2026-08-12 criterion added (v1.0.21)
+  - log: 2026-08-12 closed: closed - title suffix asserted in unit + Galata tests (v1.0.22)
+- [x] **Shield on menu entries only** - the shield glyph marks skip-permissions menu entries (header menu and row context menu), never the header button itself
+  - log: 2026-08-12 criterion added (v1.0.21)
+  - log: 2026-08-12 closed: closed - Galata proves the shield on Resume (Skip Permissions) by path data (v1.0.22)
+- [x] **Edge: live mode toggle** - flipping a mode setting updates the header button's tooltip and click behaviour without a reload; the glyph never changes
+  - log: 2026-08-12 criterion added (v1.0.21)
+  - log: 2026-08-12 closed: closed - setModes re-titles only; glyph constant, Galata-verified (v1.0.22)
 
 ## Sessions
 
@@ -300,7 +317,7 @@ Ported from `jupyterlab_kimi_code_extension` v0.7.8. Capabilities - server-side 
 
 ## Gemini Provider
 
-New provider - no standalone extension to port from. Gemini CLI 0.54.4 (`@google/gemini-cli`, installed via `lab-utils install-ai-assistant/google-gemini-cli`). Store: `~/.gemini/projects.json` registry maps project root to a short id; chats live under `~/.gemini/tmp/<shortId>/chats/` as JSON files. Capabilities - no fork flag (server-side fork), no colour command (`colourSource: none`), YOLO and approval-mode launch modes.
+New provider - no standalone extension to port from. Gemini CLI 0.54.4 (`@google/gemini-cli`, installed via `lab-utils install-ai-assistant/google-gemini-cli`). Store: `~/.gemini/projects.json` registry maps project root to a short id; chats live under `~/.gemini/tmp/<shortId>/chats/` as JSON files. Capabilities - no fork flag (server-side fork), no colour command (`colourSource: none`), YOLO launch mode.
 
 - [x] **Store scan** - projects come from the `projects.json` registry and sessions from `tmp/<shortId>/chats/*.json`, read in place, never via the auth-gated CLI listing
   - log: 2026-08-07 closed - conformance review (v0.1.7)
@@ -310,8 +327,13 @@ New provider - no standalone extension to port from. Gemini CLI 0.54.4 (`@google
   - log: 2026-08-07 closed - conformance review (v0.1.7)
 - [x] **Server-side fork** - Gemini has no fork flag, so branching copies the chat file with a fresh id, Kimi-style, and opens it
   - log: 2026-08-07 closed - conformance review (v0.1.7)
-- [x] **YOLO mode** - launch actions offer a `--yolo` variant; an `approvalMode` setting maps to `--approval-mode default|auto_edit|yolo|plan`, defaulting to `default`
+- [x] **YOLO mode** - one boolean `yoloMode` setting, off by default, with matching `--yolo` launch variants; the four-rung `approvalMode` ladder is not exposed (DEF-111)
   - log: 2026-08-07 closed - conformance review (v0.1.7)
+  - log: 2026-08-12 reopened - rewritten to the single-switch shape; `auto_edit` and `plan` are no longer settable (v1.0.21)
+  - log: 2026-08-12 closed: closed - single boolean per DEF-111 (v1.0.22)
+- [x] **Edge: stale approvalMode key** - a saved `providers.gemini.approvalMode` from an older version is ignored with a warning, and no `--approval-mode` flag ever reaches the CLI
+  - log: 2026-08-12 criterion added (v1.0.21)
+  - log: 2026-08-12 closed: closed - registry warns on unknown keys; stale token dropped server-side, pinned in test_provider_stores.py (v1.0.22)
 - [x] **Edge: unauthenticated CLI** - a gemini binary without auth configured still lists sessions in the panel (disk scan); the auth error surfaces only inside the launched terminal
   - log: 2026-08-07 closed - conformance review (v0.1.7)
 - [x] **Edge: registry migration** - Gemini versions that migrate legacy hash-named project dirs to registry short ids must not produce duplicate rows during migration

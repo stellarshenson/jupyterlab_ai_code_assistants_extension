@@ -57,7 +57,6 @@ export const descriptor: IProviderDescriptor = {
       title: 'Dangerously skip permissions',
       description:
         'When enabled, newly spawned and resumed sessions are launched with `--dangerously-skip-permissions`. Bypasses every Claude Code permission prompt - only enable in sandboxes you trust.',
-      kind: 'boolean',
       default: false,
       menuLabel: 'Skip Permissions'
     }

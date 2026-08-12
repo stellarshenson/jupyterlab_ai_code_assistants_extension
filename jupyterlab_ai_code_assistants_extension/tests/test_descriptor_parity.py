@@ -59,15 +59,7 @@ const { readdirSync } = require('fs');
       cliBinary: d.cliBinary,
       forkStrategy: d.forkStrategy,
       colourSource: d.colourSource,
-      // Flattened into the tokens the Python side stores, VALUES and all: an
-      // enum mode reaches a store as one string, so `approvalMode=yolo` is
-      // the unit both runtimes have to agree on. Comparing mode ids alone
-      // discards exactly the drift this file exists to catch.
-      launchModes: (d.launchModes ?? []).flatMap(x =>
-        x.kind === 'enum'
-          ? (x.values ?? []).map(v => x.id + '=' + v)
-          : [x.id]
-      ),
+      launchModes: (d.launchModes ?? []).map(x => x.id),
       legacyPluginId: d.legacyPluginId ?? null,
       label: d.label
     });
@@ -276,10 +268,9 @@ def test_descriptor_fields_agree_across_runtimes():
         assert t["cliBinary"] == d.cli_binary, pid
         assert t["forkStrategy"] == c.fork_strategy, pid
         assert t["colourSource"] == c.colour_source, pid
-        # Whole tokens, `mode=value` included. A mode whose VALUES drift - one
-        # runtime offering `approval_mode=plan` the other never accepts - is a
-        # menu entry that reaches the store and is silently dropped on the way
-        # to the CLI, which is the failure this used to compare its way past.
+        # Whole mode tokens. A mode one runtime offers and the other never
+        # accepts is a menu entry that reaches the store and is silently
+        # dropped on the way to the CLI.
         assert sorted(t["launchModes"]) == sorted(c.launch_modes), pid
         # The retired plugin id carries two different jobs off one string -
         # TypeScript suppresses this panel when that plugin is still installed,

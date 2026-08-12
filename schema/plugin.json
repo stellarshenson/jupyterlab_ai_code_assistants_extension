@@ -69,13 +69,6 @@
       "description": "When enabled, newly spawned and resumed sessions are launched with `--yolo`. Gemini auto-approves every tool call without asking - only enable in workspaces you trust.",
       "default": false
     },
-    "providers.gemini.approvalMode": {
-      "type": "string",
-      "title": "Gemini: Approval mode",
-      "description": "Approval ladder passed as `--approval-mode` when set to a value other than the default. A non-default value here takes precedence over the YOLO switch; only the forced YOLO menu action overrides it. `default` prompts for approval, `auto_edit` auto-approves edit tools, `yolo` auto-approves every tool, `plan` is read-only.",
-      "default": "default",
-      "enum": ["default", "auto_edit", "yolo", "plan"]
-    },
     "providers.kimi.enabled": {
       "type": "boolean",
       "title": "Kimi: enabled",

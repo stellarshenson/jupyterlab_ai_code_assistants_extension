@@ -70,14 +70,11 @@ function providerProperties(descriptor) {
   for (const mode of descriptor.launchModes ?? []) {
     const key = `providers.${descriptor.id}.${mode.id}`;
     props[key] = {
-      type: mode.kind === 'boolean' ? 'boolean' : 'string',
+      type: 'boolean',
       title: `${descriptor.label}: ${mode.title}`,
       description: mode.description,
       default: mode.default
     };
-    if (mode.kind === 'enum' && mode.values) {
-      props[key].enum = [...mode.values];
-    }
   }
   return props;
 }

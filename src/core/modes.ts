@@ -1,15 +1,15 @@
 // Launch-mode resolution: which single mode token, if any, one launch carries.
 //
 // Its own module because the panel is the only caller but not the only reader -
-// the precedence between a boolean switch and an enum ladder is a rule worth
-// asserting on its own, and this file pulls in no JupyterLab surface.
+// the rule that one launch carries at most one mode is worth asserting on its
+// own, and this file pulls in no JupyterLab surface.
 
 import { ILaunchMode } from './types';
 
 /** A resolved launch mode, with what to call it and whether to warn. */
 export interface IResolvedLaunchMode {
   mode: ILaunchMode;
-  /** What the menu should call it - the value, or the mode's own label. */
+  /** What the menu should call it - the mode's own label. */
   label: string;
   /** Whether this widens what the assistant may do without asking. */
   unsafe: boolean;
@@ -20,11 +20,8 @@ export interface IResolvedLaunchMode {
  *
  * The payload carries at most one mode, because the server maps one token to
  * one flag. `force` wins outright - that is what the menu's variant entries
- * do. Otherwise an enum mode moved off its default takes precedence over any
- * boolean switch: the enum is the explicit statement of intent, so a boolean
- * left on must not silently invert it. A boolean fires only while every enum
- * mode sits at its default. An enum at its default sends nothing - it is what
- * the CLI would do unasked.
+ * do. Otherwise the first switch that is on fires. Every mode is a boolean
+ * skip-approval switch, so "on" always means the same thing.
  */
 export function resolveLaunchMode(
   launchModes: ILaunchMode[],
@@ -35,18 +32,7 @@ export function resolveLaunchMode(
     return force;
   }
   for (const mode of launchModes) {
-    const value = values[mode.id];
-    if (
-      mode.kind !== 'boolean' &&
-      typeof value === 'string' &&
-      value &&
-      value !== mode.default
-    ) {
-      return `${mode.id}=${value}`;
-    }
-  }
-  for (const mode of launchModes) {
-    if (mode.kind === 'boolean' && values[mode.id] === true) {
+    if (values[mode.id] === true) {
       return mode.id;
     }
   }
@@ -71,23 +57,15 @@ export function resolvedLaunchModeEntry(
   if (!token) {
     return null;
   }
-  const [id, value] = token.split('=');
-  const mode = launchModes.find(m => m.id === id);
+  const mode = launchModes.find(m => m.id === token);
   if (!mode) {
     return null;
   }
-  // A boolean mode with a menu label IS the assistant's skip-approval switch;
-  // an enum only widens on the values its provider declared. `plan` resolves
-  // to a mode and is stricter than the default, so "resolved at all" is the
-  // wrong question to ask about danger.
-  const unsafe = value
-    ? (mode.unsafeValues ?? []).indexOf(value) !== -1
-    : !!mode.menuLabel;
-  // Name the VALUE where there is one - three enum values sharing the mode's
-  // title render as one indistinguishable label.
+  // Carrying a menu label IS a boolean mode's declaration that it skips
+  // approval - it is what puts a variant in the menu.
   return {
     mode,
-    label: value ?? mode.menuLabel ?? mode.title,
-    unsafe
+    label: mode.menuLabel ?? mode.title,
+    unsafe: !!mode.menuLabel
   };
 }

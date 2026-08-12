@@ -79,13 +79,8 @@ describe('the providers barrel', () => {
         expect(mode.id.trim()).toBeTruthy();
         expect(mode.title.trim()).toBeTruthy();
         expect(mode.description.trim()).toBeTruthy();
-        if (mode.kind === 'boolean') {
-          // Every unsafe switch is off by default, without exception.
-          expect(mode.default).toBe(false);
-        } else {
-          expect(mode.values).toBeDefined();
-          expect(mode.values).toContain(mode.default as string);
-        }
+        // Every unsafe switch is off by default, without exception.
+        expect(mode.default).toBe(false);
       }
       const ids = descriptor.launchModes.map(m => m.id);
       expect(new Set(ids).size).toEqual(ids.length);

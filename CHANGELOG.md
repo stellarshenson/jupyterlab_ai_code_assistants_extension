@@ -4,6 +4,17 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.23] - 2026-08-12
+
+### Changed
+
+- Gemini settings collapse to a single approval control - the YOLO switch - like every other provider; the four-rung `approvalMode` dropdown is gone (`auto_edit` and `plan` are no longer settable, and a stale saved key is ignored)
+- The panel's header new-session button always wears +, whatever launch mode is armed - the armed mode is still named in its tooltip, and the shield marks only the menu entries that skip approval
+
+### Removed
+
+- The enum launch-mode machinery (`kind`/`values`/`unsafeValues` on `ILaunchMode`, the resolver's enum-precedence branch, the schema generator's enum output) - dead once Gemini's ladder went
+
 ## [1.0.21] - 2026-08-12
 
 ### Changed

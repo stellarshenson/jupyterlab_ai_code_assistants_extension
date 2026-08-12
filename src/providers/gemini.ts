@@ -32,11 +32,10 @@ const geminiSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 65 65
   <path class="jp-icon3" fill="#616161" d="M32.447 0c.68 0 1.273.465 1.439 1.125a38.904 38.904 0 001.999 5.905c2.152 5 5.105 9.376 8.854 13.125 3.751 3.75 8.126 6.703 13.125 8.855a38.98 38.98 0 005.906 1.999c.66.166 1.124.758 1.124 1.438 0 .68-.464 1.273-1.125 1.439a38.902 38.902 0 00-5.905 1.999c-5 2.152-9.375 5.105-13.125 8.854-3.749 3.751-6.702 8.126-8.854 13.125a38.973 38.973 0 00-2 5.906 1.485 1.485 0 01-1.438 1.124c-.68 0-1.272-.464-1.438-1.125a38.913 38.913 0 00-2-5.905c-2.151-5-5.103-9.375-8.854-13.125-3.75-3.749-8.125-6.702-13.125-8.854a38.973 38.973 0 00-5.905-2A1.485 1.485 0 010 32.448c0-.68.465-1.272 1.125-1.438a38.903 38.903 0 005.905-2c5-2.151 9.376-5.104 13.125-8.854 3.75-3.749 6.703-8.125 8.855-13.125a38.972 38.972 0 001.999-5.905A1.485 1.485 0 0132.447 0z"/>
 </svg>`;
 
-// Gemini's own names for its two launch surfaces. Kept in the assistant's
-// terminology rather than normalised, because each is both the settings key
+// Gemini's own name for its approval switch. Kept in the assistant's
+// terminology rather than normalised, because it is both the settings key
 // under `providers.gemini.` and the mode token the server maps to a CLI flag.
 const YOLO_MODE = 'yoloMode';
-const APPROVAL_MODE = 'approvalMode';
 
 export const descriptor: IProviderDescriptor = {
   id: 'gemini',
@@ -60,20 +59,8 @@ export const descriptor: IProviderDescriptor = {
       title: 'YOLO mode',
       description:
         'When enabled, newly spawned and resumed sessions are launched with `--yolo`. Gemini auto-approves every tool call without asking - only enable in workspaces you trust.',
-      kind: 'boolean',
       default: false,
       menuLabel: 'YOLO'
-    },
-    {
-      id: APPROVAL_MODE,
-      title: 'Approval mode',
-      description:
-        'Approval ladder passed as `--approval-mode` when set to a value other than the default. A non-default value here takes precedence over the YOLO switch; only the forced YOLO menu action overrides it. `default` prompts for approval, `auto_edit` auto-approves edit tools, `yolo` auto-approves every tool, `plan` is read-only.',
-      kind: 'enum',
-      values: ['default', 'auto_edit', 'yolo', 'plan'],
-      default: 'default',
-      // `plan` is read-only and `default` prompts, so neither widens anything.
-      unsafeValues: ['auto_edit', 'yolo']
     }
   ],
   hasRemoteControl: false,

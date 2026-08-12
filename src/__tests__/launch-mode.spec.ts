@@ -1,10 +1,10 @@
 /**
- * Launch-mode precedence.
+ * Launch-mode resolution.
  *
- * A provider can expose both a boolean switch and an enum ladder over the same
- * approval surface, and the payload carries only one token. An enum moved off
- * its default is the user's explicit statement, so it has to beat a boolean
- * left on - otherwise a read-only ladder setting launches wide open.
+ * Every mode is a boolean skip-approval switch in the assistant's own
+ * terminology (DEF-111 retired the one enum ladder, Gemini's `approvalMode`),
+ * and the payload carries only one token: `force` wins outright, otherwise
+ * the first switch that is on fires.
  */
 
 import { resolveLaunchMode, resolvedLaunchModeEntry } from '../core/modes';
@@ -15,44 +15,33 @@ const MODES: ILaunchMode[] = [
     id: 'yoloMode',
     title: 'YOLO',
     description: 'Boolean switch.',
-    kind: 'boolean',
     default: false,
     // Carrying a menu label IS a boolean mode's declaration that it skips
     // approval - it is what puts a variant in the menu.
     menuLabel: 'YOLO'
-  },
-  {
-    id: 'approvalMode',
-    title: 'Approval',
-    description: 'Enum ladder.',
-    kind: 'enum',
-    values: ['default', 'plan', 'yolo'],
-    default: 'default',
-    unsafeValues: ['yolo']
   }
 ];
 
 describe('resolveLaunchMode', () => {
-  it('lets a non-default enum beat a boolean that is on', () => {
-    expect(
-      resolveLaunchMode(MODES, { yoloMode: true, approvalMode: 'plan' })
-    ).toEqual('approvalMode=plan');
-  });
-
-  it('sends the boolean while every enum sits at its default', () => {
-    expect(
-      resolveLaunchMode(MODES, { yoloMode: true, approvalMode: 'default' })
-    ).toEqual('yoloMode');
+  it('sends the boolean that is on', () => {
+    expect(resolveLaunchMode(MODES, { yoloMode: true })).toEqual('yoloMode');
   });
 
   it('sends nothing when no mode is set', () => {
     expect(resolveLaunchMode(MODES, {})).toBeUndefined();
+    expect(resolveLaunchMode(MODES, { yoloMode: false })).toBeUndefined();
   });
 
   it('forces the requested mode whatever the settings say', () => {
+    expect(resolveLaunchMode(MODES, {}, 'yoloMode')).toEqual('yoloMode');
+  });
+
+  it('ignores a token from a retired setting', () => {
+    // A stale `approvalMode` value in saved settings is not a boolean that is
+    // on - it must never become a launch token (DEF-111).
     expect(
-      resolveLaunchMode(MODES, { approvalMode: 'plan' }, 'yoloMode')
-    ).toEqual('yoloMode');
+      resolveLaunchMode(MODES, { approvalMode: 'plan' } as any)
+    ).toBeUndefined();
   });
 });
 
@@ -60,8 +49,7 @@ describe('resolvedLaunchModeEntry', () => {
   // What the panel marks its PLAIN menu items from. Deciding the warning glyph
   // from the menu's `force` argument instead leaves the entry the user
   // actually clicks unmarked, while marking a forced duplicate that builds the
-  // identical launch. Deciding it from "a mode resolved at all" is the same
-  // error one level down: it warns on Gemini's `plan`, which is read-only.
+  // identical launch.
   it('warns on a boolean skip-approval switch and names it', () => {
     const r = resolvedLaunchModeEntry(MODES, { yoloMode: true });
     expect(r?.mode.id).toEqual('yoloMode');
@@ -69,32 +57,8 @@ describe('resolvedLaunchModeEntry', () => {
     expect(r?.unsafe).toBe(true);
   });
 
-  it('warns on an enum value the provider declared as widening', () => {
-    const r = resolvedLaunchModeEntry(MODES, { approvalMode: 'yolo' });
-    expect(r?.mode.id).toEqual('approvalMode');
-    expect(r?.label).toEqual('yolo');
-    expect(r?.unsafe).toBe(true);
-  });
-
-  it('does NOT warn on an enum value that is stricter than the default', () => {
-    // `plan` is read-only. Marking it like `yolo` says nothing about either.
-    const r = resolvedLaunchModeEntry(MODES, { approvalMode: 'plan' });
-    expect(r?.mode.id).toEqual('approvalMode');
-    expect(r?.label).toEqual('plan');
-    expect(r?.unsafe).toBe(false);
-  });
-
-  it('names the mode that actually wins, not both', () => {
-    expect(
-      resolvedLaunchModeEntry(MODES, { yoloMode: true, approvalMode: 'plan' })
-        ?.mode.id
-    ).toEqual('approvalMode');
-  });
-
   it('names nothing for a launch that carries no mode', () => {
     expect(resolvedLaunchModeEntry(MODES, {})).toBeNull();
-    expect(
-      resolvedLaunchModeEntry(MODES, { approvalMode: 'default' })
-    ).toBeNull();
+    expect(resolvedLaunchModeEntry(MODES, { yoloMode: false })).toBeNull();
   });
 });

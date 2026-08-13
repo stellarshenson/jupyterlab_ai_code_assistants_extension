@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.25] - 2026-08-13
+
+### Changed
+
+- The header new-session button's tooltip reads `New session in <folder>` - the provider name dropped, since the panel's own tab already says which assistant it is; the armed launch mode is still named in parentheses, and an armed mode still means the button launches on click with no menu
+
 ## [1.0.23] - 2026-08-12
 
 ### Changed

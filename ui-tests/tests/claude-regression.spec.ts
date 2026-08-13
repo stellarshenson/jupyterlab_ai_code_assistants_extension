@@ -29,8 +29,7 @@ import { openPanelTab, panelId, waitForApplication } from './shared';
 test.use({ autoGoto: false, waitForApplication });
 
 const PANEL = `#${panelId('claude')}`;
-const NEW_BUTTON =
-  'button[title="New Claude Code session in the current folder"]';
+const NEW_BUTTON = 'button[title="New session in the current folder"]';
 const MENU = '.lm-Menu.jp-AiAssistantsContextMenu';
 
 test('should emit an activation console message', async ({ page }) => {

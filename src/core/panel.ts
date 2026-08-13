@@ -329,8 +329,10 @@ export class AssistantSessionsPanel extends Widget {
       // The suffix, because with a mode in force the variants suppress
       // themselves and this button LAUNCHES on click instead of dropping a
       // menu - so without it the one surface that starts an approval-free
-      // session is the only one that never says so (DEF-36).
-      newBtn.title = `New ${this._descriptor.label} session in ${where}${this._variantSuffix()}`;
+      // session is the only one that never says so (DEF-36). The provider's
+      // name is deliberately absent - the panel's own tab already says which
+      // assistant this is (DEF-113).
+      newBtn.title = `New session in ${where}${this._variantSuffix()}`;
     };
     // Focus as well as hover, or the icon-only button's accessible name is the
     // generic one for everybody not using a mouse.

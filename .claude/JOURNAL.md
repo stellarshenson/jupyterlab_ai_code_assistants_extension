@@ -93,3 +93,9 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 30. **Task [Short] - Release of DEF-111 and DEF-112** (v1.0.23): Shipped the single-switch Gemini and the always-+ header button to npm and PyPI via the release lane<br>
     **Result**: Two-defect release on top of v1.0.21 - one approval control per provider, shield confined to menu entries. Makefile current at 1.37.
+
+31. **Task - Header title drops the provider name** (v1.0.24): DEF-113 - the + tooltip reads "New session in <folder>", the redundant provider word gone<br>
+    **Result**: Title template in `src/core/panel.ts` slimmed per user direction; claude-regression Galata selected the button by the old exact title and followed. Same pass, the user's acc-crit wording for the armed state ("no menu, just + starts new session") entered the Panel criteria - behaviour already held and unit-pinned, text now carries it. Jest 118, Galata 28/28.
+
+32. **Task [Short] - Release of DEF-113** (v1.0.25): Shipped the "New session" header title and the acc-crit wording to npm and PyPI via the release lane<br>
+    **Result**: Single-change release on top of v1.0.23. Makefile current at 1.37.

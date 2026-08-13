@@ -260,7 +260,7 @@ describe('the + button names and marks the launch it performs', () => {
     // does. DEF-38 below is the other half.
     newBtn().dispatchEvent(new Event('pointerenter'));
     expect(newBtn().title).toEqual(
-      'New Testbed session in the current folder (Skip Permissions)'
+      'New session in the current folder (Skip Permissions)'
     );
   });
 
@@ -269,7 +269,7 @@ describe('the + button names and marks the launch it performs', () => {
     // only ever read "no mode in force". No pointerenter and no focus is
     // dispatched anywhere in this test - the only thing that may rewrite the
     // title is `setModes` itself.
-    expect(newBtn().title).toEqual('New Testbed session in the current folder');
+    expect(newBtn().title).toEqual('New session in the current folder');
     panel.setModes({ skip: true });
     expect(newBtn().title).toContain('(Skip Permissions)');
     panel.setModes({ skip: false });

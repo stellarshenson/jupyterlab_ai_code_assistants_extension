@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.27] - 2026-08-13
+
+### Changed
+
+- The header + menu entries read `New session` and `New session (Skip Permissions)` - the provider name gone from both - and the button's tooltip is the static `New session in current folder`, no longer interpolating a folder path that deep trees make unreadable; the armed launch mode is still named in the tooltip's parentheses
+
 ## [1.0.25] - 2026-08-13
 
 ### Changed

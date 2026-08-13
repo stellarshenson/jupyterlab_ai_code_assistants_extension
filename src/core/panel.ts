@@ -316,23 +316,15 @@ export class AssistantSessionsPanel extends Widget {
 
     const newBtn = document.createElement('button');
     newBtn.className = 'jp-AiAssistantsPanel-iconButton';
-    // Names the folder rather than "the current folder", and reads it at
-    // HOVER time: the target is the FILE BROWSER's path, which lives in the
-    // opposite sidebar, may be collapsed, and changes without this panel
-    // re-rendering - so the button would otherwise create a session somewhere
-    // the user cannot see, or name a folder they have since left.
+    // The title is a static string - the folder is deliberately NOT named
+    // (a path five levels deep makes a tooltip unreadable) and nor is the
+    // provider (the panel's own tab says which assistant this is) - plus the
+    // armed-mode suffix: with a mode in force the variants suppress themselves
+    // and this button LAUNCHES on click instead of dropping a menu, so without
+    // the suffix the one surface that starts an approval-free session is the
+    // only one that never says so (DEF-36, DEF-113, DEF-114).
     const nameNewButton = (): void => {
-      // `_displayPath` answers '.' for the root itself, which is truthy and
-      // would read as "in .".
-      const shown = this._displayPath(this._currentFolder());
-      const where = shown && shown !== '.' ? shown : 'the current folder';
-      // The suffix, because with a mode in force the variants suppress
-      // themselves and this button LAUNCHES on click instead of dropping a
-      // menu - so without it the one surface that starts an approval-free
-      // session is the only one that never says so (DEF-36). The provider's
-      // name is deliberately absent - the panel's own tab already says which
-      // assistant this is (DEF-113).
-      newBtn.title = `New session in ${where}${this._variantSuffix()}`;
+      newBtn.title = `New session in current folder${this._variantSuffix()}`;
     };
     // Focus as well as hover, or the icon-only button's accessible name is the
     // generic one for everybody not using a mouse.
@@ -2036,7 +2028,7 @@ export class AssistantSessionsPanel extends Widget {
         }
       });
       this._commands.addCommand(this._cmd(`new-session-${mode.id}`), {
-        label: `New ${this._descriptor.label} Session (${mode.menuLabel})`,
+        label: `New session (${mode.menuLabel})`,
         icon: shieldIcon,
         isVisible: () => !this._buildsSameLaunch(mode),
         execute: () => void this._newSession(mode.id)
@@ -2248,8 +2240,7 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     this._commands.addCommand(this._cmd('new-session'), {
-      label: () =>
-        `New ${this._descriptor.label} Session${this._variantSuffix()}`,
+      label: () => `New session${this._variantSuffix()}`,
       icon: () => this._variantIcon(),
       execute: () => void this._newSession()
     });

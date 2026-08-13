@@ -29,7 +29,7 @@ import { openPanelTab, panelId, waitForApplication } from './shared';
 test.use({ autoGoto: false, waitForApplication });
 
 const PANEL = `#${panelId('claude')}`;
-const NEW_BUTTON = 'button[title="New session in the current folder"]';
+const NEW_BUTTON = 'button[title="New session in current folder"]';
 const MENU = '.lm-Menu.jp-AiAssistantsContextMenu';
 
 test('should emit an activation console message', async ({ page }) => {
@@ -65,11 +65,11 @@ test('plus button opens the new-session menu', async ({ page }) => {
   const menu = page.locator(MENU);
   await expect(menu).toBeVisible();
   await expect(
-    menu.locator('.lm-Menu-itemLabel', { hasText: 'New Claude Code Session' })
+    menu.locator('.lm-Menu-itemLabel', { hasText: 'New session' })
   ).toHaveCount(2);
   await expect(
     menu.locator('.lm-Menu-itemLabel', {
-      hasText: 'New Claude Code Session (Skip Permissions)'
+      hasText: 'New session (Skip Permissions)'
     })
   ).toHaveCount(1);
 });
@@ -86,7 +86,7 @@ test('new-session menu item opens a terminal in the current folder', async ({
   const menu = page.locator(MENU);
   await menu
     .locator('.lm-Menu-itemLabel', {
-      hasText: /^New Claude Code Session$/
+      hasText: /^New session$/
     })
     .click();
 

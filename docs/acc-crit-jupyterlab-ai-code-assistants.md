@@ -134,15 +134,17 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
 - [x] **Header button glyph** - the header new-session button wears the + glyph in every launch-mode state, armed or not, never the mode's shield (DEF-112)
   - log: 2026-08-12 criterion added (v1.0.21)
   - log: 2026-08-12 closed: closed - addIcon unconditional, _repaintNewIcon deleted; Galata asserts + survives arming (v1.0.22)
-- [x] **Header menu when unarmed** - with no launch mode on, the header + drops a menu offering the normal session and each skip-permissions variant
+- [x] **Header menu when unarmed** - with no launch mode on, the header + drops a menu reading exactly `New session` and `New session (<mode label>)` - no provider name in either entry
   - log: 2026-08-12 criterion added (v1.0.21)
-  - log: 2026-08-12 closed: closed - pre-existing variant-menu behaviour, unchanged by DEF-112 (v1.0.22)
+  - log: 2026-08-12 closed - pre-existing variant-menu behaviour, unchanged by DEF-112 (v1.0.22)
+  - log: 2026-08-13 reworded per Star Colonel - exact entry texts, vendor name banned; label change landed with DEF-114 (v1.0.25)
 - [x] **Header direct launch when armed** - with a launch mode on, the header + starts the session on click with NO menu - a two-entry menu would offer the armed mode twice - and the tooltip names the mode
   - log: 2026-08-12 criterion added (v1.0.21)
   - log: 2026-08-12 closed: closed - title suffix asserted in unit + Galata tests (v1.0.22)
   - log: 2026-08-13 reworded per Star Colonel - "no menu, just + starts new session"; behaviour and tests unchanged (v1.0.23)
-- [x] **Header button title** - the + tooltip reads `New session in <folder>` with no provider name (the panel's own tab says which assistant), the armed mode named in parentheses
+- [x] **Header button title** - the + tooltip is the static `New session in current folder` - no provider name, no interpolated folder path (deep trees make it unreadable) - plus the armed mode in parentheses when one is on
   - log: 2026-08-13 criterion added and closed - unit (DEF-36/38) and Galata assertions updated to the new text (v1.0.23)
+  - log: 2026-08-13 corrected per Star Colonel - the folder path is not shown at all; landed with DEF-114 (v1.0.25)
 - [x] **Shield on menu entries only** - the shield glyph marks skip-permissions menu entries (header menu and row context menu), never the header button itself
   - log: 2026-08-12 criterion added (v1.0.21)
   - log: 2026-08-12 closed: closed - Galata proves the shield on Resume (Skip Permissions) by path data (v1.0.22)

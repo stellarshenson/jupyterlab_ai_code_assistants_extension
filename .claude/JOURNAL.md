@@ -99,3 +99,9 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 32. **Task [Short] - Release of DEF-113** (v1.0.25): Shipped the "New session" header title and the acc-crit wording to npm and PyPI via the release lane<br>
     **Result**: Single-change release on top of v1.0.23. Makefile current at 1.37.
+
+33. **Task [Short] - Vendor-less menu labels and static tooltip** (v1.0.26): DEF-114 - the + menu reads "New session" / "New session (Skip Permissions)", the tooltip no longer interpolates the folder path<br>
+    **Result**: DEF-113's scope corrected by the user: menu entries kept the vendor name and the tooltip named a live folder that deep trees make unreadable. Both fixed; the armed-mode tooltip suffix kept per the user's explicit answer. Jest 118, Galata 28/28, menu screenshot-verified.
+
+34. **Task [Short] - Release of DEF-114** (v1.0.27): Shipped the vendor-less menu labels and static tooltip to npm and PyPI via the release lane<br>
+    **Result**: Single-change release on top of v1.0.25. Makefile current at 1.37.

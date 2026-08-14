@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.29] - 2026-08-14
+
+### Changed
+
+- No runtime change - the defect ledger now records two reported symptoms as environment, not extension: a burst of 404s from the panel's endpoints that never reached the Jupyter server (a hop in front of it, with two unrelated extensions failing in the same instant), and a `Show in File Browser` that looked dead because the file browser was already sitting in the target folder
+
 ## [1.0.28] - 2026-08-14
 
 ### Added

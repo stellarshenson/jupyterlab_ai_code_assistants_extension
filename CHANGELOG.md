@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.28] - 2026-08-14
+
+### Added
+
+- Browser-rendered proof that an armed launch mode leaves the header + with no menu at all - it clicks through and starts the session, which until now was asserted only under jsdom (Galata 29 checks)
+
 ## [1.0.27] - 2026-08-13
 
 ### Changed

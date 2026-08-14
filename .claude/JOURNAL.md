@@ -111,3 +111,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 36. **Task [Short] - DEF-115 confirmed by the user** (v1.0.27): Star Colonel enabled `dangerouslySkipPermissions` and the header + launched with no menu<br>
     **Result**: Diagnosis holds - the setting was off, not the behaviour. DEF-115 closed with the confirmation logged.
+
+37. **Task [Short] - Release of the DEF-115 proof** (v1.0.28): Shipped the armed-+ Galata coverage to npm and PyPI via the release lane<br>
+    **Result**: Test-and-docs release - no runtime change since v1.0.27. Makefile current at 1.37.

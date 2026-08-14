@@ -105,3 +105,9 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 34. **Task [Short] - Release of DEF-114** (v1.0.27): Shipped the vendor-less menu labels and static tooltip to npm and PyPI via the release lane<br>
     **Result**: Single-change release on top of v1.0.25. Makefile current at 1.37.
+
+35. **Task - DEF-115 armed + menu, not reproduced** (v1.0.27): User reported the header + still dropping its two-entry menu with `dangerouslySkipPermissions` on; traced the path, found the code correct and the reporting machine's switch off<br>
+    **Result**: `_visibleVariantCount()` filters every variant whose forced launch equals the plain one, so an armed switch leaves zero and the click handler calls `_newSession()` directly (`src/core/panel.ts`); the live path `settings.changed` -> `reconcile` -> `applySharedSettings` -> `setModes` reaches it. Evidence for the non-reproduction: `~/.jupyter/lab/user-settings/.../plugin.jupyterlab-settings` holds `false`, mtime 2026-08-09, sole settings source (no `overrides.json`, no second copy, standalone claude extension not installed). Real gap was proof - the acc-crit criterion was ticked on unit evidence alone and no Galata test had ever clicked the armed +. Added one that clicks unarmed first (so the assertion can fail), arms via the settings registry, waits for the title, then asserts no menu in the DOM and a terminal. Galata 29/29.
+
+36. **Task [Short] - DEF-115 confirmed by the user** (v1.0.27): Star Colonel enabled `dangerouslySkipPermissions` and the header + launched with no menu<br>
+    **Result**: Diagnosis holds - the setting was off, not the behaviour. DEF-115 closed with the confirmation logged.

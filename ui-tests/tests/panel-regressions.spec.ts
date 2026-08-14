@@ -195,6 +195,43 @@ test('DEF-54 and DEF-112 - an approval-bypassing new-session button still wears 
   await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', false);
 });
 
+test('DEF-115 - an armed launch mode leaves the + with no menu at all', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  const newButton = page
+    .locator(`${PANEL} .jp-AiAssistantsPanel-header`)
+    .locator('.jp-AiAssistantsPanel-iconButton')
+    .first();
+
+  // Unarmed, the same click drops the two-entry menu - which is what makes the
+  // assertion below able to fail rather than pass by construction.
+  await newButton.click();
+  await expect(page.locator(MENU)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator(MENU)).toBeHidden();
+
+  await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', true);
+  // The title is the panel's own acknowledgement that the setting arrived, so
+  // the click below cannot race the settings round-trip.
+  await expect(newButton).toHaveAttribute('title', /Skip Permissions/, {
+    timeout: 10000
+  });
+
+  await newButton.click();
+
+  // With the mode on, both menu entries build the same launch, so the menu is
+  // one choice pretending to be two - the button launches instead. Lumino
+  // attaches an opened menu synchronously inside the click handler, so a menu
+  // that is not in the DOM here was never opened.
+  await expect(page.locator(MENU)).toHaveCount(0);
+  await expect(page.locator('.jp-Terminal')).toBeVisible({ timeout: 30000 });
+
+  await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', false);
+});
+
 test('DEF-40 and DEF-112 - the shield marks the skip-permissions menu entry', async ({
   page
 }) => {

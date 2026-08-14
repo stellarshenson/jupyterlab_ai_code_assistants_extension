@@ -142,6 +142,7 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - log: 2026-08-12 criterion added (v1.0.21)
   - log: 2026-08-12 closed: closed - title suffix asserted in unit + Galata tests (v1.0.22)
   - log: 2026-08-13 reworded per Star Colonel - "no menu, just + starts new session"; behaviour and tests unchanged (v1.0.23)
+  - log: 2026-08-14 rendered proof added (DEF-115) - Galata clicks the armed + and asserts no menu is in the DOM and a terminal opens; it was ticked on unit evidence alone before (v1.0.27)
 - [x] **Header button title** - the + tooltip is the static `New session in current folder` - no provider name, no interpolated folder path (deep trees make it unreadable) - plus the armed mode in parentheses when one is on
   - log: 2026-08-13 criterion added and closed - unit (DEF-36/38) and Galata assertions updated to the new text (v1.0.23)
   - log: 2026-08-13 corrected per Star Colonel - the folder path is not shown at all; landed with DEF-114 (v1.0.25)

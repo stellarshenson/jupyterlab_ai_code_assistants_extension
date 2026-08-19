@@ -4,6 +4,14 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.30] - 2026-08-19
+
+### Fixed
+
+- Panels come back within a second of a laptop waking or a tab regaining focus - the extension re-checks which assistants are available on `online` and on the tab becoming visible, instead of leaving the sidebar empty until the next 60-second refresh
+- A status check that times out can no longer discard a newer one that succeeded - overlapping checks are now ordered, so a slow request finishing late cannot undock every panel while the server is healthy
+- The warning printed when a status check fails no longer promises a retry schedule it cannot honour, and no longer implies the panels are gone for good
+
 ## [1.0.29] - 2026-08-14
 
 ### Changed

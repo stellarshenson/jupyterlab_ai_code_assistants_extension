@@ -116,20 +116,37 @@ const plugin: JupyterFrontEndPlugin<void> = {
     let settings: ISettingRegistry.ISettings | null = null;
     let sidebar: Sidebar = DEFAULT_SIDEBAR;
 
+    let probeGeneration = 0;
+
     /** Ask the server which providers exist and which of their binaries are on
-     * PATH. A failure leaves the extension activated with no panels - never a
-     * dialog, and never a thrown activation. */
+     * PATH. An unsuperseded failure leaves the extension activated with no
+     * panels until a later probe succeeds - never a dialog, never a thrown
+     * activation.
+     *
+     * Probes overlap: a probe can outlive one issued after it, so verdicts do
+     * not arrive in the order they were asked for. A ROSTER is always written,
+     * whichever settles last - both are answers from the same server, and the
+     * loser is at worst one client deadline stale (DEF-125). A FAILURE is not an answer, so it
+     * is written only while no newer probe has been issued; otherwise a
+     * timeout could discard a roster the server has since confirmed, undocking
+     * every panel while it is healthy (DEF-121). No request is suppressed. */
     const probeStatus = async (): Promise<void> => {
+      const mine = ++probeGeneration;
       try {
         status = await requestAPI<IStatusResponse>('status', serverSettings, {
           cache: 'no-store'
         });
       } catch (err) {
+        // No cadence named here: this also prints from the activation probe,
+        // and neither the interval nor the wake listeners are armed until
+        // after `await migrate()` below (DEF-122).
         console.warn(
-          `${LOG_PREFIX} status probe failed; no assistant panels will be docked.`,
+          `${LOG_PREFIX} status probe failed; panels dock again once a later probe succeeds.`,
           err
         );
-        status = null;
+        if (mine === probeGeneration) {
+          status = null;
+        }
       }
     };
 
@@ -391,6 +408,22 @@ const plugin: JupyterFrontEndPlugin<void> = {
     window.setInterval(() => {
       void probeStatus().then(reconcile);
     }, STATUS_INTERVAL_MS);
+
+    // A suspended network stack - laptop asleep, tab backgrounded - is exactly
+    // when the probe fails, and the slow cadence above would leave the sidebar
+    // panel-less for up to a minute after the machine comes back. A wake fires
+    // both events, so it costs two probes; deliberately, because a guard that
+    // let the second join the first answered the wake with a request issued
+    // before it, and starved the interval above of its own tick (DEF-117).
+    const reprobe = (): void => {
+      void probeStatus().then(reconcile);
+    };
+    window.addEventListener('online', reprobe);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        reprobe();
+      }
+    });
 
     console.log(
       `${LOG_PREFIX} ${live.size} of ${registry.ids.length} assistant panel(s) docked.`

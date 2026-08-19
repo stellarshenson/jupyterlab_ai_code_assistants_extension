@@ -1,6 +1,12 @@
 import { expect, test } from '@jupyterlab/galata';
 
-import { PLUGIN_ID, openPanelTab, panelId, waitForApplication } from './shared';
+import {
+  PLUGIN_ID,
+  STATUS_URL,
+  openPanelTab,
+  panelId,
+  waitForApplication
+} from './shared';
 
 /**
  * Rendered proof for the panel defects whose claims a DOM tier cannot settle.
@@ -364,4 +370,165 @@ test('DEF-57 - one tab stop per section, not one per row', async ({ page }) => {
   // was three stops.
   expect(stops).toBe(populated);
   expect(stops).toBeLessThanOrEqual(rows);
+});
+
+test('DEF-117 - each wake event re-probes status on its own', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // Counted only from here, after the panel is up, so the probes the page load
+  // already made are not mistaken for a wake's.
+  let probes = 0;
+  page.on('request', (request: any) => {
+    if (request.url().includes(STATUS_URL)) {
+      probes += 1;
+    }
+  });
+
+  // Separately, and this is the whole point: dispatched together, ONE listener
+  // answering satisfies "something probed", so deleting the other would leave
+  // this test green. Each dispatch is measured against the count taken
+  // immediately before it, and each is asserted before the next goes out.
+  const beforeVisible = probes;
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  // The headless page is already `visible`, so the listener's state guard
+  // passes rather than returning early.
+  await expect
+    .poll(() => probes, { timeout: 5000 })
+    .toBeGreaterThan(beforeVisible);
+
+  const beforeOnline = probes;
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect
+    .poll(() => probes, { timeout: 5000 })
+    .toBeGreaterThan(beforeOnline);
+
+  // How this fails: before the fix neither listener existed, so the next probe
+  // was the 60s timer's and both polls ran out their five seconds. Polled
+  // rather than slept because arriving in seconds instead of a minute IS the
+  // fix. Each poll returns on the first request it sees, so the window in
+  // which the 60s timer could satisfy an assertion by itself is the poll's own
+  // few hundred milliseconds (DEF-120, logged).
+});
+
+test('DEF-121 - a stale failed probe cannot discard a newer roster', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  const warnings: string[] = [];
+  page.on('console', (message: any) => {
+    if (message.text().includes('status probe failed')) {
+      warnings.push(message.text());
+    }
+  });
+
+  // The first probe from here on is held open, never answered. This is the
+  // wedged wake probe: a probe can outlive one issued after it, so verdicts do
+  // not arrive in the order they were asked for.
+  let held: any = null;
+  let seen = 0;
+  await page.route(`**${STATUS_URL}*`, async (route: any) => {
+    seen += 1;
+    if (seen === 1) {
+      held = route; // deliberately unanswered - released at the end
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect.poll(() => seen, { timeout: 5000 }).toBeGreaterThan(0);
+
+  // A second probe, issued later, answers normally with the real roster.
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => seen, { timeout: 5000 }).toBeGreaterThan(1);
+
+  const tab = page.locator(`.lm-TabBar-tab[data-id="${panelId('claude')}"]`);
+  await expect(tab).toBeVisible();
+
+  // Now the wedged probe fails - the shape a client timeout takes. It is the
+  // OLDER request, so its verdict is stale and must be discarded.
+  await held.abort('failed');
+  await expect
+    .poll(() => warnings.length, { timeout: 10000 })
+    .toBeGreaterThan(0);
+  // The catch warns before it would write, and `reconcile` runs a microtask
+  // later; this settles both. The warning is deliberately outside the guard,
+  // so it prints for superseded verdicts too (DEF-124) - which is what makes
+  // it usable as a settle signal here.
+  await page.waitForTimeout(1000);
+
+  await expect(tab).toBeVisible();
+  await expect(page.locator(PANEL)).toBeVisible();
+
+  // How this fails: without the generation check in `probeStatus` the stale
+  // catch sets `status = null`, `reconcile` reads that as every provider
+  // unavailable, and both assertions above find nothing - panels undocked
+  // while the server is healthy and answered fifteen seconds ago.
+});
+
+test('DEF-121 - a newer failure cannot bury an older roster', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // The mirror of the case above, and the half a guard on the SUCCESS path
+  // would break: the older probe is the one that answers, the newer one only
+  // fails. A failure is not an answer, so it must not win on issue order.
+  let held: any = null;
+  let seen = 0;
+  await page.route(`**${STATUS_URL}*`, async (route: any) => {
+    seen += 1;
+    if (seen === 1) {
+      held = route; // the older probe - answered last, with the real roster
+      return;
+    }
+    if (seen === 2) {
+      await route.abort('failed'); // the newer probe - fails fast
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect.poll(() => seen, { timeout: 5000 }).toBeGreaterThan(0);
+
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => seen, { timeout: 5000 }).toBeGreaterThan(1);
+
+  const tab = page.locator(`.lm-TabBar-tab[data-id="${panelId('claude')}"]`);
+  // The fast failure is the newest issued, so it legitimately undocks
+  // (DEF-119, logged) - that is the state the older roster must lift.
+  await expect(tab).toBeHidden({ timeout: 10000 });
+
+  await held.continue();
+  await expect(tab).toBeVisible({ timeout: 10000 });
+  // Docked, not re-selected: the roster is what came back. JupyterLab does not
+  // restore which sidebar panel was open, so the widget stays hidden behind
+  // its tab - the "place is lost" half of DEF-119, logged and out of scope
+  // here. Asserting visible would fail on a roster that was correctly
+  // restored.
+  await expect(page.locator(PANEL)).toBeAttached();
+
+  // How this fails: guard the success write on `mine === probeGeneration` and
+  // the older probe's roster is discarded because a newer probe was ISSUED,
+  // never mind that it only failed. The sidebar then stays empty until the 60s
+  // tick - the dark window DEF-117 exists to close, reopened by its own fix.
 });

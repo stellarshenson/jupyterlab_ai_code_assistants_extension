@@ -65,6 +65,17 @@ Availability is two-dimensional - the user's setting and whether the CLI binary 
   - log: 2026-08-07 closed - conformance review (v0.1.7)
 - [x] **Edge: CLI appears after start** - a binary installed while JupyterLab runs enables its panel on the next status refresh, without a reload
   - log: 2026-08-07 closed - conformance review (v0.1.7)
+- [x] **Edge: status probe fails** - a failed probe warns that a later probe restores the panels, never that they are gone for good, and names no cadence it cannot honour at that moment
+  - log: 2026-08-19 added (v1.0.29)
+  - log: 2026-08-19 closed - warning reworded (DEF-117) (v1.0.29)
+  - log: 2026-08-19 reworded again - the cadence dropped from the text, since the same warning prints from the activation probe before any retry is armed (DEF-122) (v1.0.29)
+- [x] **Edge: browser wakes from sleep** - once activation has finished, coming back online re-probes status at once, and so does the tab becoming visible, rather than either waiting out the 60s cadence
+  - log: 2026-08-19 added (v1.0.29)
+  - log: 2026-08-19 closed - online and visibilitychange listeners re-probe independently; Galata DEF-117 dispatches them separately and each assertion is measured against the count taken before its own dispatch, so deleting either listener reddens the suite - verified by deleting each in turn and rebuilding (v1.0.29)
+  - log: 2026-08-19 scoped to post-activation - a wake arriving before the listeners register is not heard, logged as DEF-122 with the reason it is not fixed (v1.0.29)
+- [x] **Edge: two probes in flight** - a roster is written whichever probe answers last, and a failure is written only while no newer probe has been issued, so a superseded failure cannot bury a roster an overlapping probe returned
+  - log: 2026-08-19 added - generation stamp in probeStatus (DEF-121) (v1.0.29)
+  - log: 2026-08-19 closed - scoped to the failure path after round 3 found the success half discarded good rosters; both orderings pinned by Galata DEF-121 tests, each falsified by mutation (DEF-121) (v1.0.29)
 
 ## Settings
 

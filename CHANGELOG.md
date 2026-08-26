@@ -4,6 +4,16 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.32] - 2026-08-26
+
+### Fixed
+
+- Opening or switching to a conversation no longer reads the whole transcript to find there is nothing to repair - measured at 0.8 s and 438 MiB of server memory for a single click on a 100 MB conversation, on the path 91 of 107 conversations take
+- A conversation being written to while the panel opens it can no longer lose that turn - the check meant to abort such a rewrite took its reference point after reading the file, so a turn typed during the read was already counted as part of it
+- Repairing a compacted conversation no longer rewrites or inflates the rest of the transcript - it grew a 105 MB file to 170 MB by re-encoding every line, where now only the two records the repair touches differ
+- A transcript the repair cannot write, or a directory it cannot write into, no longer fails the switch with a server error
+- Launching a conversation held by a background agent no longer rewrites it - that launch attaches to the agent and never needs the repair
+
 ## [1.0.31] - 2026-08-26
 
 ### Fixed

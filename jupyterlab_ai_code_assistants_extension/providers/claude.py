@@ -20,6 +20,7 @@ a store implementing ``SessionStore``.
 """
 from __future__ import annotations
 
+import contextlib
 import glob
 import json
 import logging
@@ -589,38 +590,59 @@ def ensure_continuable(transcript: Path) -> bool:
 
     The repair ADDS a record and removes none: a synthetic ``isMeta`` user turn
     becomes the root and the boundary is re-pointed at it, so the boundary's
-    ``compactMetadata`` and ``logicalParentUuid`` survive. It is idempotent, it
-    declines any transcript it cannot parse whole, and it aborts if the file
-    changed while it worked.
+    ``compactMetadata`` and ``logicalParentUuid`` survive. Every other line is
+    written back byte-identical - compact separators, no ASCII escaping - so a
+    repaired transcript differs from the original only in the two records it
+    touches. It is idempotent, it declines any transcript it cannot parse whole
+    or re-encode, and it aborts if the file changed while it worked.
     """
+    # ``before`` is taken BEFORE the read, not after. An append that lands
+    # while the file is being read is otherwise already inside the baseline,
+    # so the size/mtime check below agrees with itself and publishes a record
+    # list that never held the turn the user just typed.
     try:
-        raw = transcript.read_text(encoding="utf-8").splitlines()
         before = transcript.stat()
+        records: list[dict] = []
+        root: dict | None = None
+        # Iterated rather than slurped, and decided at the root record: the
+        # common case is a transcript that is already continuable, and reading
+        # a multi-hundred-MB conversation whole only to decline it costs the
+        # server the whole file in memory on a panel click. Text-mode iteration
+        # also breaks on `\n`/`\r\n`/`\r` alone, where ``str.splitlines``
+        # additionally splits on a raw U+2028 - which Claude Code writes
+        # unescaped, and which shredded such a transcript into unparseable
+        # fragments.
+        with transcript.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    # Not ours to rewrite: a file we cannot read whole is one we
+                    # cannot write back whole either, and half a transcript is
+                    # worse than an unhelpful `-c`.
+                    return False
+                if not isinstance(record, dict):
+                    return False
+                records.append(record)
+                if (
+                    root is None
+                    and record.get("parentUuid") is None
+                    and record.get("uuid")
+                ):
+                    root = record
+                    if (
+                        root.get("type") != "system"
+                        or root.get("subtype") != COMPACT_BOUNDARY_SUBTYPE
+                    ):
+                        # Already continuable, which is the common case and the
+                        # idempotent one.
+                        return False
     except (OSError, ValueError):
         return False
 
-    records: list[dict] = []
-    for line in raw:
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except ValueError:
-            # Not ours to rewrite: a file we cannot read whole is one we cannot
-            # write back whole either, and half a transcript is worse than an
-            # unhelpful `-c`.
-            return False
-        if not isinstance(record, dict):
-            return False
-        records.append(record)
-
-    root = next(
-        (r for r in records if r.get("parentUuid") is None and r.get("uuid")), None
-    )
     if root is None:
-        return False
-    if root.get("type") != "system" or root.get("subtype") != COMPACT_BOUNDARY_SUBTYPE:
-        # Already continuable, which is the common case and the idempotent one.
         return False
 
     root_uuid = str(uuid.uuid4())
@@ -647,11 +669,16 @@ def ensure_continuable(transcript: Path) -> bool:
         else:
             rebuilt.append(record)
 
-    tmp = transcript.with_name(f"{transcript.name}.continuable")
+    # Unique per write. A single shared name makes the rename atomic only
+    # against itself - the hazard ``write_json_atomic`` records in core.
+    tmp = transcript.with_name(f"{transcript.name}.{uuid.uuid4().hex}.continuable")
     try:
         with open(tmp, "w", encoding="utf-8") as handle:
             for record in rebuilt:
-                handle.write(json.dumps(record) + "\n")
+                handle.write(
+                    json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+                    + "\n"
+                )
             handle.flush()
             os.fsync(handle.fileno())
         after = transcript.stat()
@@ -661,8 +688,14 @@ def ensure_continuable(transcript: Path) -> bool:
             return False
         os.chmod(tmp, before.st_mode & 0o777)
         os.replace(tmp, transcript)
-    except OSError as err:
-        tmp.unlink(missing_ok=True)
+    except (OSError, UnicodeEncodeError) as err:
+        # ``UnicodeEncodeError`` is a ``ValueError``, not an ``OSError``: a lone
+        # surrogate re-encodes fine and only fails at the write, and without
+        # this clause it would escape a store method the route awaits bare.
+        # ``unlink`` is suppressed for the same reason - the handler running on
+        # an unwritable directory must not itself be the thing that raises.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
         _log.warning("claude could not make %s continuable: %s", transcript.name, err)
         return False
 
@@ -1123,12 +1156,13 @@ class ClaudeStore(SessionStore):
         if session_id and not fork_session_id:
             attach_id = bg_agents(cli_path).get(session_id)
 
-        if session_id:
+        if session_id and not attach_id:
             # Opening a conversation from the panel is what pins `claude -c` to
             # it. Called off the IOLoop with the rest of this method, and total
             # by construction - a launch may not fail over a transcript's
-            # shape. A conversation held elsewhere is skipped inside, which is
-            # also what makes this a no-op on the attach path.
+            # shape. An attach resumes through the agent, never through `-c`,
+            # so that path is excluded here rather than left to the liveness
+            # check inside.
             make_continuable(session_id)
 
         if attach_id:

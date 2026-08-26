@@ -311,6 +311,8 @@ Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. 
 - [x] **Terminal -c follows the panel** - switching to or launching a conversation makes plain 'claude -c' in that project resume it, including a conversation that has been compacted
   - log: 2026-08-26 added
   - log: 2026-08-26 closed: closed - DEF-127: switch and launch repair a compact_boundary root so -c can select it; verified end to end against the real CLI, 7 mutation-checked tests
+  - log: 2026-08-26 qualified - -c picks by mtime, and only the SWITCH path touches it; an already-continuable conversation opened by launch alone still leaves -c on the project's newest transcript until the resumed CLI appends (round-1 architect)
+  - log: 2026-08-26 qualified - launching a conversation held by a background agent attaches to that agent and does NOT repair it, so an agent-held compacted conversation is not made -c-selectable by launch (see DEF-128)
 
 ## Codex Provider
 

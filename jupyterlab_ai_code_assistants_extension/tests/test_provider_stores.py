@@ -6,6 +6,7 @@ retired standalone extensions; nothing here reads a real assistant directory.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import time
@@ -924,3 +925,115 @@ def test_the_repair_keeps_the_transcript_private(claude):
 
     assert claude_provider.ensure_continuable(path) is True
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+class _AppendsWhileRead:
+    """A transcript that grows while it is being read - a live CLI writing a turn
+    the reader has already passed."""
+
+    def __init__(self, path, turn):
+        self._path = path
+        self._turn = turn
+        self.name = path.name
+
+    def __fspath__(self):
+        return str(self._path)
+
+    def stat(self):
+        return self._path.stat()
+
+    def with_name(self, name):
+        return self._path.with_name(name)
+
+    def open(self, *args, **kwargs):
+        content = self._path.read_text(encoding="utf-8")
+        with self._path.open("a", encoding="utf-8") as appender:
+            appender.write(json.dumps(self._turn) + "\n")
+        return io.StringIO(content)
+
+
+def test_an_append_racing_the_read_is_never_published(claude):
+    """The size/mtime guard is anchored BEFORE the read. A turn landing while the
+    transcript is read would otherwise already be inside the baseline, so the
+    guard would agree with itself and publish a record list that never held it -
+    losing what the user just typed, and reporting success."""
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+    turn = {
+        "parentUuid": new_uuid(),
+        "type": "user",
+        "uuid": new_uuid(),
+        "sessionId": sid,
+    }
+
+    assert claude_provider.ensure_continuable(_AppendsWhileRead(path, turn)) is False
+    assert turn["uuid"] in {r.get("uuid") for r in _records(path)}
+
+
+def test_the_repair_rewrites_only_the_two_records_it_touches(claude):
+    """Writing into another program's append-only file is authorised here on the
+    grounds that the repair is additive. Claude writes compact, unescaped JSON,
+    so re-encoding with Python's defaults would rewrite every line and inflate
+    the file - measured at 1.8x on a transcript that is mostly non-ASCII."""
+    store, root = claude
+    sid = new_uuid()
+    boundary, tail = new_uuid(), new_uuid()
+    records = [
+        {"type": "custom-title", "customTitle": "Ported - caf\u00e9", "sessionId": sid},
+        {
+            "parentUuid": None,
+            "type": "system",
+            "subtype": "compact_boundary",
+            "uuid": boundary,
+            "sessionId": sid,
+            "cwd": PROJECT_PATH,
+        },
+        {
+            "parentUuid": boundary,
+            "type": "user",
+            "uuid": tail,
+            "message": {"role": "user", "content": "\u65e5\u672c\u8a9e na\u00efve"},
+        },
+    ]
+    path = write_claude_tree(root, []) / f"{sid}.jsonl"
+    path.write_text(
+        "".join(
+            json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n"
+            for r in records
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+    original = path.read_bytes().splitlines()
+
+    assert claude_provider.ensure_continuable(path) is True
+
+    after = path.read_bytes().splitlines()
+    # One record added, the boundary re-pointed, and nothing else re-encoded.
+    assert len(after) == len(original) + 1
+    assert after[0] == original[0]
+    assert after[-1] == original[-1]
+    assert "\u65e5\u672c\u8a9e".encode() in after[-1]
+
+
+def test_a_record_that_cannot_be_encoded_declines_instead_of_raising(claude):
+    """A lone surrogate survives `json.loads` and fails only at the write, where
+    it raises `UnicodeEncodeError` - a `ValueError`, not an `OSError`. The store
+    method the route awaits bare must not be the thing that raises, and the
+    transcript must be left exactly as it was found."""
+    store, root = claude
+    sid = new_uuid()
+    project_dir = write_claude_tree(root, [])
+    path = _compacted(project_dir, sid)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '{"parentUuid":"p","type":"user","uuid":"x",'
+            '"message":{"role":"user","content":"\\ud800"}}\n'
+        )
+    before = path.read_bytes()
+
+    assert claude_provider.ensure_continuable(path) is False
+    assert path.read_bytes() == before
+    assert list(project_dir.glob("*.continuable")) == []
+    assert store.switch(CLAUDE_ENCODED, sid) == {"requested": sid}

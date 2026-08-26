@@ -30,6 +30,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 - **Joint settings page** - one settings section covering all assistants, with a per-assistant toggle (all on by default); toggling takes effect live, no JupyterLab reload
 - **Three-section side panel** - Favorites, Recent, and All projects, each scrolling independently
 - **One-click resume** - click a row to jump back into that session in a terminal; an open terminal for the project is reused instead of duplicated
+- **Your terminal's `claude -c` follows the panel** (Claude) - switching to or launching a conversation makes plain `claude -c` in that project resume that same conversation, including one that has been compacted, which Claude Code otherwise refuses to continue
 - **Conversation switcher** - a right-click "Switch and Manage Sessions" submenu lists a project's other conversations by name and short id with last-activity time; "Manage Sessions..." opens a searchable popup over the full list with multi-select delete and per-row open and copy-id buttons
 - **Branch session** - fork the current conversation into a new named session via the right-click menu; each assistant forks its own way (Claude's native `--fork-session`, Codex's `codex fork`, server-side copies for Kimi and Gemini) behind the same menu item
 - **Launch modes under each assistant's own name** - Claude's skip-permissions, Codex's approval bypass, Kimi's `--yolo`, Gemini's YOLO; unsafe variants carry a shield glyph in the launch menus

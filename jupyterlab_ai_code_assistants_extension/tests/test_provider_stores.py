@@ -17,6 +17,7 @@ from jupyterlab_ai_code_assistants_extension.core import store as store_module
 from jupyterlab_ai_code_assistants_extension.core.store import SessionNotFound
 from jupyterlab_ai_code_assistants_extension.providers import codex as codex_provider
 from jupyterlab_ai_code_assistants_extension.providers import gemini as gemini_provider
+from jupyterlab_ai_code_assistants_extension.providers import claude as claude_provider
 from jupyterlab_ai_code_assistants_extension.providers.claude import ClaudeStore
 from jupyterlab_ai_code_assistants_extension.providers.codex import CodexStore
 from jupyterlab_ai_code_assistants_extension.providers.gemini import (
@@ -98,6 +99,36 @@ def test_a_malformed_number_costs_a_row_a_field_not_the_whole_listing(
     rows = store.list_sessions()
     assert len(rows) == 1
     assert rows[0]["session_id"] == sid
+
+
+def test_an_out_of_range_pid_costs_a_row_a_field_not_the_whole_listing(
+    claude, scratch_stores
+):
+    """The defect above, one field over - and this one reaches ``os.kill``.
+
+    ``os.kill`` answers an int outside C ``pid_t`` with ``OverflowError``,
+    which is NOT an ``OSError`` and so passed straight through ``pid_alive``'s
+    own handler, out of the executor, and 500'd the sessions poll for EVERY
+    project on every tick. Found by adversarial review of a change that was
+    then dropped; the fault is older than that change and independent of it
+    (DEF-126).
+    """
+    store, root = claude
+    sid = new_uuid()
+    write_claude_tree(root, [{"id": sid, "cwd": PROJECT_PATH, "turns": 1}])
+
+    states = root / "sessions"
+    states.mkdir(parents=True, exist_ok=True)
+    (states / "1.json").write_text(
+        json.dumps({"cwd": PROJECT_PATH, "pid": 2**63, "updatedAt": 1}),
+        encoding="utf-8",
+    )
+
+    rows = store.list_sessions()
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == sid
+    # The unit underneath: a pid no process can hold reads dead, never raises.
+    assert store_module.pid_alive(2**63) is False
 
 
 def test_claude_lists_one_row_per_project(claude, scratch_stores):
@@ -728,3 +759,168 @@ def test_a_native_binary_store_claims_a_pid_by_comm_alone(claude, monkeypatch):
     assert store.owns_pid(1) is True
     monkeypatch.setattr(store_module, "process_comm", lambda pid: "bash")
     assert store.owns_pid(1) is False
+
+
+# ------------------------------------------------ `claude -c` continuability
+
+
+def _compacted(project_dir, sid, *, compacted=True):
+    """A transcript shaped as Claude writes one, optionally post-compaction."""
+    boundary, first, second = new_uuid(), new_uuid(), new_uuid()
+    records = [{"type": "custom-title", "customTitle": "Ported", "sessionId": sid}]
+    if compacted:
+        records.append(
+            {
+                "parentUuid": None,
+                "type": "system",
+                "subtype": "compact_boundary",
+                "content": "Conversation compacted",
+                "uuid": boundary,
+                "sessionId": sid,
+                "cwd": PROJECT_PATH,
+                "version": "2.1.218",
+                "gitBranch": "main",
+                "logicalParentUuid": second,
+                "compactMetadata": {"trigger": "manual", "preTokens": 607119},
+            }
+        )
+    records.append(
+        {
+            "parentUuid": boundary if compacted else None,
+            "type": "user",
+            "uuid": first,
+            "cwd": PROJECT_PATH,
+            "sessionId": sid,
+        }
+    )
+    path = project_dir / f"{sid}.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8"
+    )
+    path.chmod(0o600)
+    return path
+
+
+def _records(path):
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _chain_root(path):
+    return next(
+        (r for r in _records(path) if r.get("parentUuid") is None and r.get("uuid")),
+        None,
+    )
+
+
+def _live_record(root, sid):
+    """A pid file claiming a RUNNING process serves this conversation."""
+    states = root / "sessions"
+    states.mkdir(parents=True, exist_ok=True)
+    (states / f"{os.getpid()}.json").write_text(
+        json.dumps({"pid": os.getpid(), "sessionId": sid, "cwd": PROJECT_PATH}),
+        encoding="utf-8",
+    )
+
+
+def test_a_compacted_transcript_gets_a_root_claude_c_will_select(claude):
+    """`claude -c` walks a conversation to its chain root and refuses one rooted
+    at a compact_boundary - the shape every conversation takes once compacted -
+    then falls back to the next transcript. A project whose only conversation
+    was compacted therefore answers "No conversation found to continue" against
+    a transcript that is intact and still resumable by id.
+    """
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+
+    assert claude_provider.ensure_continuable(path) is True
+
+    fixed = _chain_root(path)
+    assert (fixed["type"], fixed["isMeta"]) == ("user", True)
+    # Nothing is removed. The boundary survives, re-pointed at the new root,
+    # and keeps the metadata saying what was compacted away.
+    boundary = next(r for r in _records(path) if r.get("subtype") == "compact_boundary")
+    assert boundary["parentUuid"] == fixed["uuid"]
+    assert boundary["compactMetadata"]["preTokens"] == 607119
+    assert boundary["logicalParentUuid"]
+
+
+def test_an_already_continuable_transcript_is_left_byte_for_byte(claude):
+    """The common case, and the one that makes a repair on every launch safe to
+    run: a conversation that was never compacted is not rewritten at all."""
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid, compacted=False)
+    before = path.read_bytes()
+
+    assert claude_provider.ensure_continuable(path) is False
+    assert path.read_bytes() == before
+
+
+def test_a_transcript_that_cannot_be_parsed_whole_is_declined(claude):
+    """A file we cannot read whole is one we cannot write back whole, and half a
+    transcript is worse than an unhelpful `-c`."""
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("{not json\n")
+    before = path.read_bytes()
+
+    assert claude_provider.ensure_continuable(path) is False
+    assert path.read_bytes() == before
+
+
+def test_a_live_conversation_is_never_rewritten(claude):
+    """Transcripts are append-only, so a rewrite racing an append drops the
+    appended turns. A conversation open elsewhere is left alone entirely."""
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+    before = path.read_bytes()
+    _live_record(root, sid)
+
+    assert claude_provider.make_continuable(sid) == 0
+    assert path.read_bytes() == before
+
+
+def test_switching_to_a_compacted_conversation_makes_claude_c_select_it(claude):
+    """Wiring, panel side. The switch already touches the mtime so the picker
+    sorts this transcript first; being selectable at all is the other half."""
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+
+    assert store.switch(CLAUDE_ENCODED, sid) == {"requested": sid}
+    assert _chain_root(path)["type"] == "user"
+
+
+def test_launching_a_compacted_conversation_makes_claude_c_select_it(claude):
+    """Wiring, launch side - the path a user actually takes to open a session,
+    and the one that repairs a project the panel has never switched."""
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+
+    assert store.launch_argv("/bin/claude", session_id=sid) == [
+        "/bin/claude",
+        "--resume",
+        sid,
+    ]
+    assert _chain_root(path)["type"] == "user"
+
+
+def test_the_repair_keeps_the_transcript_private(claude):
+    """The rewrite goes through a temp file, which is created with the process
+    umask rather than the mode of the file it replaces. A conversation is not
+    world-readable and must not become so by being repaired."""
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+
+    assert claude_provider.ensure_continuable(path) is True
+    assert path.stat().st_mode & 0o777 == 0o600

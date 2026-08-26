@@ -105,6 +105,11 @@ def pid_alive(pid: int) -> bool:
 
     ``PermissionError`` from ``os.kill(pid, 0)`` means the process is alive but
     the caller cannot signal it (e.g. PID 1 on CI runners) - that's alive.
+
+    ``OverflowError`` is NOT an ``OSError``, and it is what ``os.kill`` raises
+    for an int outside C ``pid_t``. Every pid reaching here was read from a
+    record some other program wrote, so without this one value would raise
+    through the whole listing rather than cost itself a row (DEF-126).
     """
     try:
         os.kill(pid, 0)
@@ -112,7 +117,7 @@ def pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    except OSError:
+    except (OSError, OverflowError):
         return False
     return True
 

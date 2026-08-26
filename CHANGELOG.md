@@ -4,6 +4,13 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.31] - 2026-08-26
+
+### Fixed
+
+- `claude -c` in a project now resumes the conversation you last opened or switched to in the panel, including one that has been compacted - Claude Code refuses to continue a compacted conversation, so the terminal reported "No conversation found to continue" against a session the panel opened without complaint
+- A single session record carrying an out-of-range process id no longer breaks the project list - one unusable value now costs its own row a field instead of failing the listing for every project on every refresh
+
 ## [1.0.30] - 2026-08-19
 
 ### Fixed

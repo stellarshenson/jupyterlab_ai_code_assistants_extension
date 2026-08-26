@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 from ..core import state
@@ -540,6 +541,161 @@ def _read_legacy_pin(project_dir: Path) -> str | None:
     return sid
 
 
+# --------------------------------------------- ``claude -c`` continuability
+
+COMPACT_BOUNDARY_SUBTYPE = "compact_boundary"
+CONTINUE_ROOT_TEXT = "[conversation continued after compaction]"
+
+
+def _conversation_is_live(session_id: str) -> bool:
+    """True while a running process records itself as serving ``session_id``.
+
+    Gates REWRITING a transcript, never reading one. Transcripts are
+    append-only, so a rewrite that races an append drops the appended turns.
+    ``ensure_continuable`` re-checks size and mtime immediately before it swaps
+    the file in; this is the cheaper first line of the same defence, and the
+    two together are why a launch of a conversation held elsewhere is a no-op
+    rather than a corruption.
+    """
+    sessions_dir = claude_dir() / SESSIONS_DIRNAME
+    if not sessions_dir.is_dir():
+        return False
+    for entry in sessions_dir.glob("*.json"):
+        data = load_json(entry)
+        if not isinstance(data, dict) or data.get("sessionId") != session_id:
+            continue
+        pid = data.get("pid")
+        if isinstance(pid, int) and pid_alive(pid):
+            return True
+    return False
+
+
+def ensure_continuable(transcript: Path) -> bool:
+    """Give a compacted transcript a root ``claude -c`` will select. True if rewritten.
+
+    ``claude -c`` walks a conversation back to its chain root and refuses one
+    whose root is a ``system``/``compact_boundary`` record - the shape every
+    conversation takes once it has been compacted. It then falls back to the
+    next-newest transcript, so in a project whose only conversation is
+    compacted it answers "No conversation found to continue" against a
+    transcript that is intact and resumable by id. That asymmetry is why the
+    panel opens such a conversation while the user's terminal cannot.
+
+    Measured on this CLI (2.1.246), in both directions: removing the boundary
+    from a refused transcript makes it accepted, and splicing one into an
+    accepted transcript makes it refused. Claude's own fork does not help - the
+    fork inherits the boundary root and is refused too - so rewriting is the
+    only lever the panel has.
+
+    The repair ADDS a record and removes none: a synthetic ``isMeta`` user turn
+    becomes the root and the boundary is re-pointed at it, so the boundary's
+    ``compactMetadata`` and ``logicalParentUuid`` survive. It is idempotent, it
+    declines any transcript it cannot parse whole, and it aborts if the file
+    changed while it worked.
+    """
+    try:
+        raw = transcript.read_text(encoding="utf-8").splitlines()
+        before = transcript.stat()
+    except (OSError, ValueError):
+        return False
+
+    records: list[dict] = []
+    for line in raw:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            # Not ours to rewrite: a file we cannot read whole is one we cannot
+            # write back whole either, and half a transcript is worse than an
+            # unhelpful `-c`.
+            return False
+        if not isinstance(record, dict):
+            return False
+        records.append(record)
+
+    root = next(
+        (r for r in records if r.get("parentUuid") is None and r.get("uuid")), None
+    )
+    if root is None:
+        return False
+    if root.get("type") != "system" or root.get("subtype") != COMPACT_BOUNDARY_SUBTYPE:
+        # Already continuable, which is the common case and the idempotent one.
+        return False
+
+    root_uuid = str(uuid.uuid4())
+    synthetic = {
+        "parentUuid": None,
+        "isSidechain": False,
+        "userType": "external",
+        "type": "user",
+        "isMeta": True,
+        "message": {"role": "user", "content": CONTINUE_ROOT_TEXT},
+        "uuid": root_uuid,
+    }
+    # Carried from the boundary rather than invented, so the new root agrees
+    # with the conversation it heads on every field the CLI reads.
+    for field in ("timestamp", "cwd", "sessionId", "version", "gitBranch"):
+        if field in root:
+            synthetic[field] = root[field]
+
+    rebuilt: list[dict] = []
+    for record in records:
+        if record is root:
+            rebuilt.append(synthetic)
+            rebuilt.append({**record, "parentUuid": root_uuid})
+        else:
+            rebuilt.append(record)
+
+    tmp = transcript.with_name(f"{transcript.name}.continuable")
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            for record in rebuilt:
+                handle.write(json.dumps(record) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        after = transcript.stat()
+        if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+            # Someone appended while we worked; theirs is the live copy.
+            tmp.unlink(missing_ok=True)
+            return False
+        os.chmod(tmp, before.st_mode & 0o777)
+        os.replace(tmp, transcript)
+    except OSError as err:
+        tmp.unlink(missing_ok=True)
+        _log.warning("claude could not make %s continuable: %s", transcript.name, err)
+        return False
+
+    _log.info("claude gave %s a root `claude -c` accepts", transcript.name)
+    return True
+
+
+def make_continuable(session_id: str) -> int:
+    """Repair every transcript of ``session_id``. Returns how many were rewritten.
+
+    A conversation can sit under two encoded directories at once - a renamed
+    project leaves the same id in both - and ``-c`` resolves through whichever
+    matches the cwd, so both are repaired.
+
+    Total by construction: every failure inside answers False rather than
+    raising, because the callers are a switch and a launch, and neither may
+    fail over the shape of a transcript.
+    """
+    if not is_safe_segment(session_id):
+        return 0
+    if _conversation_is_live(session_id):
+        return 0
+    try:
+        matches = sorted(
+            (claude_dir() / PROJECTS_DIRNAME).glob(
+                f"*/{glob.escape(session_id)}.jsonl"
+            )
+        )
+    except OSError:
+        return 0
+    return sum(1 for match in matches if ensure_continuable(match))
+
+
 class ClaudeStore(SessionStore):
     """``~/.claude/projects`` as a session store."""
 
@@ -863,6 +1019,11 @@ class ClaudeStore(SessionStore):
         jsonl = project_dir / f"{session_id}.jsonl"
         if not jsonl.is_file():
             return {"error": "branch_not_found"}
+        # Making this transcript newest is only half of making `claude -c` land
+        # on it; being selectable at all is the other half, and a compacted
+        # conversation is not (``make_continuable``). Runs BEFORE the touch so
+        # the mtime the picker sorts on is the last write to the file.
+        make_continuable(session_id)
         try:
             os.utime(jsonl, None)
         except OSError:
@@ -961,6 +1122,14 @@ class ClaudeStore(SessionStore):
         attach_id: str | None = None
         if session_id and not fork_session_id:
             attach_id = bg_agents(cli_path).get(session_id)
+
+        if session_id:
+            # Opening a conversation from the panel is what pins `claude -c` to
+            # it. Called off the IOLoop with the rest of this method, and total
+            # by construction - a launch may not fail over a transcript's
+            # shape. A conversation held elsewhere is skipped inside, which is
+            # also what makes this a no-op on the attach path.
+            make_continuable(session_id)
 
         if attach_id:
             argv = [cli_path, "attach", attach_id]

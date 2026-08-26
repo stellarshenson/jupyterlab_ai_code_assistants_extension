@@ -198,6 +198,9 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-08-07 closed - conformance review (v0.1.7)
 - [x] **Edge: concurrent delete** - deleting a conversation another panel has open reports the failure and refreshes, never leaving a phantom row
   - log: 2026-08-07 closed - conformance review (v0.1.7)
+- [x] **Edge: unusable field in an assistant's session record** - a value the assistant wrote that the panel cannot use - an ISO string where a number is compared, a pid outside the OS range - costs its own row that field and nothing else; the listing still answers for every project
+  - log: 2026-08-26 added
+  - log: 2026-08-26 closed: closed - DEF-126: pid_alive catches OverflowError so an out-of-range pid reads dead; pinned by test_an_out_of_range_pid_costs_a_row_a_field_not_the_whole_listing, mutation-verified (v1.0.30 tree)
 
 ## Colour
 
@@ -305,6 +308,9 @@ Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. 
   - log: 2026-08-09 qualified - `/color` is now the DEFAULT, not the last word; a hand-set tab colour overrides it (v1.0.0)
 - [x] **Skip-permissions mode** - an opt-in setting and matching menu entries launch with `--dangerously-skip-permissions`, off by default
   - log: 2026-08-07 closed - conformance review (v0.1.7)
+- [x] **Terminal -c follows the panel** - switching to or launching a conversation makes plain 'claude -c' in that project resume it, including a conversation that has been compacted
+  - log: 2026-08-26 added
+  - log: 2026-08-26 closed: closed - DEF-127: switch and launch repair a compact_boundary root so -c can select it; verified end to end against the real CLI, 7 mutation-checked tests
 
 ## Codex Provider
 

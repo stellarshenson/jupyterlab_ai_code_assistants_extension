@@ -690,6 +690,43 @@ async def test_the_argv_route_resumes_without_touching_the_pin(
     assert state.read_pin("kimi", encoded) == pinned
 
 
+async def test_the_argv_route_pins_a_fork_the_same_way_the_launch_route_does(
+    jp_fetch, tmp_path, present
+):
+    """A fork pins the branch on this route as on the launch route.
+
+    Parity for a route that runs the launch route's validator and accepts its
+    full body; the pin bookkeeping is one shared method so the two routes
+    cannot drift. On the native-flag provider the argv carries the fork too,
+    which is what makes the pinned id the conversation that actually runs.
+    No client sends a fork to this route today.
+    """
+    encoded = "wd-demo"
+    parent = "11111111-2222-3333-4444-555555555555"
+    fork = "99999999-8888-7777-6666-555555555555"
+
+    response = await jp_fetch(
+        URL,
+        "providers",
+        "claude",
+        "launch-argv",
+        method="POST",
+        body=json.dumps(
+            {
+                "project_path": str(tmp_path),
+                "encoded_path": encoded,
+                "session_id": parent,
+                "fork_session_id": fork,
+            }
+        ),
+    )
+    assert response.code == 200
+    argv = json.loads(response.body)["argv"]
+    assert argv[1:3] == ["--resume", parent]
+    assert argv[argv.index("--fork-session") + 2] == fork
+    assert state.read_pin("claude", encoded) == fork
+
+
 async def test_the_argv_route_refuses_an_undeclared_mode(jp_fetch, tmp_path, present):
     """Same descriptor gate as the launch route - the store is never reached."""
     status, error = await error_of(

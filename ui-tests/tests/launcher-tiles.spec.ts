@@ -176,7 +176,39 @@ test('ACC-LNCH-143 - one tile per available assistant, under AI Assistants', asy
     );
   }
 
+  await page
+    .locator(SECTION_TITLE, { hasText: CATEGORY })
+    .scrollIntoViewIfNeeded();
   await page.screenshot({ path: shotPath('launcher-ai-assistants-section') });
+});
+
+test('ACC-LNCH-163 - the section header carries the joint icon, not a tile icon', async ({
+  page
+}) => {
+  await page.goto();
+  await resetToLauncher(page);
+
+  // The Launcher draws a header with its first tile's command icon; this
+  // extension's tile icon is a view that answers the header with the joint
+  // icon instead, so the header svg matches none of the tiles' svgs.
+  const section = page.locator('.jp-Launcher-section', {
+    has: page.locator(SECTION_TITLE, { hasText: CATEGORY })
+  });
+  const header = section.locator('.jp-Launcher-sectionHeader svg');
+  await expect(header).toHaveCount(1);
+  const headerSvg = await header.innerHTML();
+  expect(headerSvg).toContain('<path');
+
+  const tileSvgs: string[] = await page
+    .locator(`${CARDS} .jp-LauncherCard-icon svg`)
+    .evaluateAll(nodes => nodes.map(node => node.innerHTML));
+  expect(tileSvgs.length).toBeGreaterThan(0);
+  for (const tileSvg of tileSvgs) {
+    expect(headerSvg).not.toBe(tileSvg);
+  }
+
+  await section.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: shotPath('launcher-section-joint-icon') });
 });
 
 test('ACC-LNCH-145 - a settings toggle adds and removes a tile with no reload', async ({
@@ -232,23 +264,14 @@ test('ACC-LNCH-144 - no docked assistant leaves no section at all', async ({
   await expect(page.locator(CARDS)).toHaveCount(AVAILABLE.length);
 });
 
-test('ACC-LNCH-156 - the section sits after Console and before Other', async ({
-  page
-}) => {
+test('ACC-LNCH-156 - the section sits after Other', async ({ page }) => {
   await page.goto();
   await resetToLauncher(page);
 
   const titles = await sectionTitles(page);
   expect(titles).toContain(CATEGORY);
   expect(titles).toContain('Other');
-  // Console only exists when a kernel is installed; this venv has none, so the
-  // half of the claim it can answer is asserted and the other half is skipped
-  // rather than faked with a kernel the suite does not otherwise need.
-  const console = titles.indexOf('Console');
-  if (console !== -1) {
-    expect(console).toBeLessThan(titles.indexOf(CATEGORY));
-  }
-  expect(titles.indexOf(CATEGORY)).toBeLessThan(titles.indexOf('Other'));
+  expect(titles.indexOf('Other')).toBeLessThan(titles.indexOf(CATEGORY));
 });
 
 test('ACC-LNCH-155 - the sibling that owns the spawn is present', async ({

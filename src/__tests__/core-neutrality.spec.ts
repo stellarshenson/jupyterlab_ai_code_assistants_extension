@@ -1,5 +1,6 @@
 /**
- * No assistant is named in `src/core/`.
+ * No assistant is named in `src/core/` or in the composition root
+ * `src/index.ts` (ACC-LNCH-150).
  *
  * The architecture rests on it: adding or removing an assistant must touch one
  * provider module and one barrel line, never a core file. A single `if (id ===
@@ -112,13 +113,21 @@ function coreFiles(): string[] {
     .map(name => path.join(CORE_DIR, name));
 }
 
-describe('the core names no assistant', () => {
+describe('the core and the composition root name no assistant', () => {
   it('has core files to scan at all', () => {
     // Guards against the scan passing because it found nothing to read.
     expect(coreFiles().length).toBeGreaterThan(3);
   });
 
-  it.each(coreFiles().map(file => [path.basename(file), file]))(
+  // ACC-LNCH-150 names the composition root as well as `src/core/`, so
+  // `index.ts` joins this scan only; `coreFiles()` stays as it is because the
+  // registry test below forbids the providers import `index.ts` must make.
+  it.each(
+    [...coreFiles(), path.resolve(__dirname, '..', 'index.ts')].map(file => [
+      path.basename(file),
+      file
+    ])
+  )(
     '%s carries no assistant name outside comments',
     (_name: string, file: string) => {
       const code = fs.readFileSync(file, 'utf8');

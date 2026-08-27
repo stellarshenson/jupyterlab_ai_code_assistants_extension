@@ -80,6 +80,18 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - log: 2026-08-26T00:00:00Z @kj reported: `os.kill(0, 0)` signals the CALLER's own process group and `os.kill(-N, 0)` signals a group, so `pid_alive(0)`, `pid_alive(-1)` and `pid_alive(-<own pid>)` all measure True. `_conversation_is_live` guards only `isinstance(pid, int)`, so a single record carrying `"pid": 0` makes `make_continuable` a permanent no-op for that conversation, with no log and no user-visible signal. Same latent class as `DEF-126` - a foreign or future CLI writing the value - but failing CLOSED instead of loudly, which is why it would never be diagnosed. The same reviewer confirmed `DEF-126`'s `OverflowError` catch is complete for int input: `os.kill` answers `2**31`, `2**63`, `-(2**63)` and `10**30` with `OverflowError` and nothing else
   - log: 2026-08-26T00:00:00Z @kj logged, not fixed: the remedy is one line at the origin, `if pid <= 0: return False`, and all three call sites want that answer. Declined on three grounds - measured incidence is zero (0 of 3032 records in the live store carry such a value), it fails closed rather than loud, and `pid_alive` was changed one round ago to close `DEF-126` and is the function under review this round. Editing the same function in two consecutive rounds is the exact pattern this loop exists to avoid
   - log: 2026-08-27T16:09:38Z @kj closed: fixed (close-out campaign, v1.0.40): range gate 'if pid <= 0: return False' at the top of pid_alive - os.kill(0,0)/(-1,0)/(-N,0) are signalling idioms that measure ALIVE; a sessions record with pid 0 gated the repair and mis-marked conversations agent-owned. DEF-126's OverflowError arm untouched. Mutation-checked: severing the guard reds test_a_non_positive_pid_is_dead_and_never_gates_the_repair (test_provider_stores.py 47->48)
+- [x] `DEF-SERV-147` **Launch validator accepts fork ids regardless of the provider's fork strategy** - MINOR; validated_argv (shared by launch and launch-argv) takes fork_session_id and fork_from for any provider; on a server-copy or native-command provider a body with session_id plus fork_session_id resumes the parent and pins the fork, an id nothing runs. Unreachable from the shipped frontend (_branchByNativeFlag sends fork_session_id only when forkStrategy is native-flag). Pre-existing on the launch route; surfaced by the round-2 parity test, which now runs on claude. Remedy if wanted: 400 fork_unsupported when the id does not match capabilities.fork_strategy. Ruled MINOR, logged not fixed (round-3 bug-hunter)
+  - evidence: round-3 ruling; unreachable from the shipped frontend (_branchByNativeFlag gates fork_session_id on forkStrategy native-flag); documented in docs/design-launcher.md Launch argv route
+  - repro: POST providers/kimi/launch-argv {project_path, encoded_path, session_id: parent, fork_session_id: fork} -> 200 with argv 'kimi -S parent' and the pin set to fork
+  - test-tags: integration
+  - log: 2026-08-27T19:16:45Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-SERV-149` **launch-argv settles the pin before anything spawns** - MINOR; the shared update_pin runs when the argv is answered; on the launch route it runs only after a live pty. A launch-argv client sending encoded_path without session_id has the pin cleared or repointed, and if the sibling then refuses the spawn the store stays pinned to a conversation that never ran. Zero incidence: the tile cannot construct that body. Ruled MINOR, logged not fixed (round-4 bug-hunter)
+  - evidence: round-4 bug-hunter ruling; zero incidence - the tile body carries session_id or omits encoded_path; documented in docs/design-launcher.md Launch argv route
+  - repro: POST launch-argv with encoded_path and no session_id, then make basic-terminal:launch refuse - read_pin is cleared, no terminal
+  - test-tags: integration
+  - log: 2026-08-27T19:42:15Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
 
 ## Providers `PROV`
 
@@ -178,6 +190,12 @@ Package manifest, shared-package and template leftovers that decide whether the 
 - [x] `DEF-PACK-22` **Template leftovers, unguarded barrel drift and a duplicate chalk copy** - MINOR; the scaffold's `1+1` spec and the `@types/react`, `@types/react-addons-linked-state-mixin` and `yjs` devDependencies survived with no React or Yjs in `src/`; `generate-schema.mjs` globbed `lib/providers` without checking the barrel, so a module dropped from `providers/index.ts` still got a settings toggle; and node_modules held two chalk copies (2.4.2 and 4.1.2), the documented duplicate-package landmine in the `@jupyterlab/builder` isolated-build path; `package.json`
   - log: 2026-08-07T00:00:00Z @kj reported: reported by the architect adversary (round 1, MINOR) plus the jupyterlab-extension release checklist
   - log: 2026-08-07T00:00:00Z @kj fixed: the scaffold spec and the @types/react, @types/react-addons-linked-state-mixin and yjs devDependencies are gone (the lib0 and webpack resolutions stay - the build is green with them); generate-schema.mjs now asserts its module count equals the barrel's export count and throws on drift; package.json pins chalk 4.1.2 in resolutions and gains an npm overrides block ({webpack, chalk}), leaving exactly one chalk copy in node_modules and an isolated `python -m build` at exit 0
+- [x] `DEF-PACK-152` **react is a dependency with no @types/react while the test-only react-dom pair declares both** - MINOR; src/core/icons.ts imports react directly under strict TypeScript; @types/react resolves only through @jupyterlab/apputils' transitive dependency hoisted by nodeLinker node-modules. A bump that drops or re-scopes it reddens jlpm build:lib with TS7016. Remedy if wanted: one devDependency line @types/react ^18.2.0. Ruled MINOR (review round 1, architect)
+  - evidence: review round 1 architect; build:lib green at v1.1.11 on the hoisted typings
+  - repro: jlpm why @types/react - resolved only via @jupyterlab/apputils
+  - test-tags: integration
+  - log: 2026-08-27T22:03:53Z @kj added
+  - log: 2026-08-27T22:03:53Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
 
 ## Retirement and migration `RETI`
 
@@ -297,8 +315,49 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-08-10T00:00:00Z @kj fixed: the one deliberate pass this entry and `DEF-81` both named. The cleanup catch in `_cleanupParallel` dropped its `_showError` call entirely - the modal already writes `Cleanup failed: <msg>`, so the banner duplicated it (accepted side effect: that path's `console.error` went with it, `_showError` having done both). The two JupyterLab command rejections route through `_showActionError` with copy naming the failure - 'Could not open a terminal for this session - try again.' (`panel.ts:2080`) and 'Could not open the project folder - try again.' (`:2107`). Final inventory: exactly two `_showError` call sites remain, both retry-owning - manual Refresh (`:245`) and the poll tick (`:2602`). No mutation check possible - `panel.ts` is not Jest-importable, so no test can redden on a banner string; verification is the grep inventory, `jlpm build:lib` exit 0, eslint 0 errors, and the copy rendering in the Galata 27/27 run at v1.0.11
   - log: 2026-08-10T00:00:00Z @kj correction and re-land (round 8): the two command-site routings were NOT in the tree when the note above was written - both round-8 adversaries proved the strings absent and four `_showError` call sites live. The lane's own verification was true when it ran; a parallel lane's mutation-check restore of `panel.ts` (see `DEF-100`) overwrote the two late-file hunks afterwards. Re-landed byte-equal to the description; the inventory now holds - grep answers two `_showError` sites (`:243`, `:2602`). The 'copy rendering in the Galata 27/27 run' sub-claim is WITHDRAWN: no browser test asserts these strings and that run predates the re-land; verification is the grep inventory, `jlpm build:lib`, eslint, and the Galata suite re-run over the re-landed file
   - log: 2026-08-10T00:00:00Z @kj line drift (round 9, cosmetic): the poll-site `_showError` call moved from `:2602` to `:2612` when the `DEF-74` hunk landed above it. The two-site count stands
-- [ ] `DEF-PANE-140` **setRoot re-render fires under an open context menu** - MINOR; the DEF-GUARD-136 render on root arrival runs from reconcile, independent of the panel poll whose no-reshuffle guard skips rendering while the context menu is attached (panel.ts _contextMenu.isAttached); tested in jsdom - menu stays attached and commands act on the right session, but the anchor row is replaced so the active-row highlight is lost, once per panel lifetime, in the seconds between the first fetch and the first roster. Logged not fixed (close-out bug-hunter): the remedy (mirror the poll's guard in setRoot) trades a stale absolute-path tooltip until the next poll
+- [x] `DEF-PANE-140` **setRoot re-render fires under an open context menu** - MINOR; the DEF-GUARD-136 render on root arrival runs from reconcile, independent of the panel poll whose no-reshuffle guard skips rendering while the context menu is attached (panel.ts _contextMenu.isAttached); tested in jsdom - menu stays attached and commands act on the right session, but the anchor row is replaced so the active-row highlight is lost, once per panel lifetime, in the seconds between the first fetch and the first roster. Logged not fixed (close-out bug-hunter): the remedy (mirror the poll's guard in setRoot) trades a stale absolute-path tooltip until the next poll
+  - evidence: close-out bug-hunter ruling; once per panel lifetime, the remedy trades a stale tooltip; jsdom test shows the menu survives and commands act on the right session
   - log: 2026-08-27T16:17:39Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-PANE-142` **Tile launch in flight completes after the provider is disabled** - MINOR; launchHere has no isDisposed guard after its awaits; disabling the provider in settings while launch-argv is pending still spawns the terminal, with no panel left to list or tint it. Refetching the listing on every click widens the window by one request. Ruled MINOR, logged not fixed (round-1 bug-hunter)
+  - evidence: round-1 bug-hunter ruling; window is one request round trip, the terminal opens with the CLI in the intended folder
+  - repro: hold the launch-argv response, uncheck the provider in settings, release the response - a terminal opens
+  - test-tags: unit
+  - log: 2026-08-27T18:17:56Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-PANE-143` **No spinner on the tile click path** - MINOR; the panel's own launches show showLaunchSpinner; launchHere shows nothing while the listing and launch-argv requests run, and the Launcher's pending flag swallows further clicks meanwhile. Ruled MINOR, logged not fixed (round-1 bug-hunter)
+  - evidence: round-1 bug-hunter ruling; the Launcher's own pending flag blocks a second click, no user-visible fault beyond the wait
+  - repro: click a tile against a slow sessions listing - no feedback until the terminal appears
+  - test-tags: manual
+  - log: 2026-08-27T18:17:57Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-PANE-144` **Resume via tile re-docks an already-open terminal beside the Launcher** - MINOR; the launcher-extension callback runs shell.add(widget, 'main', {ref: launcherId}) on any widget a tile command returns that is already in the main area, so a resume that reuses a terminal running in a split dock slot moves it into the Launcher's slot. Confirmed by the adjudicator from the installed 4.6.3 jlab_core bundle; a consequence of the locked return-the-widget decision, documented in docs/design-launcher.md Edge cases (round-1 architect)
+  - evidence: adjudicator confirmed from the 4.6.3 jlab_core bundle; documented in docs/design-launcher.md Edge cases as the cost of the locked return-the-widget decision
+  - repro: open a terminal via a tile, split the dock, reopen the Launcher, click the same tile from the same folder, observe whether the terminal moves
+  - test-tags: manual
+  - log: 2026-08-27T18:17:57Z @kj added
+  - log: 2026-08-27T18:36:30Z @kj confirmed by the adjudicator from the installed 4.6.3 jlab_core bundle: the launcher-extension callback runs shell.add(widget, 'main', {ref: launcherId}) on any returned widget already in the main area; consequence of the locked return-the-widget decision, documented in docs/design-launcher.md Edge cases, not fixed
+  - log: 2026-08-27T19:42:15Z @kj edited title
+  - log: 2026-08-27T21:12:19Z @kj edited text
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-PANE-146` **Panel render sits on the tile's critical path** - MINOR; launchHere refetches through _fetch, which also renders the panel; a throwing render would veto the launch. No throwing input was constructed (hooks and storage paths all swallow), so this is a coupling note. Ruled MINOR, logged not fixed (round-2 bug-hunter). Settling test if wanted: stub hooks.tooltipLines to throw and assert the tile still launches
+  - evidence: round-2 bug-hunter ruling; no throwing input constructed - hooks and storage paths all swallow
+  - repro: make _render throw in a scratch copy, click a tile - no terminal, one launch error notification
+  - test-tags: unit
+  - log: 2026-08-27T18:55:34Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-PANE-148` **Tile click path bypasses the panel's in-flight launch dedup** - MINOR; launchHere goes findForSession then basic-terminal:launch and never through TerminalManager.launch's per-conversation in-flight map; two Launcher tabs, or a row click racing a tile click on one folder, can both pass findForSession before either terminal exists and spawn two processes on one history. The single Launcher's pending flag covers the common case. Ruled MINOR, logged not fixed (round-4 architect)
+  - evidence: round-4 architect ruling; one Launcher's pending flag covers the single-launcher case, two launchers on one folder is the only route
+  - repro: two Launcher tabs on the same folder, click the same tile in both within one request round trip - two terminals
+  - test-tags: manual
+  - log: 2026-08-27T19:42:15Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-PANE-151` **launcherTileIcon view defines react non-writable; element() ignores the section branch** - MINOR; Object.defineProperty(view, 'react', {value}) yields writable:false, so LabIcon.bindprops on the view (labicon.js:228 assigns view.react) throws TypeError; and only react is overridden, so view.element({stylesheet:'launcherSection'}) draws the tile glyph. Unreached: the Launcher renders command icons through LabIcon.resolveReact only, and the shell's bindprops calls run on widget title icons this view never is. Remedy if wanted: plain assignment as bindprops itself does. Ruled MINOR (review round 1, architect and bug-hunter)
+  - evidence: review round 1 both lenses; unreachable from the Launcher's resolveReact path; view semantics documented in docs/design-launcher.md Section icon
+  - repro: in a scratch jest run: launcherTileIcon(tile).bindprops({stylesheet:'mainAreaTab'}) -> TypeError: Cannot assign to read only property 'react'
+  - test-tags: unit
+  - log: 2026-08-27T22:03:53Z @kj added
+  - log: 2026-08-27T22:03:53Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
 
 ## Colour store `COLO`
 
@@ -604,3 +663,33 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - log: 2026-08-27T14:21:02Z @kj imported
   - log: 2026-08-27T16:09:38Z @kj closed: fixed (close-out campaign, v1.0.40): by the Jest route, not this entry's declined Galata sketch - new src/**tests**/index.spec.ts activates the real plugin against the real panel, covering src/index.ts from 0 to ~70 percent of lines and redding when the reconcile -> setRoot call is deleted; DEF-GUARD-120's timing-sensitive Galata suite untouched. Needed jest.config.js modulePathIgnorePatterns for the two venv labextension copies jest-haste-map collides on
   - log: 2026-08-27T16:18:36Z @kj close-out campaign verified totals on the finished tree: Jest 130/130 (8 suites), pytest 185/185, Galata 33/33 (v1.0.40). Confirming pair: bug-hunter SHIP (one MINOR, logged as DEF-PANE-140), architect's findings were ledger-text only and are corrected in this diff; the pid_alive docstring/comment duplication is declined as taste
+- [x] `DEF-GUARD-141` **Drive predicate test double accepts any colon** - MINOR; launcher.spec.ts models contents.driveName as 'anything before a colon'; the real ContentsManager.driveName splits on '/' first and answers a drive only for a registered one, so ACC-LNCH-149's unit test cannot tell the registered-drive rule from cwd.includes(':'). Ruled MINOR, logged not fixed (round-1 bug-hunter)
+  - evidence: round-1 bug-hunter ruling; the drive rule is covered by the Galata click path on the real ContentsManager
+  - repro: replace the driveName check in launchHere with cwd.includes(':'); the launcher suite stays green
+  - test-tags: unit
+  - log: 2026-08-27T18:17:56Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-GUARD-145` **Commit 981c79a shipped yarn.lock in yarn v1 format** - MEDIUM; the release lockfile is berry format (jlpm 3.5); the first Launcher-tiles make install went through .nodeenv/bin/yarn 1.22 and rewrote yarn.lock as v1, and the mid-run commit carried it. CI runs bare jlpm with immutable installs and would refuse to import a v1 lock. Fixed: the berry lockfile regenerated by make install is committed with the round-2 changes; recurrence prevention (packageManager field or dropping the v1 shim) is a proposal for the user, not applied
+  - repro: git show 981c79a:yarn.lock | sed -n 2p -> '# yarn lockfile v1'
+  - test-tags: manual
+  - log: 2026-08-27T18:55:34Z @kj added
+  - log: 2026-08-27T18:55:34Z @kj closed: fixed in the round-2 tree: yarn.lock back in berry format from make install at v1.1.6
+  - log: 2026-08-27T19:42:15Z @kj package-lock half: 981c79a also carried the npm lock re-resolved against the old tree and at 4-space indentation against the repo prettier config; round 4 cleared node_modules and regenerated it through make install - both locks now resolve one tree (0 of 906 shared names diverge), which moved 80 transitive packages including @rspack/core 2.1.8 -> 2.2.1 and @jupyterlab/application 4.6.2 -> 4.6.3; the whole-file diff in the round-4 commit is that regeneration plus prettier's 2-space
+- [x] `DEF-GUARD-150` **No failing-listing test on the tile click path** - MINOR; launchHere's now-unconditional _fetch is the first responder for a vanished binary (design 503 edge), and no launcher.spec.ts case routes sessions to a 503 cli_not_found refusal asserting one warning, no launch-argv call and no launch. A future _fetch that swallows its own error would turn a 503 into a launch on an empty listing with the suite green. Ruled MINOR, logged not fixed (round-4 bug-hunter)
+  - evidence: round-4 bug-hunter ruling; the 503 gate is exercised by test_routes.py on the argv route and by the launch-argv 503 case in launcher.spec.ts
+  - repro: in launcher.spec.ts route sessions to the 503 cli_not_found shape used at the launch-argv 503 case and assert no launch
+  - test-tags: unit
+  - log: 2026-08-27T19:42:15Z @kj added
+  - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-GUARD-153` **Galata ACC-LNCH-163 proves header != every tile, never header == joint icon** - MINOR; ui-tests/tests/launcher-tiles.spec.ts ACC-LNCH-163 case asserts the header svg contains a path and differs from every tile svg; a blank or blob header with any path still passes the DOM gate. The identity claim is carried by launcher-icon.spec.ts under the launcherSection preset and by the screenshot, not by the e2e assertion. Ruled MINOR (review round 2, architect)
+  - evidence: review round 2 architect; identity proven by the unit spec (mutation reddens 4 cases) and the regenerated screenshot after scrollIntoViewIfNeeded
+  - repro: replace assistantsIcon's svg with a lone <path/> in a scratch copy - the Galata case stays green
+  - test-tags: e2e
+  - log: 2026-08-27T22:03:54Z @kj added
+  - log: 2026-08-27T22:03:54Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-GUARD-154` **Fourth byte-identical copy of the @jupyter/web-components jest stub** - MINOR; src/**tests**/launcher-icon.spec.ts repeats the jest.mock stub block for @jupyter/react-components and @jupyter/web-components that three other specs already carry, instead of the esModules allowlist in jest.config.js carrying @jupyter/. Ruled MINOR (review round 3, bug-hunter)
+  - evidence: review round 3 bug-hunter; a shared fix is a jest.config change outside this delta
+  - repro: grep -l 'provideJupyterDesignSystem' src/**tests**/*.ts - four files
+  - test-tags: unit
+  - log: 2026-08-27T22:03:54Z @kj added
+  - log: 2026-08-27T22:03:54Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110

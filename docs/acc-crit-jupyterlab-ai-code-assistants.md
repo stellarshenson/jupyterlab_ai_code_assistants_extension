@@ -428,14 +428,19 @@ Three tiers - pytest for the server core and each provider module, Jest for fron
   - log: 2026-08-09T00:00:00Z @kj closed - ui-tests/tests/colour-override.spec.ts drives the menu item; Galata 19/19 in ui-tests/.venv (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj extended - adversarial round 2: the seeded conversation now carries an assistant colour, so 'back to the assistant's' is a real tint rather than null-vs-null; the route-only precedence case was dropped as a pytest duplicate and a branch-conversation release case added, mutation-checked (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj extended - adversarial round 3: two cases added - an inherited tint is left alone by the release, and the item names its count when it reaches more than one conversation; the inheritance case is mutation-checked against keying on any stored colour (21/21, v1.0.0)
-- [ ] `ACC-TEST-160` **Launcher tiles Galata** - a Galata test proves tiles per enabled provider, removal on disable, absence of the section with all disabled, and section order - with screenshots
+- [x] `ACC-TEST-160` **Launcher tiles Galata** - a Galata test proves tiles per enabled provider, removal on disable, absence of the section with all disabled, and section order - with screenshots
+  - evidence: ui-tests/tests/launcher-tiles.spec.ts, seven tests, Galata 40/40 at v1.1.8 with screenshots under ui-tests/test-results/8931/screenshots/
   - test: ui-tests/tests/launcher-tiles.spec.ts
   - test-tags: e2e
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-TEST-161` **Launcher tile command Jest** - Jest covers the tile command paths: new, resume, terminal reuse, no root, non-default drive, basic terminal absent, and add/dispose on toggle
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+  - log: 2026-08-27T22:03:54Z @kj evidence count corrected: launcher-tiles.spec.ts now carries eight tests (ACC-LNCH-163 added), Galata 41/41 at v1.1.11
+- [x] `ACC-TEST-161` **Launcher tile command Jest** - Jest covers the tile command paths: new, resume, terminal reuse, no root, non-default drive, basic terminal absent, and add/dispose on toggle
+  - evidence: src/**tests**/launcher.spec.ts 14 cases plus index.spec.ts tile cases; Jest 149/149 at v1.1.8
   - test: src/**tests**/launcher.spec.ts
   - test-tags: unit
   - log: 2026-08-27T16:49:34Z @kj added
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
 
 ## API `API`
 
@@ -446,7 +451,8 @@ All routes are namespaced by provider id under the extension base `jupyterlab-ai
 - `GET providers/<id>/branches?encoded_path=...` -> `{current, total, branches: [...]}`
 - `POST providers/<id>/switch` body `{encoded_path, session_id}` -> `{requested, current}`; 404 `branch_not_found`, 400 invalid input
 - `POST providers/<id>/favourite` body `{project_path, favourite}` -> `{favourites: [...]}`
-- `POST providers/<id>/launch` body `{project_path, session_id?, mode?}` -> `{terminal_name}`; 404 `session_not_found`, 400 `mode_unsupported`
+- `POST providers/<id>/launch` body `{project_path, encoded_path?, session_id?, new_session_id?, fork_session_id?, fork_from?, mode?, name?}` -> `{terminal_name}`; 404 `session_not_found`, 400 `mode_unsupported`, 503 `cli_not_found`
+- `POST providers/<id>/launch-argv` - same body and validator as `launch` -> `{argv}`; 404 `session_not_found`, 400 `mode_unsupported`, 503 `cli_not_found`
 - `POST providers/<id>/branch` body `{encoded_path, session_id, name?}` -> `{session_id}`; 400 `fork_unsupported`
 - `DELETE providers/<id>/sessions` body `{encoded_path, session_ids?}` -> `{removed_count}`
 - `GET providers/<id>/colours` -> `{colours: {session_id: colour}, overrides: [session_id]}`; `overrides` names the hand-set colours among them
@@ -458,76 +464,128 @@ All routes are namespaced by provider id under the extension base `jupyterlab-ai
 
 Launcher tiles that open an assistant in the file browser's current folder
 
-- [ ] `ACC-LNCH-143` **Tile per docked assistant** - every assistant whose panel is docked (enabled in settings, binary present or roster unknown) has exactly one tile in the Launcher section "AI Assistants", label = descriptor label, icon = provider icon
+- [x] `ACC-LNCH-143` **Tile per docked assistant** - every assistant whose panel is docked (enabled in settings, binary present or roster unknown) has exactly one tile in the Launcher section "AI Assistants", label = descriptor label, icon = provider icon
+  - evidence: ui-tests/tests/launcher-tiles.spec.ts ACC-LNCH-143 case, Galata 40/40 at v1.1.8; index.spec.ts launcher.add per docked provider
   - related: ACC-LNCH-162 - the design note docs/design-launcher.md carries the mechanism for this section
   - test: enable claude and codex, open Launcher, assert two tiles under AI Assistants with the provider labels
   - test-tags: unit, e2e
   - log: 2026-08-27T16:47:06Z @kj added
-- [ ] `ACC-LNCH-144` **Section absent when empty** - with no docked assistant the Launcher shows no "AI Assistants" section at all - no header, no empty container
+  - log: 2026-08-27T19:43:10Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-144` **Section absent when empty** - with no docked assistant the Launcher shows no "AI Assistants" section at all - no header, no empty container
+  - evidence: launcher-tiles.spec.ts ACC-LNCH-144 case: all providers disabled, zero cards and zero section headers
   - test: disable every assistant, open Launcher, assert no section titled AI Assistants
   - test-tags: e2e
   - log: 2026-08-27T16:47:06Z @kj added
-- [ ] `ACC-LNCH-145` **Live toggle** - disabling an assistant in settings removes its tile from every open Launcher without reload; enabling it adds the tile back
+  - log: 2026-08-27T19:43:10Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-145` **Live toggle** - disabling an assistant in settings removes its tile from every open Launcher without reload; enabling it adds the tile back
+  - evidence: launcher-tiles.spec.ts ACC-LNCH-145 case: codex disabled and re-enabled through the settings registry, no reload
   - test: toggle providers.claude.enabled in settings with the Launcher open, assert the tile disappears then reappears
   - test-tags: unit, e2e
   - log: 2026-08-27T16:47:06Z @kj added
-- [ ] `ACC-LNCH-146` **Tile lifecycle equals panel lifecycle** - the tile is created in the same start() that docks the panel and disposed in the same stop() that removes it - one enable/available decision, never a second one
+  - log: 2026-08-27T19:43:10Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-146` **Tile lifecycle equals panel lifecycle** - the tile is created in the same start() that docks the panel and disposed in the same stop() that removes it - one enable/available decision, never a second one
+  - evidence: index.spec.ts: start() adds the tile, stop() disposes it, available=false gets neither; Jest 149/149
   - test: unit: start(id) registers the launcher item, stop(id) disposes it; a provider with available=false gets neither panel nor tile
   - test-tags: unit
   - log: 2026-08-27T16:47:06Z @kj added
-- [ ] `ACC-LNCH-147` **Launch mode from settings** - a tile launch uses the default launch mode resolved from settings, exactly as the panel's + button with no forced mode
+  - log: 2026-08-27T19:43:10Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-147` **Launch mode from settings** - a tile launch uses the default launch mode resolved from settings, exactly as the panel's + button with no forced mode
+  - evidence: launcher.spec.ts: launch-argv body carries the mode resolved from settings, mutation-checked
   - test: set the claude bypass mode on in settings, click the tile, assert the launched argv carries the mode flag
   - test-tags: unit
   - log: 2026-08-27T16:47:06Z @kj added
-- [ ] `ACC-LNCH-148` **Edge: no server root yet** - a tile click before the first status roster launches nothing and shows one Notification "Waiting for the server root"; no path is ever joined onto an empty root
+  - log: 2026-08-27T19:43:10Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-148` **Edge: no server root yet** - a tile click before the first status roster launches nothing and shows one Notification "Waiting for the server root"; no path is ever joined onto an empty root
+  - evidence: launcher.spec.ts: status null -> no request, one warning Waiting for the server root
   - test: unit: execute the tile command with status null, assert no launch request and one warning
   - test-tags: unit
   - log: 2026-08-27T16:47:06Z @kj added
-- [ ] `ACC-LNCH-149` **Edge: folder on a non-default drive** - a tile click while the file browser sits on a non-server drive launches nothing and shows one Notification naming the reason
+  - log: 2026-08-27T19:43:10Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-149` **Edge: folder on a non-default drive** - a tile click while the file browser sits on a non-server drive launches nothing and shows one Notification naming the reason
+  - evidence: launcher.spec.ts: drive-prefixed cwd -> no request, one warning (double weakness logged as DEF-GUARD-141)
   - test: unit: cwd arg with a drive prefix, assert no launch request and one warning
   - test-tags: unit
   - log: 2026-08-27T16:47:06Z @kj added
-- [ ] `ACC-LNCH-150` **Core neutrality holds** - tile registration reads only descriptors from the registry; no assistant is named in src/core or src/index.ts
+  - log: 2026-08-27T19:43:10Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-150` **Core neutrality holds** - tile registration reads only descriptors from the registry; no assistant is named in src/core or src/index.ts
+  - evidence: core-neutrality.spec.ts it.each over src/core and src/index.ts, 22/22; mutation-checked with an if (id === 'claude') in start()
   - test: core-neutrality.spec.ts stays green after the change
   - test-tags: unit
   - log: 2026-08-27T16:47:06Z @kj added
-- [ ] `ACC-LNCH-151` **Resume when the folder has a conversation** - when the provider's sessions listing has a row whose project_path equals the current folder, the tile resumes that row's current conversation - the same target as the panel row click
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-151` **Resume when the folder has a conversation** - when the provider's sessions listing has a row whose project_path equals the current folder, the tile resumes that row's current conversation - the same target as the panel row click
+  - evidence: launcher-tiles.spec.ts resume case: argv carries --resume branch-2 and the terminal probe reports session_id branch-2; launcher.spec.ts fresh-listing cases
   - test: create a claude session in a folder, click the tile from that folder, assert the launched argv resumes that session id
   - test-tags: unit, e2e
   - log: 2026-08-27T16:49:33Z @kj added
-- [ ] `ACC-LNCH-152` **Open terminal reused on resume** - a terminal already running the conversation being resumed is activated and focused; no second launch is issued
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-152` **Open terminal reused on resume** - a terminal already running the conversation being resumed is activated and focused; no second launch is issued
+  - evidence: launcher-tiles.spec.ts second click: /api/terminals unchanged, same widget current, zero launch-argv requests
   - test: unit: TerminalManager.findForSession returns a widget, assert focus and no launch request
   - test-tags: unit
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-LNCH-153` **New session otherwise** - with no listing row for the current folder the tile starts a new session in that folder, minting the id client-side when the descriptor says mintsNewSessionId
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-153` **New session otherwise** - with no listing row for the current folder the tile starts a new session in that folder, minting the id client-side when the descriptor says mintsNewSessionId
+  - evidence: launcher-tiles.spec.ts new-session case: argv carries --session-id and no --resume, probe session_id equals the minted uuid
   - test: click the tile from a folder with no session, assert a new row appears for that folder in the panel
   - test-tags: unit, e2e
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-LNCH-154` **Launch through basic-terminal:launch** - the tile executes the command basic-terminal:launch with {argv, cwd}; argv comes from a new provider route that keeps cli_path lookup, mode flag, resume verb and pin bookkeeping server-side; the existing launch route is untouched
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-154` **Launch through basic-terminal:launch** - the tile executes the command basic-terminal:launch with {argv, cwd}; argv comes from a new provider route that keeps cli_path lookup, mode flag, resume verb and pin bookkeeping server-side; the existing launch route is untouched
+  - evidence: launcher.spec.ts asserts commands.execute('basic-terminal:launch', {argv, cwd}); test_routes.py argv-route cases 41/41
   - test: unit: assert commands.execute('basic-terminal:launch', {argv, cwd}) with the argv the route returned
   - test-tags: unit, integration
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-LNCH-155` **Edge: basic terminal command absent** - when basic-terminal:launch is not registered a tile click launches nothing and shows one Notification naming jupyterlab_basic_terminal_extension as the missing dependency
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-155` **Edge: basic terminal command absent** - when basic-terminal:launch is not registered a tile click launches nothing and shows one Notification naming jupyterlab_basic_terminal_extension as the missing dependency
+  - evidence: launcher.spec.ts: hasCommand false -> no request, one warning naming jupyterlab_basic_terminal_extension; Galata sibling-present case
   - test: unit: hasCommand false, assert no route call and one warning
   - test-tags: unit
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-LNCH-156` **Section between Console and Other** - every tile carries the same categoryRank so the section renders after Console and before Other; @jupyterlab/launcher is pinned ^4.6.0
-  - test: open Launcher with a notebook kernel present, assert section order Notebook, Console, AI Assistants, Other
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-156` **Section after Other** - every tile carries the same categoryRank, above Other's 100, so the section renders after Other and before any unranked third-party category; @jupyterlab/launcher is pinned ^4.6.0
+  - evidence: launcher.spec.ts categoryRank case (rank 200, above Other's 100, finite) and ui-tests launcher-tiles.spec.ts ACC-LNCH-156 case asserting Other before AI Assistants in the section titles; Galata 41/41, Jest 159/159 at v1.1.11
+  - test: open the Launcher, assert the AI Assistants header sits below the Other header
   - test-tags: e2e
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-LNCH-157` **Launcher tab replaced by the terminal** - the tile command resolves to the terminal widget, so the Launcher tab closes and the terminal takes its place, as notebook tiles do
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+  - log: 2026-08-27T21:19:50Z @kj edited title and text and test (replaced)
+  - log: 2026-08-27T21:19:50Z @kj placement changed on the user's word from between Console and Other to after Other; reopened for re-verification
+  - log: 2026-08-27T21:19:51Z @kj reopened: re-verify the new placement
+  - log: 2026-08-27T21:26:04Z @kj closed: verified in v1.1.11
+- [x] `ACC-LNCH-157` **Launcher tab replaced by the terminal** - the tile command resolves to the terminal widget, so the Launcher tab closes and the terminal takes its place, as notebook tiles do
+  - evidence: launcher-tiles.spec.ts: .jp-Launcher count drops to 0 and .jp-Terminal is current after the click; screenshot launcher-click-new-terminal.png
   - test: click a tile, assert the Launcher tab is gone and the terminal tab is current
   - test-tags: e2e
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-LNCH-158` **Tile order follows the registry** - tiles are ranked by provider position in the registry barrel, matching the sidebar order
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-158` **Tile order follows the registry** - tiles are ranked by provider position in the registry barrel, matching the sidebar order
+  - evidence: index.spec.ts: ranks passed to launcher.add equal the provider indices in the registry
   - test: unit: ranks passed to ILauncher.add equal the provider indices
   - test-tags: unit
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-LNCH-159` **Dependencies declared** - pyproject.toml lists jupyterlab-basic-terminal-extension as a runtime dependency (the coupling is the command id string, no npm dependency); package.json lists @jupyterlab/launcher ^4.6.0
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-159` **Dependencies declared** - pyproject.toml lists jupyterlab-basic-terminal-extension as a runtime dependency (the coupling is the command id string, no npm dependency); package.json lists @jupyterlab/launcher ^4.6.0
+  - evidence: package.json @jupyterlab/launcher ^4.6.0; pyproject.toml jupyterlab-basic-terminal-extension>=1.0.7; no npm dependency on the sibling
   - test: grep both manifests
   - test-tags: manual
   - log: 2026-08-27T16:49:34Z @kj added
-- [ ] `ACC-LNCH-162` **Design document in sync with the implementation** - docs/design-launcher.md describes the shipped mechanism - command ids, route path and payload, dependency pins, edge behaviour; a change to any of them in code lands in the document in the same commit
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-162` **Design document in sync with the implementation** - docs/design-launcher.md describes the shipped mechanism - command ids, route path and payload, dependency pins, edge behaviour; a change to any of them in code lands in the document in the same commit
+  - evidence: docs/design-launcher.md updated by every lane and round; round-4 architect SHIP on doc-vs-code
   - test: diff each named identifier in docs/design-launcher.md against src/ and the Python routes after every launcher change
   - test-tags: manual
   - log: 2026-08-27T16:55:48Z @kj added
+  - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
+- [x] `ACC-LNCH-163` **Joint section icon** - the AI Assistants section header shows the extension's own joint icon (a robot head, vendor-neutral) regardless of which assistant's tile is first; every tile keeps its own provider icon
+  - evidence: src/**tests**/launcher-icon.spec.ts 10 cases (mutation: severing the launcherSection branch reddens the 4 section-preset cases), Jest 159/159; ui-tests/tests/launcher-tiles.spec.ts ACC-LNCH-163 case with screenshot launcher-section-joint-icon.png, launcher spec 8/8 at v1.1.9
+  - related: ACC-LNCH-162 - the design note carries the header icon mechanism
+  - test: open the Launcher with two assistants docked, assert the section header svg matches no tile svg and the launcherTileIcon view renders assistantsIcon under the launcherSection preset
+  - test-tags: unit, e2e
+  - log: 2026-08-27T21:10:03Z @kj added
+  - log: 2026-08-27T21:14:41Z @kj closed: verified in v1.1.9
+  - log: 2026-08-27T21:18:58Z @kj re-verified in v1.1.10 after the glyph fix: fill=none moved to an unclassed outer group because the theme rule .jp-icon3[fill] filled the stroked outline into a solid blob in the v1.1.9 screenshot; launcher-section-joint-icon.png now shows the brain
+  - log: 2026-08-27T21:40:38Z @kj re-verified in v1.1.11: the ACC-LNCH-156 placement moved the section after Other and below the fold of the Launcher body, so the screenshot the v1.1.10 log cites framed no AI Assistants header; the Galata spec now scrolls the section into view before both screenshots and launcher-section-joint-icon.png shows the brain header after Other with each tile keeping its own icon, launcher spec 8/8
+  - log: 2026-08-27T22:06:26Z @kj edited text
+  - log: 2026-08-27T22:06:26Z @kj glyph changed on the user's word from the electronic brain to a filled robot head (Material style, evenodd cut-outs); the launcherTileIcon mechanism is unchanged
+  - log: 2026-08-27T22:09:30Z @kj re-verified in v1.1.12 with the robot head: launcher-section-joint-icon.png shows it in the header after Other, Galata 41/41, Jest 159/159

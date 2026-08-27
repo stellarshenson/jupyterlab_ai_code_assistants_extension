@@ -12,7 +12,7 @@ import { ITerminalTracker } from '@jupyterlab/terminal';
 import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
 import { IDisposable } from '@lumino/disposable';
 
-import { providerIcon } from './core/icons';
+import { launcherTileIcon, providerIcon } from './core/icons';
 import { DEFAULT_RECENT_LIMIT } from './core/limits';
 import {
   AssistantSessionsPanel,
@@ -43,10 +43,10 @@ const STATUS_INTERVAL_MS = 60_000;
 const LAUNCHER_CATEGORY = 'AI Assistants';
 /** Where that section sits. The Launcher ranks Notebook 0, Console 20 and
  * Other 100, and the smallest rank among a category's items decides where the
- * category goes - so ONE value on every tile, between Console and Other, puts
- * the assistants there and keeps them there whichever tile is added first
- * (ACC-LNCH-156). */
-const LAUNCHER_CATEGORY_RANK = 50;
+ * category goes - so ONE value on every tile, above Other's, puts the
+ * assistants after Other and keeps them there whichever tile is added first;
+ * unranked third-party categories (rank Infinity) still follow (ACC-LNCH-156). */
+const LAUNCHER_CATEGORY_RANK = 200;
 
 type Sidebar = 'left' | 'right';
 
@@ -247,9 +247,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
         const launchCommand = app.commands.addCommand(launchCommandId, {
           label: module.descriptor.label,
           caption: `Start or resume ${module.descriptor.label} in the current folder`,
-          icon: providerIcon(
-            module.descriptor.iconName,
-            module.descriptor.iconSvg
+          // The section header borrows this icon too; the view draws the
+          // joint icon there and the provider's own on the tile.
+          icon: launcherTileIcon(
+            providerIcon(module.descriptor.iconName, module.descriptor.iconSvg)
           ),
           // The Launcher puts the file browser's folder in `cwd` on every
           // click; the panel resolves it against the server root.

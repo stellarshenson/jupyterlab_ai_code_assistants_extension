@@ -161,6 +161,8 @@ function harness(
     rootDir?: string;
     /** Register the sibling extension's command (default: yes). */
     sibling?: boolean;
+    /** Register it, and have it refuse the launch. */
+    siblingFails?: boolean;
     /** Hand the panel a tracker holding one open terminal. */
     tracker?: boolean;
   } = {}
@@ -172,6 +174,9 @@ function harness(
     commands.addCommand(BASIC_TERMINAL_LAUNCH, {
       execute: args => {
         launches.push(args);
+        if (options.siblingFails) {
+          throw new Error('no terminal service');
+        }
         return LAUNCHED_WIDGET;
       }
     });
@@ -310,16 +315,60 @@ describe('the tile click path resumes a folder that has a conversation', () => {
     ]);
   });
 
-  it('reads the rows the panel already holds rather than asking again', async () => {
-    routes({ 'launch-argv': { argv: ['/bin/testbed'] } });
+  it('asks the server on every click, and the fresh listing beats the cache', async () => {
+    // ACC-LNCH-151. `_sessions` is written by `_fetch` (and the optimistic
+    // remove in `_removeProject`), and the poll that
+    // calls `_fetch` stops while the panel is hidden - so the cache a click
+    // reads can be older than the folder's real conversation. Here it is empty
+    // and the server has the row: reading the cache would have started a
+    // second conversation in a folder that already had one.
+    routes({
+      sessions: { sessions: [session()] },
+      'launch-argv': { argv: ['/bin/testbed'] }
+    });
     const h = harness();
     await flush();
     request.mockClear();
-    (h.panel as any)._sessions = [session()];
+    (h.panel as any)._sessions = [];
 
     await h.panel.launchHere('proj');
-    expect(callsTo('sessions')).toHaveLength(0);
-    expect(bodyOf('launch-argv').session_id).toBe('sid-proj');
+    expect(callsTo('sessions')).toHaveLength(1);
+    const body = bodyOf('launch-argv');
+    expect(body.session_id).toBe('sid-proj');
+    expect(body.new_session_id).toBeUndefined();
+  });
+
+  it('resumes on the second click what the first click started', async () => {
+    // The panel need never have polled between the two clicks - the tile is
+    // clickable with the panel hidden - so only the click's own listing can
+    // tell the second one that the folder now has a conversation.
+    let listing: ISession[] = [];
+    request.mockImplementation((_id: string, path: string) =>
+      Promise.resolve(
+        path === 'sessions'
+          ? { sessions: listing }
+          : path === 'launch-argv'
+            ? { argv: ['/bin/testbed'] }
+            : {}
+      )
+    );
+    const h = harness();
+    await flush();
+    request.mockClear();
+    (h.panel as any)._sessions = [];
+
+    await h.panel.launchHere('proj');
+    const first = bodyOf('launch-argv');
+    expect(typeof first.new_session_id).toBe('string');
+    expect(first.session_id).toBeUndefined();
+
+    listing = [session({ session_id: first.new_session_id })];
+    request.mockClear();
+
+    await h.panel.launchHere('proj');
+    const second = bodyOf('launch-argv');
+    expect(second.session_id).toBe(first.new_session_id);
+    expect(second.new_session_id).toBeUndefined();
   });
 });
 
@@ -390,6 +439,23 @@ describe('the tile click path reports a refusal and stops', () => {
     expect(error.mock.calls[0][0]).toContain('project root is gone');
     expect(h.launches).toEqual([]);
     expect(callsTo('launch-argv')).toHaveLength(1);
+  });
+
+  it('reports a refusal from the sibling command and keeps the Launcher tab', async () => {
+    // The Launcher shows a modal "Launcher Error" for any rejection that
+    // escapes the command it ran, so a refused spawn is answered here with one
+    // notification and an undefined result instead.
+    routes({
+      sessions: { sessions: [] },
+      'launch-argv': { argv: ['/bin/testbed'] }
+    });
+    const h = harness({ siblingFails: true });
+    await flush();
+
+    await expect(h.panel.launchHere('proj')).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0][0]).toContain('Could not open a terminal');
+    expect(error.mock.calls[0][0]).toContain('no terminal service');
   });
 });
 
@@ -464,7 +530,8 @@ describe('the tiles the plugin adds to the Launcher', () => {
     const ranks = new Set(added.map(item => item.categoryRank));
     expect(ranks.size).toBe(1);
     const rank = [...ranks][0];
-    expect(rank).toBeGreaterThan(20);
-    expect(rank).toBeLessThan(100);
+    // Above Other's 100, finite so unranked categories still come last.
+    expect(rank).toBeGreaterThan(100);
+    expect(Number.isFinite(rank)).toBe(true);
   });
 });

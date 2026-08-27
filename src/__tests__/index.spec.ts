@@ -209,7 +209,9 @@ describe('ACC-LNCH-143..146 - the Launcher tile has the panel lifecycle', () => 
       expect(tile).toBeDefined();
       expect(tile.category).toBe('AI Assistants');
       expect(live.app.commands.label(id)).toBe(module.descriptor.label);
-      expect(live.app.commands.icon(id)).toBe(
+      // A `launcherTileIcon` view of the provider's own icon - the header
+      // draws the joint icon through it (launcher-icon.spec.ts).
+      expect(Object.getPrototypeOf(live.app.commands.icon(id))).toBe(
         providerIcon(module.descriptor.iconName, module.descriptor.iconSvg)
       );
     }

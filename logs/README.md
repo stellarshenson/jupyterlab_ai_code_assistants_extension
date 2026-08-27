@@ -11,3 +11,6 @@ Output of every background or long-running command, teed here rather than left i
 - `readme-shot-jlab.log` - the JupyterLab server behind the README screenshots
 - `waiter-race-sweep.log` - terminal-waiter race sweep: hit counts per waiter variant and per injected delay
 - `adversarial/` - devils-advocate adversarial review: seeded prompts (`*-prompt.txt`), round results (`*-roundN.txt`) and mid-round addenda (`*-roundN-addendum.txt`), one series per adversary. A `colour-` or `wholerepo-` prefix names the campaign the series belongs to
+- `make-install-launcher*.log`, `make-test-launcher*.log`, `galata-launcher*.log` - the Launcher-tiles builds and gates, one set per review round; `galata-launcher-only.log` is `tests/launcher-tiles.spec.ts` on its own
+- `mutation-b1-*.log`, `mutation-b2-*.log` - the two mutated builds the Launcher-tiles Galata tests were severed against, `install` and `galata` per batch
+- `repro-server.log`, `repro-galata.log` - the isolation runs that traced the click-through failure to Galata's mock of the terminals API

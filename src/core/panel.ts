@@ -922,7 +922,7 @@ export class AssistantSessionsPanel extends Widget {
    *
    * The tile's whole click path lives here rather than in `src/index.ts`
    * because every input it needs is already the panel's: the root join, the
-   * cached rows, the terminal reuse ladder and the settings-resolved launch
+   * listing fetch, the terminal reuse ladder and the settings-resolved launch
    * mode. Nothing here retries and nothing is scheduled: a guard that refuses
    * shows one notification and launches nothing, and a request that fails
    * writes nothing.
@@ -965,19 +965,14 @@ export class AssistantSessionsPanel extends Widget {
     const folder = this._currentFolder(cwd);
     let argv: string[];
     try {
-      // The rows the poll already answered with, so a click on a live panel
-      // costs one request rather than two.
-      const rows =
-        this._sessions ??
-        (
-          await requestProvider<ISessionsListResponse>(
-            this._descriptor.id,
-            'sessions',
-            this._serverSettings,
-            { cache: 'no-store' }
-          )
-        ).sessions ??
-        [];
+      // Every click asks the server for the listing (ACC-LNCH-151). `_sessions`
+      // is written by `_fetch` and by the optimistic remove in
+      // `_removeProject`, and the poll that calls `_fetch` stops on
+      // `onBeforeHide` - so a hidden panel's cache is as old as the moment it
+      // was hidden, and reading it resumed a conversation that had since moved
+      // or minted a second one for a folder that already had a row.
+      await this._fetch();
+      const rows = this._sessions ?? [];
       // A row for this folder means the folder has a conversation, which is
       // what makes this a resume rather than a new session (ACC-LNCH-151).
       const row = rows.find(s => s.project_path === folder) ?? null;
@@ -1026,10 +1021,22 @@ export class AssistantSessionsPanel extends Widget {
     }
     // The folder is already resolved against the server root, and the sibling
     // takes an absolute path (ACC-LNCH-154).
-    return this._app.commands.execute(BASIC_TERMINAL_LAUNCH, {
-      argv,
-      cwd: folder
-    });
+    //
+    // Its own catch, because the cause is a different one: the block above
+    // refuses before anything was spawned, this one refuses after the argv was
+    // agreed. The Launcher shows a modal "Launcher Error" for any rejection
+    // that escapes the command, so the refusal is reported as one notification
+    // and the Launcher keeps its tab (ACC-LNCH-157 covers the success path
+    // only).
+    try {
+      return await this._app.commands.execute(BASIC_TERMINAL_LAUNCH, {
+        argv,
+        cwd: folder
+      });
+    } catch (err) {
+      this._notifyLaunchError('Could not open a terminal for this folder', err);
+      return undefined;
+    }
   }
 
   /** Start a brand-new conversation in the file browser's current folder. */

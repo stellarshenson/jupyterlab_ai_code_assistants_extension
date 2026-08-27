@@ -860,6 +860,30 @@ class _LaunchBase(_ProviderHandler):
             argv=argv,
         )
 
+    def update_pin(
+        self, provider: registry.Provider, request: _LaunchRequest
+    ) -> None:
+        """Settle the project's branch pin for a launch that just happened.
+
+        Shared rather than copied per route, so the two cannot drift. The argv
+        route runs the launch route's validator and accepts its full body, so
+        it settles the pin the same way; its only client today, the Launcher
+        tile, reaches neither branch - it resumes with a session id or starts
+        new without an encoded path (docs/design-launcher.md).
+        """
+        if not (isinstance(request.encoded_path, str) and request.encoded_path):
+            return
+        # A new conversation supersedes a prior switch and becomes current
+        # by recency on its own; a fork needs the pin to beat the parent.
+        # ANY launch that opens no existing conversation is a new one -
+        # keying this on ``new_session_id`` would never fire for an
+        # assistant whose CLI mints its own id, leaving the row stuck on
+        # the conversation the user last switched to.
+        if request.session_id is None and request.fork_from is None:
+            state.clear_pin(provider.id, request.encoded_path)
+        elif request.fork_session_id:
+            state.write_pin(provider.id, request.encoded_path, request.fork_session_id)
+
 
 class LaunchHandler(_LaunchBase):
     """Spawn a JL terminal whose pty's only process is the assistant.
@@ -910,19 +934,7 @@ class LaunchHandler(_LaunchBase):
             self.set_status(500)
             self.finish(json.dumps({"error": "terminal_create_failed"}))
             return
-        if isinstance(request.encoded_path, str) and request.encoded_path:
-            # A new conversation supersedes a prior switch and becomes current
-            # by recency on its own; a fork needs the pin to beat the parent.
-            # ANY launch that opens no existing conversation is a new one -
-            # keying this on ``new_session_id`` would never fire for an
-            # assistant whose CLI mints its own id, leaving the row stuck on
-            # the conversation the user last switched to.
-            if request.session_id is None and request.fork_from is None:
-                state.clear_pin(provider.id, request.encoded_path)
-            elif request.fork_session_id:
-                state.write_pin(
-                    provider.id, request.encoded_path, request.fork_session_id
-                )
+        self.update_pin(provider, request)
         self.finish(json.dumps({"terminal_name": terminal_name}))
 
 
@@ -947,11 +959,7 @@ class LaunchArgvHandler(_LaunchBase):
         request = await self.validated_argv(provider, body)
         if request is None:
             return
-        if isinstance(request.encoded_path, str) and request.encoded_path:
-            # Same rule as the launch route: ANY launch that opens no existing
-            # conversation is a new one, and supersedes a prior switch.
-            if request.session_id is None and request.fork_from is None:
-                state.clear_pin(provider.id, request.encoded_path)
+        self.update_pin(provider, request)
         self.finish(json.dumps({"argv": request.argv}))
 
 

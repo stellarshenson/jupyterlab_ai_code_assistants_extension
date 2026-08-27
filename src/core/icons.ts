@@ -1,4 +1,5 @@
 import { LabIcon } from '@jupyterlab/ui-components';
+import * as React from 'react';
 
 // Shared panel chrome icons. Provider icons are NOT here - each provider
 // carries its own SVG on its descriptor and the registry builds the LabIcon
@@ -9,11 +10,13 @@ import { LabIcon } from '@jupyterlab/ui-components';
 
 const ICON_PREFIX = 'jupyterlab_ai_code_assistants_extension';
 
-// The extension's own identity, used by the settings entry - one section for
-// all assistants, so it cannot borrow any one assistant's glyph. Material
-// "smart_toy" outline.
+// The extension's own identity, used by the settings entry and the Launcher
+// section header - one section for all assistants, so it cannot borrow any one
+// assistant's glyph. A robot head in the Material filled style: antenna, side
+// bolts, eye and mouth cut-outs. One evenodd path, so the cut-outs are holes
+// and the theme's `.jp-icon3[fill]` rule recolours the whole glyph at once.
 const assistantsSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
-  <path class="jp-icon3" fill="#616161" d="M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zm-2 10H6V7h12v12zM9 13.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm7.5-1.5c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5.67-1.5 1.5-1.5 1.5.67 1.5 1.5zM8 15h8v2H8v-2z"/>
+  <path class="jp-icon3" fill="#616161" fill-rule="evenodd" d="M12 1.5a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2ZM11.2 4.7h1.6V7h-1.6ZM7 7h10a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3ZM2 11h2v5H2ZM20 11h2v5h-2ZM9 10.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6ZM15 10.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6ZM8.6 15.6h6.8a.9.9 0 0 1 0 1.8H8.6a.9.9 0 0 1 0-1.8Z"/>
 </svg>`;
 
 export const assistantsIcon = new LabIcon({
@@ -137,4 +140,33 @@ export function providerIcon(name: string, svgstr: string): LabIcon {
     _providerIcons.set(name, icon);
   }
   return icon;
+}
+
+/**
+ * A provider's tile icon as the Launcher should draw it.
+ *
+ * The Launcher has no section icon of its own: a category's header is drawn
+ * with the FIRST tile's command icon under the `launcherSection` stylesheet
+ * preset, and each tile under `launcherCard`. This view of `tile` renders the
+ * extension's joint icon under the section preset and `tile` everywhere else,
+ * so the header carries no vendor's mark while every tile keeps its own
+ * (ACC-LNCH-163).
+ *
+ * Built the way `LabIcon.bindprops` builds its views - a prototype child of
+ * the tile with its own `react` - so `LabIcon.resolve` still recognises it.
+ */
+export function launcherTileIcon(tile: LabIcon): LabIcon {
+  const view: LabIcon = Object.create(tile);
+  const react = React.forwardRef<SVGElement, LabIcon.IReactProps>(
+    (props, ref) =>
+      React.createElement(
+        props.stylesheet === 'launcherSection'
+          ? assistantsIcon.react
+          : tile.react,
+        { ...props, ref }
+      )
+  );
+  // `react` is readonly on the type; the view shadows the tile's own.
+  Object.defineProperty(view, 'react', { value: react });
+  return view;
 }

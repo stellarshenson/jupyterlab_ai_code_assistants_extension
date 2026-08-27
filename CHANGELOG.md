@@ -4,6 +4,23 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.1.13] - 2026-08-28
+
+### Added
+
+- An "AI Assistants" section in the JupyterLab Launcher with one tile per enabled assistant; a click opens that assistant in the file browser's current folder, resuming the folder's conversation when one exists and starting a new one otherwise, in a terminal spawned through `jupyterlab_basic_terminal_extension`
+- The section carries the extension's own robot-head icon rather than the first assistant's, sits after Other, and appears or disappears live as assistants are enabled or disabled in settings - no section when none is enabled
+- `POST providers/<id>/launch-argv` returns the command line the launch route would spawn, with the same validation and pin bookkeeping
+- Design note `docs/design-launcher.md`, kept in step with the implementation
+
+### Changed
+
+- `@jupyterlab/launcher` pinned `^4.6.0` for `categoryRank`; `jupyterlab-basic-terminal-extension>=1.0.7` is a runtime dependency; `react` is a direct dependency for the section-icon view
+
+### Fixed
+
+- `yarn.lock` is back in the berry format the build reads; a yarn v1 shim had rewritten it in the previous commit, and both lockfiles now resolve one tree
+
 ## [1.0.41] - 2026-08-27
 
 ### Fixed

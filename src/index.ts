@@ -6,11 +6,13 @@ import {
 } from '@jupyterlab/application';
 import { Notification } from '@jupyterlab/apputils';
 import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
+import { ILauncher } from '@jupyterlab/launcher';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { ITerminalTracker } from '@jupyterlab/terminal';
 import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
 import { IDisposable } from '@lumino/disposable';
 
+import { providerIcon } from './core/icons';
 import { DEFAULT_RECENT_LIMIT } from './core/limits';
 import {
   AssistantSessionsPanel,
@@ -37,13 +39,26 @@ const PANEL_RANK = 600;
 /** How often the server is re-asked which assistants are available, so a CLI
  * installed while JupyterLab runs surfaces without a reload. */
 const STATUS_INTERVAL_MS = 60_000;
+/** Launcher section every assistant tile lands in. */
+const LAUNCHER_CATEGORY = 'AI Assistants';
+/** Where that section sits. The Launcher ranks Notebook 0, Console 20 and
+ * Other 100, and the smallest rank among a category's items decides where the
+ * category goes - so ONE value on every tile, between Console and Other, puts
+ * the assistants there and keeps them there whichever tile is added first
+ * (ACC-LNCH-156). */
+const LAUNCHER_CATEGORY_RANK = 50;
 
 type Sidebar = 'left' | 'right';
 
-/** One live provider: its panel and the command that refreshes it. */
+/** One live provider: its panel, the command that refreshes it, the command
+ * its Launcher tile runs, and the tile itself - null when JupyterLab supplied
+ * no launcher. All of them are created and disposed together, so a tile has
+ * the panel's lifecycle and no enable decision of its own (ACC-LNCH-146). */
 interface ILivePanel {
   panel: AssistantSessionsPanel;
   command: IDisposable;
+  launchCommand: IDisposable;
+  tile: IDisposable | null;
 }
 
 const plugin: JupyterFrontEndPlugin<void> = {
@@ -57,7 +72,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     ISettingRegistry,
     ITerminalTracker,
     IDefaultFileBrowser,
-    IColourfulTabs
+    IColourfulTabs,
+    ILauncher
   ],
   activate: async (
     app: JupyterFrontEnd,
@@ -66,7 +82,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     settingRegistry: ISettingRegistry | null,
     terminalTracker: ITerminalTracker | null,
     fileBrowser: IDefaultFileBrowser | null,
-    colourfulTabs: IColourfulTabs | null
+    colourfulTabs: IColourfulTabs | null,
+    launcher: ILauncher | null
   ) => {
     console.log(
       'JupyterLab extension jupyterlab_ai_code_assistants_extension is activated!'
@@ -223,7 +240,31 @@ const plugin: JupyterFrontEndPlugin<void> = {
           label: `Refresh ${module.descriptor.panelTitle}`,
           execute: () => panel.refresh()
         });
-        live.set(id, { panel, command });
+        // The Launcher tile's command. It is registered whether or not a
+        // launcher exists, because the tile is the only caller but the command
+        // is what carries the label, the icon and the click path.
+        const launchCommandId = commandId(id, 'launch-here');
+        const launchCommand = app.commands.addCommand(launchCommandId, {
+          label: module.descriptor.label,
+          caption: `Start or resume ${module.descriptor.label} in the current folder`,
+          icon: providerIcon(
+            module.descriptor.iconName,
+            module.descriptor.iconSvg
+          ),
+          // The Launcher puts the file browser's folder in `cwd` on every
+          // click; the panel resolves it against the server root.
+          execute: args => panel.launchHere(args.cwd as string | undefined)
+        });
+        // Tile order follows the barrel, so the Launcher section reads in the
+        // sidebar's order (ACC-LNCH-158).
+        const tile =
+          launcher?.add({
+            command: launchCommandId,
+            category: LAUNCHER_CATEGORY,
+            rank: registry.ids.indexOf(id),
+            categoryRank: LAUNCHER_CATEGORY_RANK
+          }) ?? null;
+        live.set(id, { panel, command, launchCommand, tile });
       } catch (err) {
         // One provider failing to start must leave the others working.
         console.error(`${LOG_PREFIX} provider "${id}" failed to start.`, err);
@@ -239,6 +280,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
       // Disposing stops the polling and clears this provider's tab tints; the
       // terminals it launched keep running, untouched.
       entry.command.dispose();
+      // Tile before the command it runs, so the Launcher never re-renders an
+      // item whose command has already gone.
+      entry.tile?.dispose();
+      entry.launchCommand.dispose();
       entry.panel.dispose();
     };
 

@@ -9,6 +9,7 @@ unknown id (404 ``provider_unknown``), turned off in settings (404
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 import sys
@@ -716,25 +717,32 @@ class BranchHandler(_ProviderHandler):
         self.finish(json.dumps({"session_id": new_id}))
 
 
-class LaunchHandler(_ProviderHandler):
-    """Spawn a JL terminal whose pty's only process is the assistant.
+@dataclasses.dataclass(frozen=True)
+class _LaunchRequest:
+    """A validated launch body together with the argv it resolves to."""
 
-    Bypasses ``terminal:create-new`` (which spawns the user's $SHELL) so the tab
-    shows the assistant immediately without any visible bash, using terminado's
-    per-call ``shell_command`` through ``TerminalManager.create``. The argv
-    itself is the store's - including which verb opens the conversation, decided
-    here at launch rather than by the caller, because the panel's view is only
-    as fresh as its last poll.
+    project_path: str
+    encoded_path: str | None
+    session_id: str | None
+    fork_session_id: str | None
+    fork_from: str | None
+    argv: list[str]
+
+
+class _LaunchBase(_ProviderHandler):
+    """Body validation and argv construction shared by the two launch routes.
+
+    Both routes answer the same question - what argv opens this conversation -
+    and differ only in what they do with the answer: one spawns the pty itself,
+    the other hands the argv back so the Launcher tile can spawn it through the
+    sibling terminal extension (ACC-LNCH-154). One implementation is what keeps
+    a tile launch identical to the panel's, per-provider verbs included.
     """
 
-    @tornado.web.authenticated
-    async def post(self, provider_id: str) -> None:
-        provider = self.resolve(provider_id)
-        if provider is None:
-            return
-        body = self.parse_body()
-        if body is None:
-            return
+    async def validated_argv(
+        self, provider: registry.Provider, body: dict
+    ) -> _LaunchRequest | None:
+        """The validated body and its argv, or None with the response sent."""
         project_path = body.get("project_path")
         encoded_path = body.get("encoded_path")
         session_id = body.get("session_id")
@@ -746,16 +754,16 @@ class LaunchHandler(_ProviderHandler):
 
         if not isinstance(project_path, str) or not os.path.isdir(project_path):
             self.bad_request("invalid_project_path")
-            return
+            return None
         if encoded_path is not None and not isinstance(encoded_path, str):
             self.bad_request()
-            return
+            return None
         # ``session_id`` opens an existing conversation; absent means a new one.
         if session_id is not None and (
             not isinstance(session_id, str) or not session_id
         ):
             self.bad_request("invalid_session_id")
-            return
+            return None
         # ``new_session_id`` starts a fresh conversation under a caller-chosen
         # id, so the launched terminal is identifiable from its argv. Mutually
         # exclusive with the other two.
@@ -767,7 +775,7 @@ class LaunchHandler(_ProviderHandler):
             or fork_session_id is not None
         ):
             self.bad_request("invalid_new_session_id")
-            return
+            return None
         # ``fork_session_id`` is the id a native fork will run under - only
         # meaningful alongside the conversation being branched.
         if fork_session_id is not None and (
@@ -777,7 +785,7 @@ class LaunchHandler(_ProviderHandler):
             or session_id is None
         ):
             self.bad_request("invalid_fork_session_id")
-            return
+            return None
         # ``fork_from`` names the conversation the CLI is to branch, for a
         # provider that owns both the fork verb and the new id
         # (``fork_strategy: native-command``). The launch carries the PARENT and
@@ -793,13 +801,13 @@ class LaunchHandler(_ProviderHandler):
             or fork_session_id is not None
         ):
             self.bad_request("invalid_fork_from")
-            return
+            return None
         if name is not None and (not isinstance(name, str) or not name.strip()):
             self.bad_request("invalid_name")
-            return
+            return None
         if mode is not None and mode not in provider.descriptor.capabilities.launch_modes:
             self.bad_request("mode_unsupported")
-            return
+            return None
         # Pre-flight the conversation while the caller can still be told about
         # it: past ``terminal_manager.create`` the pty is live and a failure
         # would orphan a terminal the frontend never attaches.
@@ -816,13 +824,7 @@ class LaunchHandler(_ProviderHandler):
             if known and session_id not in known:
                 self.set_status(404)
                 self.finish(json.dumps({"error": "session_not_found"}))
-                return
-
-        terminal_manager = self.settings.get("terminal_manager")
-        if terminal_manager is None:
-            self.set_status(503)
-            self.finish(json.dumps({"error": "terminal_service_unavailable"}))
-            return
+                return None
 
         try:
             argv = await loop.run_in_executor(
@@ -845,12 +847,51 @@ class LaunchHandler(_ProviderHandler):
             # removed enumerates as nothing rather than as a miss).
             self.set_status(404)
             self.finish(json.dumps({"error": "session_not_found"}))
-            return
+            return None
         if not argv:
             self.bad_request("launch_unsupported")
+            return None
+        return _LaunchRequest(
+            project_path=project_path,
+            encoded_path=encoded_path,
+            session_id=session_id,
+            fork_session_id=fork_session_id,
+            fork_from=fork_from,
+            argv=argv,
+        )
+
+
+class LaunchHandler(_LaunchBase):
+    """Spawn a JL terminal whose pty's only process is the assistant.
+
+    Bypasses ``terminal:create-new`` (which spawns the user's $SHELL) so the tab
+    shows the assistant immediately without any visible bash, using terminado's
+    per-call ``shell_command`` through ``TerminalManager.create``. The argv
+    itself is the store's - including which verb opens the conversation, decided
+    here at launch rather than by the caller, because the panel's view is only
+    as fresh as its last poll.
+    """
+
+    @tornado.web.authenticated
+    async def post(self, provider_id: str) -> None:
+        provider = self.resolve(provider_id)
+        if provider is None:
             return
+        body = self.parse_body()
+        if body is None:
+            return
+        request = await self.validated_argv(provider, body)
+        if request is None:
+            return
+
+        terminal_manager = self.settings.get("terminal_manager")
+        if terminal_manager is None:
+            self.set_status(503)
+            self.finish(json.dumps({"error": "terminal_service_unavailable"}))
+            return
+
         model = terminal_manager.create(
-            shell_command=_wrap_with_init(argv), cwd=project_path
+            shell_command=_wrap_with_init(request.argv), cwd=request.project_path
         )
         # The pty is sized by ``_INIT_WAITER`` inside the child, not from here:
         # a resize issued at this point is indistinguishable from the client
@@ -869,18 +910,49 @@ class LaunchHandler(_ProviderHandler):
             self.set_status(500)
             self.finish(json.dumps({"error": "terminal_create_failed"}))
             return
-        if isinstance(encoded_path, str) and encoded_path:
+        if isinstance(request.encoded_path, str) and request.encoded_path:
             # A new conversation supersedes a prior switch and becomes current
             # by recency on its own; a fork needs the pin to beat the parent.
             # ANY launch that opens no existing conversation is a new one -
             # keying this on ``new_session_id`` would never fire for an
             # assistant whose CLI mints its own id, leaving the row stuck on
             # the conversation the user last switched to.
-            if session_id is None and fork_from is None:
-                state.clear_pin(provider.id, encoded_path)
-            elif fork_session_id:
-                state.write_pin(provider.id, encoded_path, fork_session_id)
+            if request.session_id is None and request.fork_from is None:
+                state.clear_pin(provider.id, request.encoded_path)
+            elif request.fork_session_id:
+                state.write_pin(
+                    provider.id, request.encoded_path, request.fork_session_id
+                )
         self.finish(json.dumps({"terminal_name": terminal_name}))
+
+
+class LaunchArgvHandler(_LaunchBase):
+    """The argv a launch would run, without spawning anything (ACC-LNCH-154).
+
+    The Launcher tile spawns through ``basic-terminal:launch`` in the sibling
+    extension rather than through :class:`LaunchHandler`, so this route stops
+    one step short: same body, same validation, same store hook, same pin
+    bookkeeping - only the pty is somebody else's. The argv goes back BARE,
+    because that sibling wraps it in its own terminal-init waiter.
+    """
+
+    @tornado.web.authenticated
+    async def post(self, provider_id: str) -> None:
+        provider = self.resolve(provider_id)
+        if provider is None:
+            return
+        body = self.parse_body()
+        if body is None:
+            return
+        request = await self.validated_argv(provider, body)
+        if request is None:
+            return
+        if isinstance(request.encoded_path, str) and request.encoded_path:
+            # Same rule as the launch route: ANY launch that opens no existing
+            # conversation is a new one, and supersedes a prior switch.
+            if request.session_id is None and request.fork_from is None:
+                state.clear_pin(provider.id, request.encoded_path)
+        self.finish(json.dumps({"argv": request.argv}))
 
 
 class TerminalHandler(_ProviderHandler):
@@ -1028,6 +1100,10 @@ def setup_route_handlers(web_app) -> None:
         (
             url_path_join(base_url, URL_PREFIX, "providers", provider, "launch"),
             LaunchHandler,
+        ),
+        (
+            url_path_join(base_url, URL_PREFIX, "providers", provider, "launch-argv"),
+            LaunchArgvHandler,
         ),
         (
             url_path_join(

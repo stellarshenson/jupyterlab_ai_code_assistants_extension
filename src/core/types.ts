@@ -230,6 +230,15 @@ export interface ILaunchResponse {
   terminal_name: string;
 }
 
+/** `POST providers/<id>/launch-argv`: the command line a launch WOULD run,
+ * for a caller that owns the spawn itself. Same body as {@link ILaunchRequest}
+ * and the same server-side bookkeeping as `launch`; the difference is that
+ * nothing is spawned, so the argv can be handed to another extension's
+ * terminal (ACC-LNCH-154). */
+export interface ILaunchArgvResponse {
+  argv: string[];
+}
+
 /** What a terminal is running, as the server resolved it from `/proc`. */
 export interface ITerminalProbeResponse {
   terminal_name: string;

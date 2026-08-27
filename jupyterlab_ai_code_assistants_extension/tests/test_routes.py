@@ -635,6 +635,130 @@ async def test_resuming_a_conversation_leaves_the_pin_alone(
     assert state.read_pin("kimi", encoded) == pinned
 
 
+async def test_the_argv_route_answers_the_store_argv_and_clears_the_pin(
+    jp_fetch, tmp_path, present
+):
+    """The Launcher tile's launch is the panel's, minus the pty (ACC-LNCH-154).
+
+    ``basic-terminal:launch`` in the sibling extension owns the spawn, so this
+    route hands back the store's argv BARE - wrapping it in the terminal-init
+    waiter here would run that waiter twice - and still does the pin
+    bookkeeping, because a tile click starts a real conversation.
+    """
+    encoded = "wd-demo"
+    pinned = "session_11111111-2222-3333-4444-555555555555"
+    state.write_pin("kimi", encoded, pinned)
+
+    response = await jp_fetch(
+        URL,
+        "providers",
+        "kimi",
+        "launch-argv",
+        method="POST",
+        body=json.dumps({"project_path": str(tmp_path), "encoded_path": encoded}),
+    )
+    assert response.code == 200
+    argv = json.loads(response.body)["argv"]
+    assert argv == registry.providers()["kimi"].store.launch_argv("/usr/bin/kimi")
+    assert state.read_pin("kimi", encoded) is None
+
+
+async def test_the_argv_route_resumes_without_touching_the_pin(
+    jp_fetch, tmp_path, present
+):
+    """A resume carries the store's own resume verb and is not a new session."""
+    encoded = "wd-demo"
+    pinned = "session_11111111-2222-3333-4444-555555555555"
+    state.write_pin("kimi", encoded, pinned)
+
+    response = await jp_fetch(
+        URL,
+        "providers",
+        "kimi",
+        "launch-argv",
+        method="POST",
+        body=json.dumps(
+            {
+                "project_path": str(tmp_path),
+                "encoded_path": encoded,
+                "session_id": pinned,
+            }
+        ),
+    )
+    argv = json.loads(response.body)["argv"]
+    assert argv == ["/usr/bin/kimi", "-S", pinned]
+    assert state.read_pin("kimi", encoded) == pinned
+
+
+async def test_the_argv_route_refuses_an_undeclared_mode(jp_fetch, tmp_path, present):
+    """Same descriptor gate as the launch route - the store is never reached."""
+    status, error = await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "launch-argv",
+        method="POST",
+        body=json.dumps({"project_path": str(tmp_path), "mode": "notAMode"}),
+    )
+    assert (status, error) == (400, "mode_unsupported")
+
+
+async def test_the_argv_route_refuses_a_project_path_that_is_not_a_directory(
+    jp_fetch, tmp_path, present
+):
+    """A folder that does not exist yields no argv - the cwd has to be real."""
+    status, error = await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "launch-argv",
+        method="POST",
+        body=json.dumps({"project_path": str(tmp_path / "missing")}),
+    )
+    assert (status, error) == (400, "invalid_project_path")
+
+
+async def test_the_argv_route_refuses_a_new_id_beside_a_resume(
+    jp_fetch, tmp_path, present
+):
+    """The two ids name opposite intents, so one body may carry only one."""
+    status, error = await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "launch-argv",
+        method="POST",
+        body=json.dumps(
+            {
+                "project_path": str(tmp_path),
+                "session_id": "11111111-2222-3333-4444-555555555555",
+                "new_session_id": "22222222-3333-4444-5555-666666666666",
+            }
+        ),
+    )
+    assert (status, error) == (400, "invalid_new_session_id")
+
+
+async def test_the_argv_route_answers_503_when_the_binary_is_gone(
+    jp_fetch, tmp_path, uninstall
+):
+    """A tile can outlive the binary, and the click must say which one went."""
+    uninstall("claude")
+    status, error = await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "launch-argv",
+        method="POST",
+        body=json.dumps({"project_path": str(tmp_path)}),
+    )
+    assert (status, error) == (503, "cli_not_found")
+
+
 async def test_a_switch_writes_the_pin_on_the_route_side(
     jp_fetch, present, monkeypatch
 ):

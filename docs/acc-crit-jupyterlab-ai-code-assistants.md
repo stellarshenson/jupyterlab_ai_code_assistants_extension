@@ -428,6 +428,14 @@ Three tiers - pytest for the server core and each provider module, Jest for fron
   - log: 2026-08-09T00:00:00Z @kj closed - ui-tests/tests/colour-override.spec.ts drives the menu item; Galata 19/19 in ui-tests/.venv (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj extended - adversarial round 2: the seeded conversation now carries an assistant colour, so 'back to the assistant's' is a real tint rather than null-vs-null; the route-only precedence case was dropped as a pytest duplicate and a branch-conversation release case added, mutation-checked (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj extended - adversarial round 3: two cases added - an inherited tint is left alone by the release, and the item names its count when it reaches more than one conversation; the inheritance case is mutation-checked against keying on any stored colour (21/21, v1.0.0)
+- [ ] `ACC-TEST-160` **Launcher tiles Galata** - a Galata test proves tiles per enabled provider, removal on disable, absence of the section with all disabled, and section order - with screenshots
+  - test: ui-tests/tests/launcher-tiles.spec.ts
+  - test-tags: e2e
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-TEST-161` **Launcher tile command Jest** - Jest covers the tile command paths: new, resume, terminal reuse, no root, non-default drive, basic terminal absent, and add/dispose on toggle
+  - test: src/**tests**/launcher.spec.ts
+  - test-tags: unit
+  - log: 2026-08-27T16:49:34Z @kj added
 
 ## API `API`
 
@@ -445,3 +453,81 @@ All routes are namespaced by provider id under the extension base `jupyterlab-ai
 - `POST providers/<id>/colours` body `{session_id, colour, hand_set?}` -> the whole store; `colour` null drops the entry, `hand_set` false marks a fork's inherited tint; 400 `colour_invalid`, 500 `colour_store_unwritable`
 - `DELETE providers/<id>/colours` body `{session_ids}` -> the whole store; 500 `colour_store_unwritable`
 - `POST migrate` -> `{migrated: [{provider_id, keys, favourites}]}`; idempotent, safe to call repeatedly
+
+## Launcher `LNCH`
+
+Launcher tiles that open an assistant in the file browser's current folder
+
+- [ ] `ACC-LNCH-143` **Tile per docked assistant** - every assistant whose panel is docked (enabled in settings, binary present or roster unknown) has exactly one tile in the Launcher section "AI Assistants", label = descriptor label, icon = provider icon
+  - related: ACC-LNCH-162 - the design note docs/design-launcher.md carries the mechanism for this section
+  - test: enable claude and codex, open Launcher, assert two tiles under AI Assistants with the provider labels
+  - test-tags: unit, e2e
+  - log: 2026-08-27T16:47:06Z @kj added
+- [ ] `ACC-LNCH-144` **Section absent when empty** - with no docked assistant the Launcher shows no "AI Assistants" section at all - no header, no empty container
+  - test: disable every assistant, open Launcher, assert no section titled AI Assistants
+  - test-tags: e2e
+  - log: 2026-08-27T16:47:06Z @kj added
+- [ ] `ACC-LNCH-145` **Live toggle** - disabling an assistant in settings removes its tile from every open Launcher without reload; enabling it adds the tile back
+  - test: toggle providers.claude.enabled in settings with the Launcher open, assert the tile disappears then reappears
+  - test-tags: unit, e2e
+  - log: 2026-08-27T16:47:06Z @kj added
+- [ ] `ACC-LNCH-146` **Tile lifecycle equals panel lifecycle** - the tile is created in the same start() that docks the panel and disposed in the same stop() that removes it - one enable/available decision, never a second one
+  - test: unit: start(id) registers the launcher item, stop(id) disposes it; a provider with available=false gets neither panel nor tile
+  - test-tags: unit
+  - log: 2026-08-27T16:47:06Z @kj added
+- [ ] `ACC-LNCH-147` **Launch mode from settings** - a tile launch uses the default launch mode resolved from settings, exactly as the panel's + button with no forced mode
+  - test: set the claude bypass mode on in settings, click the tile, assert the launched argv carries the mode flag
+  - test-tags: unit
+  - log: 2026-08-27T16:47:06Z @kj added
+- [ ] `ACC-LNCH-148` **Edge: no server root yet** - a tile click before the first status roster launches nothing and shows one Notification "Waiting for the server root"; no path is ever joined onto an empty root
+  - test: unit: execute the tile command with status null, assert no launch request and one warning
+  - test-tags: unit
+  - log: 2026-08-27T16:47:06Z @kj added
+- [ ] `ACC-LNCH-149` **Edge: folder on a non-default drive** - a tile click while the file browser sits on a non-server drive launches nothing and shows one Notification naming the reason
+  - test: unit: cwd arg with a drive prefix, assert no launch request and one warning
+  - test-tags: unit
+  - log: 2026-08-27T16:47:06Z @kj added
+- [ ] `ACC-LNCH-150` **Core neutrality holds** - tile registration reads only descriptors from the registry; no assistant is named in src/core or src/index.ts
+  - test: core-neutrality.spec.ts stays green after the change
+  - test-tags: unit
+  - log: 2026-08-27T16:47:06Z @kj added
+- [ ] `ACC-LNCH-151` **Resume when the folder has a conversation** - when the provider's sessions listing has a row whose project_path equals the current folder, the tile resumes that row's current conversation - the same target as the panel row click
+  - test: create a claude session in a folder, click the tile from that folder, assert the launched argv resumes that session id
+  - test-tags: unit, e2e
+  - log: 2026-08-27T16:49:33Z @kj added
+- [ ] `ACC-LNCH-152` **Open terminal reused on resume** - a terminal already running the conversation being resumed is activated and focused; no second launch is issued
+  - test: unit: TerminalManager.findForSession returns a widget, assert focus and no launch request
+  - test-tags: unit
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-LNCH-153` **New session otherwise** - with no listing row for the current folder the tile starts a new session in that folder, minting the id client-side when the descriptor says mintsNewSessionId
+  - test: click the tile from a folder with no session, assert a new row appears for that folder in the panel
+  - test-tags: unit, e2e
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-LNCH-154` **Launch through basic-terminal:launch** - the tile executes the command basic-terminal:launch with {argv, cwd}; argv comes from a new provider route that keeps cli_path lookup, mode flag, resume verb and pin bookkeeping server-side; the existing launch route is untouched
+  - test: unit: assert commands.execute('basic-terminal:launch', {argv, cwd}) with the argv the route returned
+  - test-tags: unit, integration
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-LNCH-155` **Edge: basic terminal command absent** - when basic-terminal:launch is not registered a tile click launches nothing and shows one Notification naming jupyterlab_basic_terminal_extension as the missing dependency
+  - test: unit: hasCommand false, assert no route call and one warning
+  - test-tags: unit
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-LNCH-156` **Section between Console and Other** - every tile carries the same categoryRank so the section renders after Console and before Other; @jupyterlab/launcher is pinned ^4.6.0
+  - test: open Launcher with a notebook kernel present, assert section order Notebook, Console, AI Assistants, Other
+  - test-tags: e2e
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-LNCH-157` **Launcher tab replaced by the terminal** - the tile command resolves to the terminal widget, so the Launcher tab closes and the terminal takes its place, as notebook tiles do
+  - test: click a tile, assert the Launcher tab is gone and the terminal tab is current
+  - test-tags: e2e
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-LNCH-158` **Tile order follows the registry** - tiles are ranked by provider position in the registry barrel, matching the sidebar order
+  - test: unit: ranks passed to ILauncher.add equal the provider indices
+  - test-tags: unit
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-LNCH-159` **Dependencies declared** - pyproject.toml lists jupyterlab-basic-terminal-extension as a runtime dependency (the coupling is the command id string, no npm dependency); package.json lists @jupyterlab/launcher ^4.6.0
+  - test: grep both manifests
+  - test-tags: manual
+  - log: 2026-08-27T16:49:34Z @kj added
+- [ ] `ACC-LNCH-162` **Design document in sync with the implementation** - docs/design-launcher.md describes the shipped mechanism - command ids, route path and payload, dependency pins, edge behaviour; a change to any of them in code lands in the document in the same commit
+  - test: diff each named identifier in docs/design-launcher.md against src/ and the Python routes after every launcher change
+  - test-tags: manual
+  - log: 2026-08-27T16:55:48Z @kj added

@@ -61,6 +61,7 @@ import {
   IDeleteSessionsResponse,
   IFavouriteResponse,
   IForkResponse,
+  ILaunchArgvResponse,
   ILaunchMode,
   ILaunchRequest,
   IProviderDescriptor,
@@ -96,6 +97,11 @@ const BRANCH_WATCH_INTERVAL_MS = 2_000;
 const BRANCH_WATCH_MAX_ATTEMPTS = 90; // ~3 minutes
 /** Conversations listed inline in a branch submenu before the popup takes over. */
 const INLINE_BRANCH_LIMIT = 5;
+/** Command id of the sibling extension that spawns a shell-less terminal on a
+ * bare argv, with args `{argv, cwd}`. That string IS the coupling: the sibling
+ * exports no token, so its absence is something to ask the command registry
+ * about at click time rather than a build-time dependency (ACC-LNCH-155). */
+const BASIC_TERMINAL_LAUNCH = 'basic-terminal:launch';
 
 type SectionKey = 'favourites' | 'recent' | 'all';
 
@@ -887,19 +893,143 @@ export class AssistantSessionsPanel extends Widget {
     }
   }
 
-  /** Absolute path of the file browser's current folder; the server root when
-   * no file browser is available. */
-  private _currentFolder(): string {
+  /** Absolute path of a folder given as a Contents-API path, defaulting to the
+   * file browser's current folder; the server root when neither is available.
+   *
+   * `path` is passed by the Launcher tile, which carries the folder its click
+   * happened in rather than whatever the browser shows now. An empty string is
+   * the root, so the default applies only when nothing at all was given. */
+  private _currentFolder(path?: string): string {
     // No roster yet (DEF-132): a relative folder joined to an empty root
     // would be an absolute path at the filesystem root.
     if (!this._rootDir) {
       return '';
     }
-    const rel = (this._fileBrowser?.model?.path ?? '').replace(/^\/+/, '');
+    const rel = (path ?? this._fileBrowser?.model?.path ?? '').replace(
+      /^\/+/,
+      ''
+    );
     if (!rel) {
       return this._rootDir;
     }
     return this._rootDir === '/' ? `/${rel}` : `${this._rootDir}/${rel}`;
+  }
+
+  /**
+   * Start or resume this assistant in `cwd`, and answer with the terminal
+   * widget the sibling extension opened - the Launcher replaces its own tab
+   * with whatever the command resolves to (ACC-LNCH-157).
+   *
+   * The tile's whole click path lives here rather than in `src/index.ts`
+   * because every input it needs is already the panel's: the root join, the
+   * cached rows, the terminal reuse ladder and the settings-resolved launch
+   * mode. Nothing here retries and nothing is scheduled: a guard that refuses
+   * shows one notification and launches nothing, and a request that fails
+   * writes nothing.
+   *
+   * `cwd` is a Contents-API path, `''` for the root.
+   */
+  async launchHere(cwd?: string): Promise<any> {
+    // No roster yet, so the root is unknown. Joining onto an empty one names a
+    // folder at the filesystem root, which the server accepts whenever it
+    // happens to exist (ACC-LNCH-148, DEF-132).
+    if (!this._rootDir) {
+      Notification.warning(
+        'Waiting for the server root - nothing was launched.',
+        { autoClose: 4000 }
+      );
+      return undefined;
+    }
+    // A registered drive (jupyter-fs, S3) is not assumed to map onto the
+    // server filesystem, and its local path would resolve against the server's
+    // own root - an unrelated directory of the same name (ACC-LNCH-149).
+    if (
+      typeof cwd === 'string' &&
+      this._app.serviceManager.contents.driveName(cwd) !== ''
+    ) {
+      Notification.warning(
+        'The file browser is on a drive that does not map onto the Jupyter ' +
+          "server's filesystem, so nothing was launched.",
+        { autoClose: 4000 }
+      );
+      return undefined;
+    }
+    if (!this._app.commands.hasCommand(BASIC_TERMINAL_LAUNCH)) {
+      Notification.warning(
+        'jupyterlab_basic_terminal_extension is not installed, and it owns ' +
+          `the \`${BASIC_TERMINAL_LAUNCH}\` command this launch runs on.`,
+        { autoClose: 4000 }
+      );
+      return undefined;
+    }
+    const folder = this._currentFolder(cwd);
+    let argv: string[];
+    try {
+      // The rows the poll already answered with, so a click on a live panel
+      // costs one request rather than two.
+      const rows =
+        this._sessions ??
+        (
+          await requestProvider<ISessionsListResponse>(
+            this._descriptor.id,
+            'sessions',
+            this._serverSettings,
+            { cache: 'no-store' }
+          )
+        ).sessions ??
+        [];
+      // A row for this folder means the folder has a conversation, which is
+      // what makes this a resume rather than a new session (ACC-LNCH-151).
+      const row = rows.find(s => s.project_path === folder) ?? null;
+      if (row) {
+        // A terminal already holding that conversation IS the answer: a second
+        // process on one history is never what the click meant (ACC-LNCH-152).
+        const found = await this._terminals.findForSession(row.session_id);
+        if (found) {
+          this._terminals.focus(found.widget);
+          return found.widget;
+        }
+      }
+      const request: ILaunchRequest = {
+        project_path: folder,
+        encoded_path: row?.encoded_path,
+        session_id: row?.session_id,
+        // Minted here when the CLI takes an id, so the new conversation is
+        // identifiable from its argv on the first poll (ACC-LNCH-153).
+        new_session_id:
+          row || !this._descriptor.mintsNewSessionId ? undefined : UUID.uuid4(),
+        // No forced mode - the same default the + button launches under
+        // (ACC-LNCH-147).
+        mode: this._launchMode()
+      };
+      const answer = await requestProvider<ILaunchArgvResponse>(
+        this._descriptor.id,
+        'launch-argv',
+        this._serverSettings,
+        { method: 'POST', body: JSON.stringify(request) }
+      );
+      argv = answer.argv;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // The binary went away after the panel docked. Named, because the
+      // symptom otherwise reads as a broken tile.
+      if (isResponseStatus(err, 503) && message === 'cli_not_found') {
+        Notification.warning(
+          `\`${this._descriptor.cliBinary}\` was not found on the Jupyter ` +
+            "server's PATH, so nothing was launched.",
+          { autoClose: 4000 }
+        );
+        return undefined;
+      }
+      this._notifyLaunchError('Could not start a session in this folder', err);
+      return undefined;
+    }
+    // The folder is already resolved against the server root, and the sibling
+    // takes an absolute path (ACC-LNCH-154).
+    return this._app.commands.execute(BASIC_TERMINAL_LAUNCH, {
+      argv,
+      cwd: folder
+    });
   }
 
   /** Start a brand-new conversation in the file browser's current folder. */

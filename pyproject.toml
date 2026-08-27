@@ -24,6 +24,10 @@ classifiers = [
 ]
 dependencies = [
     "jupyter_server>=2.13.0,<3",
+    # Spawns the terminal a Launcher tile launches into (ACC-LNCH-154). The
+    # coupling is the command id string basic-terminal:launch, not a token, so
+    # there is no npm dependency to match this one (ACC-LNCH-159).
+    "jupyterlab-basic-terminal-extension>=1.0.7",
     # Companion labextension providing the IColourfulTabs token. Declared as a
     # non-bundled webpack singleton (package.json sharedPackages), so it must be
     # present at runtime or the whole extension fails to load with "Shared

@@ -40,8 +40,10 @@ The following workspace rules are STRICTLY ENFORCED for this project:
 
 ## Feature and Defect Tracking
 
-- **Acceptance criteria** - create and maintain one per feature using the `/acceptance-criteria` skill, written to `docs/acc-crit-<feature>.md`
-- **Defects** - track in the single master list `docs/defects.md` using the `/defects-tracking` skill
+- **Both disciplines live in the `project-management` skill** (`~/.claude/skills/project-management/SKILL.md`): every read and write goes through its `scripts/pm.py`, never a hand edit; ids are permanent (`ACC-<CAT>-<N>`, `DEF-<CAT>-<N>`); author handle `@kj`
+- **Acceptance criteria** - one consolidated doc, `docs/acc-crit-jupyterlab-ai-code-assistants.md`
+- **Defects** - single master list `docs/defects.md`; severity CRITICAL / MAJOR / MEDIUM / MINOR triaged on filing
+- **Gate** - `pm.py check docs/` must exit 0 after every edit session
 
 ## Required Workspace Skills
 

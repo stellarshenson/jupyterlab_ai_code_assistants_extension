@@ -1,6 +1,8 @@
 import { expect, test } from '@jupyterlab/galata';
 
 import {
+  ABSENT,
+  AVAILABLE,
   PLUGIN_ID,
   STATUS_URL,
   openPanelTab,
@@ -458,77 +460,65 @@ test('DEF-121 - a stale failed probe cannot discard a newer roster', async ({
   const tab = page.locator(`.lm-TabBar-tab[data-id="${panelId('claude')}"]`);
   await expect(tab).toBeVisible();
 
-  // Now the wedged probe fails - the shape a client timeout takes. It is the
-  // OLDER request, so its verdict is stale and must be discarded.
+  // Now the wedged probe fails - the shape a client timeout takes. A failure
+  // writes nothing, so there is no verdict to discard.
   await held.abort('failed');
   await expect
     .poll(() => warnings.length, { timeout: 10000 })
     .toBeGreaterThan(0);
-  // The catch warns before it would write, and `reconcile` runs a microtask
-  // later; this settles both. The warning is deliberately outside the guard,
-  // so it prints for superseded verdicts too (DEF-124) - which is what makes
-  // it usable as a settle signal here.
+  // The catch always warns before `reconcile` runs, which is what makes it
+  // usable as a settle signal here.
   await page.waitForTimeout(1000);
 
   await expect(tab).toBeVisible();
   await expect(page.locator(PANEL)).toBeVisible();
 
-  // How this fails: without the generation check in `probeStatus` the stale
-  // catch sets `status = null`, `reconcile` reads that as every provider
-  // unavailable, and both assertions above find nothing - panels undocked
-  // while the server is healthy and answered fifteen seconds ago.
+  // How this fails: let a failed probe write `status = null` again and
+  // `reconcile` reads that as every provider unavailable - both assertions
+  // above find nothing, panels undocked while the server is healthy and
+  // answered fifteen seconds ago. A failure writes nothing (DEF-132), so
+  // there is no verdict to order against the roster.
 });
 
-test('DEF-121 - a newer failure cannot bury an older roster', async ({
+test('DEF-132 - a failed activation probe does not cost the sidebar its panel', async ({
   page
 }) => {
-  await page.goto();
-  await openPanelTab(page, 'claude');
-
-  // The mirror of the case above, and the half a guard on the SUCCESS path
-  // would break: the older probe is the one that answers, the newer one only
-  // fails. A failure is not an answer, so it must not win on issue order.
-  let held: any = null;
+  // The first status probe of the page load fails - the shape a reload takes
+  // while the server is still coming back. JupyterLab waits for activation
+  // and then restores the sidebar tab it had open, but it does not wait for
+  // a later probe: a panel that docks a minute late is one the layout has
+  // already given up on, and the sidebar stays shut.
   let seen = 0;
   await page.route(`**${STATUS_URL}*`, async (route: any) => {
     seen += 1;
     if (seen === 1) {
-      held = route; // the older probe - answered last, with the real roster
-      return;
-    }
-    if (seen === 2) {
-      await route.abort('failed'); // the newer probe - fails fast
+      await route.abort('failed');
       return;
     }
     await route.continue();
   });
 
-  await page.evaluate(() => {
-    window.dispatchEvent(new Event('online'));
-  });
-  await expect.poll(() => seen, { timeout: 5000 }).toBeGreaterThan(0);
+  await page.goto();
+  await expect.poll(() => seen).toBeGreaterThan(0);
 
-  await page.evaluate(() => {
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
-  await expect.poll(() => seen, { timeout: 5000 }).toBeGreaterThan(1);
+  // Unknown is not absent: with no roster yet, every enabled assistant is
+  // docked at activation, well inside the 60 s the old code waited.
+  for (const id of AVAILABLE) {
+    await expect(
+      page.locator(`.lm-TabBar-tab[data-id="${panelId(id)}"]`)
+    ).toBeAttached({ timeout: 5000 });
+  }
+  // The honest cost, stated: an enabled assistant with no binary is docked
+  // too, until the next probe answers and removes it.
+  for (const id of ABSENT) {
+    await expect(
+      page.locator(`.lm-TabBar-tab[data-id="${panelId(id)}"]`)
+    ).toBeAttached({ timeout: 5000 });
+  }
 
-  const tab = page.locator(`.lm-TabBar-tab[data-id="${panelId('claude')}"]`);
-  // The fast failure is the newest issued, so it legitimately undocks
-  // (DEF-119, logged) - that is the state the older roster must lift.
-  await expect(tab).toBeHidden({ timeout: 10000 });
-
-  await held.continue();
-  await expect(tab).toBeVisible({ timeout: 10000 });
-  // Docked, not re-selected: the roster is what came back. JupyterLab does not
-  // restore which sidebar panel was open, so the widget stays hidden behind
-  // its tab - the "place is lost" half of DEF-119, logged and out of scope
-  // here. Asserting visible would fail on a roster that was correctly
-  // restored.
-  await expect(page.locator(PANEL)).toBeAttached();
-
-  // How this fails: guard the success write on `mine === probeGeneration` and
-  // the older probe's roster is discarded because a newer probe was ISSUED,
-  // never mind that it only failed. The sidebar then stays empty until the 60s
-  // tick - the dark window DEF-117 exists to close, reopened by its own fix.
+  // How this fails: read a failed probe as "nothing installed" and nothing
+  // docks - `0 of 4 assistant panel(s) docked`. The `waitForApplication`
+  // fixture then reds inside `page.goto()` at 30 s waiting for the claude
+  // tab; the ABSENT loop above is the only assertion the fixture does not
+  // already make.
 });

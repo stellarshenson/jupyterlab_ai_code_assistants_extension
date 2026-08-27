@@ -116,37 +116,29 @@ const plugin: JupyterFrontEndPlugin<void> = {
     let settings: ISettingRegistry.ISettings | null = null;
     let sidebar: Sidebar = DEFAULT_SIDEBAR;
 
-    let probeGeneration = 0;
-
     /** Ask the server which providers exist and which of their binaries are on
-     * PATH. An unsuperseded failure leaves the extension activated with no
-     * panels until a later probe succeeds - never a dialog, never a thrown
-     * activation.
+     * PATH.
      *
-     * Probes overlap: a probe can outlive one issued after it, so verdicts do
-     * not arrive in the order they were asked for. A ROSTER is always written,
-     * whichever settles last - both are answers from the same server, and the
-     * loser is at worst one client deadline stale (DEF-125). A FAILURE is not an answer, so it
-     * is written only while no newer probe has been issued; otherwise a
-     * timeout could discard a roster the server has since confirmed, undocking
-     * every panel while it is healthy (DEF-121). No request is suppressed. */
+     * `status` is the last roster the server gave, and null means it has never
+     * given one - two different facts that used to share one value. A probe
+     * that FAILS writes nothing: not answering is not an answer, and reading it
+     * as "no assistant is installed" is what emptied the sidebar on every
+     * reload whose first request landed before the server was listening
+     * (DEF-132), and on every wake whose probe fired before the network was
+     * back (DEF-119). No request is suppressed, and a failure never needs
+     * ordering against a success, because it has nothing to write. */
     const probeStatus = async (): Promise<void> => {
-      const mine = ++probeGeneration;
       try {
         status = await requestAPI<IStatusResponse>('status', serverSettings, {
           cache: 'no-store'
         });
       } catch (err) {
-        // No cadence named here: this also prints from the activation probe,
-        // and neither the interval nor the wake listeners are armed until
-        // after `await migrate()` below (DEF-122).
+        // No cadence named: this also prints from the activation probe, before
+        // the interval and the wake listeners are armed (DEF-122).
         console.warn(
-          `${LOG_PREFIX} status probe failed; panels dock again once a later probe succeeds.`,
+          `${LOG_PREFIX} status probe failed; the last known roster stands (every enabled assistant, when there is none yet) until a later probe answers.`,
           err
         );
-        if (mine === probeGeneration) {
-          status = null;
-        }
       }
     };
 
@@ -214,7 +206,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
           descriptor: module.descriptor,
           hooks: module.hooks,
           rootDir: status?.root_dir ?? '',
-          deleteToTrash: status?.delete_to_trash !== false,
+          // Unknown reads as "not trash": the popup then arms its Delete
+          // button before it executes, which is the only confirmation a
+          // permanent bulk delete has (DEF-135).
+          deleteToTrash: status ? status.delete_to_trash !== false : false,
           terminalTracker,
           fileBrowser,
           colourfulTabs
@@ -258,16 +253,23 @@ const plugin: JupyterFrontEndPlugin<void> = {
         const enabled =
           setting<boolean>(`providers.${id}.enabled`, true) !== false;
         const probe = statusFor(id);
-        const available = probe ? probe.available !== false : false;
+        // Unknown is not absent. With no roster yet, an enabled assistant is
+        // docked: JupyterLab restores the sidebar tab it had open only if that
+        // tab exists when activation ends, and it waits for activation but
+        // not for a later probe - so a panel that arrives a minute late is one
+        // the layout has already given up on (DEF-132). Once a roster exists
+        // the server's word on each binary is final.
+        const roster = status;
+        const available =
+          roster === null ? true : probe !== null && probe.available !== false;
         // Enabled but binary absent must not be a silent state: the user sees
         // a missing panel with no clue that PATH under the Jupyter server
         // differs from their shell. Once per id, not per reconcile.
         // Only when the probe SUCCEEDED and this provider is the one missing.
-        // A failed probe sets every provider unavailable, and blaming PATH for
-        // a server the frontend never reached names the wrong cause; and every
-        // provider defaults to enabled, so a machine with one assistant
-        // installed would otherwise raise three toasts about assistants the
-        // user has never heard of. The console line stays for that case.
+        // Blaming PATH for a server the frontend never reached names the wrong
+        // cause; and every provider defaults to enabled, so a machine with one
+        // assistant installed would otherwise raise three toasts about assistants
+        // the user has never heard of. The console line stays for that case.
         const chosen =
           settings?.get(`providers.${id}.enabled`).user !== undefined;
         if (
@@ -296,7 +298,16 @@ const plugin: JupyterFrontEndPlugin<void> = {
         }
         if (enabled && available) {
           if (live.has(id)) {
-            applySharedSettings(live.get(id)!.panel);
+            const panel = live.get(id)!.panel;
+            applySharedSettings(panel);
+            // A panel docked before the first roster was built without the
+            // server root, and cannot resolve paths until it has one.
+            if (roster !== null) {
+              panel.setRoot(
+                roster.root_dir ?? '',
+                roster.delete_to_trash !== false
+              );
+            }
           } else {
             start(id);
           }
@@ -410,8 +421,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     }, STATUS_INTERVAL_MS);
 
     // A suspended network stack - laptop asleep, tab backgrounded - is exactly
-    // when the probe fails, and the slow cadence above would leave the sidebar
-    // panel-less for up to a minute after the machine comes back. A wake fires
+    // when the probe fails, and the slow cadence above would leave the roster
+    // stale for up to a minute after the machine comes back. A wake fires
     // both events, so it costs two probes; deliberately, because a guard that
     // let the second join the first answered the wake with a request issued
     // before it, and starved the interval above of its own tick (DEF-117).

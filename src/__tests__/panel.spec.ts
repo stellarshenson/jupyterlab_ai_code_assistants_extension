@@ -622,3 +622,43 @@ describe('DEF-46 - the row tooltip names only a mode the row launches with', () 
     expect(text).not.toContain('Launch mode');
   });
 });
+
+describe('DEF-132 - a panel docked before the first roster has no root', () => {
+  function rootless(): AssistantSessionsPanel {
+    return new AssistantSessionsPanel({
+      app: {
+        serviceManager: { serverSettings: {} },
+        commands: { execute: jest.fn() }
+      } as any,
+      descriptor: { ...DESCRIPTOR, iconName: 'testbed-rootless-panel-spec' },
+      rootDir: '',
+      fileBrowser: { model: { path: 'data/raw' } } as any
+    });
+  }
+
+  it('the + button is inert until setRoot supplies the root', async () => {
+    const p = rootless();
+    await flush();
+    request.mockClear();
+
+    // Without the guard this is `/data/raw` - a folder at the filesystem
+    // root, which the server accepts whenever it happens to exist.
+    expect((p as any)._currentFolder()).toBe('');
+    await (p as any)._newSession();
+    expect(request).not.toHaveBeenCalled();
+    // And the button says so, rather than looking live and doing nothing.
+    const newBtn = p.node.querySelector<HTMLButtonElement>(
+      '.jp-AiAssistantsPanel-iconButton'
+    )!;
+    expect(newBtn.disabled).toBe(true);
+    expect(newBtn.title).toBe('Waiting for the server root');
+
+    p.setRoot('/srv/lab/', true);
+    expect((p as any)._currentFolder()).toBe('/srv/lab/data/raw');
+    expect(newBtn.disabled).toBe(false);
+    expect(newBtn.title).toMatch(/^New session in current folder/);
+    p.setRoot('/', true);
+    expect((p as any)._currentFolder()).toBe('/data/raw');
+    p.dispose();
+  });
+});

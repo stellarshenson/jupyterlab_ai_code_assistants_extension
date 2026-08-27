@@ -4,6 +4,19 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.39] - 2026-08-27
+
+### Fixed
+
+- The sidebar no longer stays collapsed after a reload or a JupyterLab restart whose first status check fails - the extension read "the server did not answer" as "no assistant is installed" and docked nothing, so JupyterLab found no panel to restore and closed the sidebar itself; a failed check now leaves the last known set of panels in place, and until the server has answered once every enabled assistant is docked so the panel you had open comes back where it was
+- A panel docked before the server's first answer can no longer start a session in the wrong folder - the new-session button used to join the file browser's folder to an unknown root and could launch at the top of the filesystem
+- A panel docked before the server's first answer can no longer delete conversations permanently on one click - the Manage Sessions Delete button now arms first whenever the trash setting is not yet known
+- The new-session button is disabled, dimmed and titled "Waiting for the server root" until the server has answered, instead of looking live and doing nothing
+
+### Changed
+
+- Defect and acceptance-criteria tracking moved to the `project-management` schema - every item carries a permanent id (`DEF-GUARD-132`) and an author handle; existing defect numbers are unchanged
+
 ## [1.0.32] - 2026-08-26
 
 ### Fixed

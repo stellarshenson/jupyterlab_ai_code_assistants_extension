@@ -171,13 +171,7 @@ export class AssistantSessionsPanel extends Widget {
     this._descriptor = options.descriptor;
     this._hooks = options.hooks ?? {};
     this._serverSettings = options.app.serviceManager.serverSettings;
-    // Trailing slashes go, but never the root itself: serving JupyterLab at
-    // `/` used to normalise to the empty string, which reads as "no root" -
-    // the + button then did nothing at all, and Open Terminal and Show in File
-    // Browser answered "outside the JupyterLab root" for every row inside it.
-    const root = (options.rootDir || '').replace(/\/+$/, '');
-    this._rootDir = root || (options.rootDir ? '/' : '');
-    this._deleteToTrash = options.deleteToTrash !== false;
+    this.setRoot(options.rootDir, options.deleteToTrash !== false);
     this._fileBrowser = options.fileBrowser ?? null;
     this._expandedKey = `jupyterlab_ai_code_assistants_extension:${this._descriptor.id}:expanded`;
     this._expanded = loadExpanded(this._expandedKey);
@@ -323,8 +317,15 @@ export class AssistantSessionsPanel extends Widget {
     // and this button LAUNCHES on click instead of dropping a menu, so without
     // the suffix the one surface that starts an approval-free session is the
     // only one that never says so (DEF-36, DEF-113, DEF-114).
+    // Disabled, not silent, while the server root is unknown (a panel docked
+    // before the first status roster, DEF-132): a healthy-looking button that
+    // does nothing on click cannot be diagnosed by the user. `setRoot` re-runs
+    // this once the root lands, so the state is data-driven, not timed.
     const nameNewButton = (): void => {
-      newBtn.title = `New session in current folder${this._variantSuffix()}`;
+      newBtn.disabled = !this._rootDir;
+      newBtn.title = this._rootDir
+        ? `New session in current folder${this._variantSuffix()}`
+        : 'Waiting for the server root';
     };
     // Focus as well as hover, or the icon-only button's accessible name is the
     // generic one for everybody not using a mouse.
@@ -841,9 +842,32 @@ export class AssistantSessionsPanel extends Widget {
     }
   }
 
+  /** The server root every path is shown and resolved against, plus
+   * JupyterLab's move-to-trash setting. Settable because a panel docked before
+   * the server has answered its first status probe is built without either
+   * (DEF-132); the action paths read them lazily, so a late value applies on
+   * the next click, while rows already rendered keep absolute paths until the
+   * next poll.
+   *
+   * Trailing slashes go, but never the root itself: serving JupyterLab at
+   * `/` used to normalise to the empty string, which reads as "no root" -
+   * the + button then did nothing at all, and Open Terminal and Show in File
+   * Browser answered "outside the JupyterLab root" for every row inside it. */
+  setRoot(rootDir: string, deleteToTrash: boolean): void {
+    const root = (rootDir || '').replace(/\/+$/, '');
+    this._rootDir = root || (rootDir ? '/' : '');
+    this._deleteToTrash = deleteToTrash;
+    this._renameNewButton?.();
+  }
+
   /** Absolute path of the file browser's current folder; the server root when
    * no file browser is available. */
   private _currentFolder(): string {
+    // No roster yet (DEF-132): a relative folder joined to an empty root
+    // would be an absolute path at the filesystem root.
+    if (!this._rootDir) {
+      return '';
+    }
     const rel = (this._fileBrowser?.model?.path ?? '').replace(/^\/+/, '');
     if (!rel) {
       return this._rootDir;
@@ -2603,8 +2627,8 @@ export class AssistantSessionsPanel extends Widget {
   private readonly _descriptor: IProviderDescriptor;
   private readonly _hooks: IProviderHooks;
   private readonly _serverSettings: ServerConnection.ISettings;
-  private readonly _rootDir: string;
-  private readonly _deleteToTrash: boolean;
+  private _rootDir = '';
+  private _deleteToTrash = true;
   private readonly _fileBrowser: IDefaultFileBrowser | null;
   private readonly _colours: ColourStore;
   private readonly _terminals: TerminalManager;

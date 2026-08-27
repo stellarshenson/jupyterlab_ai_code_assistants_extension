@@ -61,7 +61,14 @@
   color: var(--jp-ui-font-color2);
 }
 
-.jp-AiAssistantsPanel-iconButton:hover {
+/* The + button while the server root is unknown (DEF-132): the glyph is an
+   icon fill, not `color`, so the UA's disabled styling never reaches it. */
+.jp-AiAssistantsPanel-iconButton:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.jp-AiAssistantsPanel-iconButton:hover:not(:disabled) {
   background: var(--jp-layout-color3);
   color: var(--jp-ui-font-color1);
 }

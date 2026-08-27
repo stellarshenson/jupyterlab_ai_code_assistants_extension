@@ -37,10 +37,15 @@ jest.mock('@jupyter/web-components', () => ({
 // before each act rather than asserted from construction.
 jest.mock('../core/request', () => ({
   requestProvider: jest.fn(() => Promise.resolve({})),
-  isResponseStatus: () => false,
+  // Shape-based rather than `instanceof`, so a test can hand the panel the
+  // refusal a route answers with without building a real `Response`.
+  isRequestTimeout: (err: any) => err?.name === 'RequestTimeoutError',
+  isResponseStatus: (err: any, status: number) =>
+    err?.response?.status === status,
   withQuery: (path: string) => path
 }));
 
+import { Notification } from '@jupyterlab/apputils';
 import { TAB_COLOUR_IDS, fnv1aColour } from '../core/colour';
 import { addIcon, branchIcon, cleanupIcon, shieldIcon } from '../core/icons';
 import { AssistantSessionsPanel, commandId } from '../core/panel';
@@ -660,5 +665,129 @@ describe('DEF-132 - a panel docked before the first roster has no root', () => {
     p.setRoot('/', true);
     expect((p as any)._currentFolder()).toBe('/data/raw');
     p.dispose();
+  });
+
+  it('the path actions name the missing root, not a folder outside it', async () => {
+    const p = rootless();
+    await flush();
+    const warn = jest.spyOn(Notification, 'warning').mockReturnValue('' as any);
+
+    // The folder is INSIDE the root the server has not sent yet, so blaming
+    // the root is the one diagnosis that cannot be acted on (DEF-134).
+    (p as any)._activeSession = session({ project_path: '/srv/lab/proj' });
+    await (p as any)._commands.execute(commandId('testbed', 'open-terminal'));
+    await (p as any)._commands.execute(
+      commandId('testbed', 'show-in-filebrowser')
+    );
+    expect(warn.mock.calls.map(c => String(c[0]))).toEqual([
+      'Waiting for the server root - cannot open a terminal yet.',
+      'Waiting for the server root - the file browser cannot show it yet.'
+    ]);
+
+    // And the outside case is still named, rather than deleted with it.
+    warn.mockClear();
+    p.setRoot('/srv/lab', true);
+    (p as any)._activeSession = session({ project_path: '/elsewhere/proj' });
+    await (p as any)._commands.execute(commandId('testbed', 'open-terminal'));
+    expect(String(warn.mock.calls[0][0])).toContain(
+      'outside the JupyterLab root'
+    );
+    p.dispose();
+  });
+
+  // DEF-136 - the root can land after the rows are already on screen.
+
+  it('a root arriving after the rows redraws their tooltips', async () => {
+    const p = rootless();
+    await flush();
+    render(p, [session()]);
+
+    // Pre-roster the absolute path is the honest fallback.
+    const row = p.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!;
+    expect(row.title).toContain('Path: /home/user/proj');
+
+    p.setRoot('/home/user', true);
+    expect(
+      p.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!.title
+    ).toContain('Path: proj');
+    p.dispose();
+  });
+
+  it('a root arriving after the rows redraws their labels in path mode', async () => {
+    const p = rootless();
+    await flush();
+    p.setPresentationMode('path');
+    render(p, [session()]);
+    expect(
+      p.node.querySelector('.jp-AiAssistantsPanel-nameText')!.textContent
+    ).toBe('/home/user/proj');
+
+    p.setRoot('/home/user', true);
+    expect(
+      p.node.querySelector('.jp-AiAssistantsPanel-nameText')!.textContent
+    ).toBe('proj');
+    p.dispose();
+  });
+
+  it('an unchanged root does not redraw - the reconcile tick repeats it', async () => {
+    const p = rootless();
+    await flush();
+    render(p, [session()]);
+    p.setRoot('/home/user', true);
+
+    const spy = jest.spyOn(p as any, '_render');
+    p.setRoot('/home/user', true);
+    p.setRoot('/home/user/', true);
+    expect(spy).not.toHaveBeenCalled();
+    p.dispose();
+  });
+});
+
+// --------------------------------------------------------------- DEF-138
+
+describe('DEF-138 - a refused listing names the missing binary', () => {
+  const banner = (): string =>
+    panel.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-error')!
+      .textContent ?? '';
+
+  beforeEach(() => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  /** What `requestAPI` throws for the server's `{"error": "cli_not_found"}` -
+   * the only 503 a listing can be refused with. */
+  const cliNotFound = (): Error =>
+    Object.assign(new Error('cli_not_found'), {
+      name: 'ResponseError',
+      response: { status: 503 }
+    });
+
+  it('names the binary instead of blaming the server', () => {
+    (panel as any)._showError(cliNotFound());
+    expect(banner()).toContain('`testbed` was not found');
+    expect(banner()).not.toContain('Could not reach the server');
+  });
+
+  it("leaves a 503 that is not this extension's own alone", () => {
+    // What a hub proxy or a stopped single-user server answers: a 503 whose
+    // body is HTML, so `requestAPI` hands the raw text through as the message.
+    (panel as any)._showError(
+      Object.assign(new Error('<html>503 Service Unavailable</html>'), {
+        name: 'ResponseError',
+        response: { status: 503 }
+      })
+    );
+    expect(banner()).toContain('Could not reach the server');
+    expect(banner()).not.toContain('was not found');
+  });
+
+  it('leaves the two unanswered-server verdicts alone', () => {
+    (panel as any)._showError(
+      Object.assign(new Error('timed out'), { name: 'RequestTimeoutError' })
+    );
+    expect(banner()).toContain('The server is not answering');
+
+    (panel as any)._showError(new TypeError('Failed to fetch'));
+    expect(banner()).toContain('Could not reach the server');
   });
 });

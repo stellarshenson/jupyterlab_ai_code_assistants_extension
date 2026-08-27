@@ -4,6 +4,22 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.0.41] - 2026-08-27
+
+### Fixed
+
+- A sign-in or proxy page returned with status 200 no longer empties the sidebar - the extension now treats a non-JSON answer as "the server did not answer" and keeps the panels it has, instead of reading it as "no assistant is installed"
+- Opening a conversation held by a session record with a zero or negative process id no longer skips the transcript repair and no longer routes the launch to a background agent that does not exist
+- Forking a Gemini conversation keeps the chat file byte-faithful - a line-separator character inside a message no longer splits the record, non-ASCII text is no longer re-escaped, and a record that cannot be encoded declines the fork cleanly instead of failing with a server error
+- Before the server has answered its first status check, Open Terminal and Show in File Browser now say "Waiting for the server root" instead of blaming a folder outside the JupyterLab root
+- Rows drawn before the server root is known now show root-relative paths the moment the root arrives, instead of at the next 30-second refresh
+- An assistant that is enabled but not installed now says so in its panel, naming the missing command, instead of "Could not reach the server - retrying"
+- The "enabled but its binary was not found" notice can fire again after a false alarm - the once-per-page latch clears as soon as a status check reports the assistant available
+
+### Changed
+
+- The plugin's activation path is now covered by a Jest suite; `jest.config.js` ignores the two virtual environments whose duplicate labextension copies broke module resolution
+
 ## [1.0.39] - 2026-08-27
 
 ### Fixed

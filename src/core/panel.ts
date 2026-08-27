@@ -590,6 +590,22 @@ export class AssistantSessionsPanel extends Widget {
   private _showError(err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     this._logError(message);
+
+    // DEF-138: the server ANSWERED, and its answer is that this assistant's
+    // binary is not on the PATH the Jupyter server runs with. Blaming the
+    // server names the wrong cause - the panel is docked only because no
+    // roster has arrived yet, and the roster is what removes it (DEF-132).
+    // The error code is matched as well as the status, because a 503 raised
+    // by a proxy or a stopped single-user server is NOT this: its body never
+    // parses to `{"error": "cli_not_found"}`, so it keeps the copy below.
+    if (isResponseStatus(err, 503) && message === 'cli_not_found') {
+      this._setInlineError(
+        `\`${this._descriptor.cliBinary}\` was not found on the Jupyter ` +
+          `server's PATH.`
+      );
+      return;
+    }
+
     const copy = isRequestTimeout(err)
       ? 'The server is not answering - retrying.'
       : 'Could not reach the server - retrying.';
@@ -846,8 +862,8 @@ export class AssistantSessionsPanel extends Widget {
    * JupyterLab's move-to-trash setting. Settable because a panel docked before
    * the server has answered its first status probe is built without either
    * (DEF-132); the action paths read them lazily, so a late value applies on
-   * the next click, while rows already rendered keep absolute paths until the
-   * next poll.
+   * the next click, and a root arriving after rows were drawn redraws them
+   * once (DEF-136).
    *
    * Trailing slashes go, but never the root itself: serving JupyterLab at
    * `/` used to normalise to the empty string, which reads as "no root" -
@@ -855,9 +871,20 @@ export class AssistantSessionsPanel extends Widget {
    * Browser answered "outside the JupyterLab root" for every row inside it. */
   setRoot(rootDir: string, deleteToTrash: boolean): void {
     const root = (rootDir || '').replace(/\/+$/, '');
-    this._rootDir = root || (rootDir ? '/' : '');
+    const next = root || (rootDir ? '/' : '');
+    const changed = next !== this._rootDir;
+    this._rootDir = next;
     this._deleteToTrash = deleteToTrash;
     this._renameNewButton?.();
+    // Guarded on the VALUE, not on the call: `reconcile` re-sends the same
+    // root every status tick, so a changed-guard redraws exactly once, on the
+    // '' -> root transition. `_sessions` stands in for "the shell is built and
+    // rows are on screen" - it is null until the first `_fetch` answers, which
+    // is what keeps the constructor's own `setRoot` from reaching `_render`
+    // before `_buildShell` has created `_bodyEl`.
+    if (changed && this._sessions !== null) {
+      this._render();
+    }
   }
 
   /** Absolute path of the file browser's current folder; the server root when
@@ -2078,8 +2105,12 @@ export class AssistantSessionsPanel extends Widget {
         // absolute filesystem path, so it goes through _pathUnderRoot.
         const rel = this._pathUnderRoot(s.project_path);
         if (rel === null) {
+          // A root the server has not sent yet is not a folder outside it
+          // (DEF-134).
           Notification.warning(
-            'Folder is outside the JupyterLab root - cannot open a terminal there.',
+            this._rootDir
+              ? 'Folder is outside the JupyterLab root - cannot open a terminal there.'
+              : 'Waiting for the server root - cannot open a terminal yet.',
             { autoClose: 4000 }
           );
           return;
@@ -2105,8 +2136,12 @@ export class AssistantSessionsPanel extends Widget {
         }
         const rel = this._pathUnderRoot(s.project_path);
         if (rel === null) {
+          // A root the server has not sent yet is not a folder outside it
+          // (DEF-134).
           Notification.warning(
-            'Folder is outside the JupyterLab root - the file browser cannot show it.',
+            this._rootDir
+              ? 'Folder is outside the JupyterLab root - the file browser cannot show it.'
+              : 'Waiting for the server root - the file browser cannot show it yet.',
             { autoClose: 4000 }
           );
           return;

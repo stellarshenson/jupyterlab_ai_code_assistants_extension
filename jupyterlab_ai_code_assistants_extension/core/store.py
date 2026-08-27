@@ -110,7 +110,18 @@ def pid_alive(pid: int) -> bool:
     for an int outside C ``pid_t``. Every pid reaching here was read from a
     record some other program wrote, so without this one value would raise
     through the whole listing rather than cost itself a row (DEF-126).
+
+    The range gate below is the other end of that same argument: a pid at or
+    below zero is a signalling idiom rather than a process handle, and reads
+    dead (DEF-129).
     """
+    # A non-positive value is not a process handle: `os.kill(0, 0)` signals the
+    # CALLER's own group, `os.kill(-1, 0)` every process it may signal, and
+    # `os.kill(-N, 0)` group N - so 0, -1 and -<own pid> all measure ALIVE.
+    # Every pid reaching here was read from a record another program wrote
+    # (DEF-126's case, one value over), and all three call sites want dead.
+    if pid <= 0:
+        return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

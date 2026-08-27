@@ -23,6 +23,10 @@ module.exports = {
     '!src/**/.ipynb_checkpoints/*'
   ],
   coverageReporters: ['lcov', 'text'],
+  // Both gitignored venvs (.venv/ and ui-tests/.venv/, the documented dev
+  // layout) install the same labextension package, and jest-haste-map throws
+  // on the duplicate for any spec that resolves it (DEF-GUARD-139).
+  modulePathIgnorePatterns: ['/\\.venv/'],
   testRegex: 'src/.*/.*.spec.ts[x]?$',
   transformIgnorePatterns: [`/node_modules/(?!${esModules}).+`]
 };

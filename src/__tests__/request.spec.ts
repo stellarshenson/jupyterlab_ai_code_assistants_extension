@@ -195,3 +195,50 @@ describe('requestAPI with a caller-supplied signal', () => {
     ).resolves.toEqual({ ok: true });
   });
 });
+
+describe('requestAPI on a body it cannot parse', () => {
+  it('refuses a 200 that is not JSON instead of returning the raw string', async () => {
+    // DEF-118: every handler in `core/routes.py` finishes `json.dumps`, so a
+    // 200 this helper cannot parse came from something in front of the server.
+    // Returned as data, `status.providers` read `undefined` and every panel
+    // undocked; thrown, the probe FAILS and the last roster stands (DEF-132).
+    makeRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        '<!doctype html><html><head><title>Sign in</title></head><body>SSO</body></html>'
+    } as unknown as Response);
+
+    await expect(requestAPI('status', SETTINGS)).rejects.toThrow(
+      /was not JSON/
+    );
+  });
+
+  it('still resolves an empty 200 body to the empty string', async () => {
+    // The `data.length > 0` guard is untouched: a 204-shaped answer is not a
+    // parse failure and must not become one.
+    makeRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => ''
+    } as unknown as Response);
+
+    await expect(requestAPI('status', SETTINGS)).resolves.toBe('');
+  });
+
+  it('keeps a refused non-JSON body a ResponseError', async () => {
+    // The refusal side is the DEF-116 case - a proxy error page - and it must
+    // keep carrying the body as the `ResponseError` message rather than
+    // becoming the new error.
+    makeRequest.mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: async () => '<html>bad gateway</html>'
+    } as unknown as Response);
+
+    const error = await capture(requestAPI('status', SETTINGS));
+
+    expect(error).toBeInstanceOf(ServerConnection.ResponseError);
+    expect((error as Error).message).toContain('bad gateway');
+  });
+});

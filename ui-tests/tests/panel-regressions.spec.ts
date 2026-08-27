@@ -7,6 +7,7 @@ import {
   STATUS_URL,
   openPanelTab,
   panelId,
+  setProviderEnabled,
   waitForApplication
 } from './shared';
 
@@ -521,4 +522,58 @@ test('DEF-132 - a failed activation probe does not cost the sidebar its panel', 
   // fixture then reds inside `page.goto()` at 30 s waiting for the claude
   // tab; the ABSENT loop above is the only assertion the fixture does not
   // already make.
+});
+
+test('DEF-125 - the PATH warning re-arms once the binary comes back', async ({
+  page
+}) => {
+  const id = ABSENT[0]; // gemini: no stub binary in jupyter_server_test_config.py
+  const infos: string[] = [];
+  page.on('console', (message: any) => {
+    if (
+      message.text().includes('was not found on the') &&
+      message.text().includes(`"${id}"`)
+    ) {
+      infos.push(message.text());
+    }
+  });
+
+  // The roster served to the page: the real one, with this provider's
+  // availability under the test's control.
+  let present = false;
+  await page.route(`**${STATUS_URL}*`, async (route: any) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const provider of body.providers) {
+      if (provider.id === id) {
+        provider.available = present;
+      }
+    }
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.goto();
+
+  // The warning only fires for a provider the user CHOSE to enable, so make
+  // that choice explicitly - this is the `chosen` gate in reconcile.
+  await setProviderEnabled(page, id, true);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect.poll(() => infos.length, { timeout: 10000 }).toBe(1);
+
+  // The CLI is installed: the next roster reports it present, the panel docks.
+  present = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(
+    page.locator(`.lm-TabBar-tab[data-id="${panelId(id)}"]`)
+  ).toBeAttached({ timeout: 10000 });
+
+  // And it is removed again. This is a NEW absence and must warn on its own.
+  present = false;
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect.poll(() => infos.length, { timeout: 10000 }).toBe(2);
+
+  // How this fails: delete the `warnedUnavailable.delete(id)` line in
+  // `reconcile` and the set still holds the id from the first absence, so the
+  // last poll runs its full ten seconds at infos=1 - which is the user
+  // silently losing the only signal that a panel went because its binary did.
 });

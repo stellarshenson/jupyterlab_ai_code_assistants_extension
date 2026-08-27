@@ -132,6 +132,35 @@ def test_an_out_of_range_pid_costs_a_row_a_field_not_the_whole_listing(
     assert store_module.pid_alive(2**63) is False
 
 
+def test_a_non_positive_pid_is_dead_and_never_gates_the_repair(claude):
+    """The defect above, one value over in the other direction (DEF-129).
+
+    ``os.kill(0, 0)`` signals the CALLER's own process group and
+    ``os.kill(-N, 0)`` signals group N, so every non-positive pid used to
+    measure ALIVE. A record carrying ``"pid": 0`` then made a conversation
+    look live forever and the transcript repair a permanent no-op for it -
+    with no log and nothing the user could see.
+    """
+    store, root = claude
+    # The unit: a signalling idiom is not a process handle.
+    assert store_module.pid_alive(0) is False
+    assert store_module.pid_alive(-1) is False
+    assert store_module.pid_alive(-os.getpid()) is False
+
+    # The consequence: the repair runs instead of being gated by that record.
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+    states = root / "sessions"
+    states.mkdir(parents=True, exist_ok=True)
+    (states / "0.json").write_text(
+        json.dumps({"pid": 0, "sessionId": sid, "cwd": PROJECT_PATH}),
+        encoding="utf-8",
+    )
+
+    assert claude_provider.make_continuable(sid) == 1
+    assert _chain_root(path)["type"] == "user"
+
+
 def test_claude_lists_one_row_per_project(claude, scratch_stores):
     store, root = claude
     older, newer = new_uuid(), new_uuid()
@@ -629,6 +658,107 @@ def test_gemini_fork_rewrites_every_metadata_record(gemini):
         parent,
         new_id,
     }
+
+
+def test_gemini_fork_copies_a_record_carrying_a_line_separator_untouched(gemini):
+    """A raw U+2028 and non-ASCII text survive the copy byte for byte.
+
+    ``str.splitlines()`` breaks on U+2028, U+2029 and U+0085 - which a Node
+    CLI's ``JSON.stringify`` writes unescaped - and ``ensure_ascii`` at its
+    default rewrites every non-ASCII character, so either one re-authors the
+    file the fork docstring says is copied through untouched.
+    """
+    store, root = gemini
+    parent = new_uuid()
+    chats = write_gemini_tree(
+        root, GEMINI_SHORT_ID, [{"id": parent, "summary": "Parent", "messages": 2}]
+    )
+    source = next(chats.iterdir())
+    lines = source.read_text(encoding="utf-8").split("\n")
+    content = "line one\u2028line two za\u017c\u00f3\u0142\u0107"
+    lines[1] = json.dumps(
+        {"type": "user", "content": content},
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    source.write_text("\n".join(lines), encoding="utf-8")
+    before = [line for line in source.read_bytes().split(b"\n") if line.strip()]
+
+    new_id = store.fork(GEMINI_SHORT_ID, parent, "Branch")
+    assert new_id
+    copy = next(p for p in chats.iterdir() if new_id[:8] in p.name)
+    raw = copy.read_bytes()
+    after = [line for line in raw.split(b"\n") if line.strip()]
+    assert len(after) == len(before)
+    for line in after:
+        json.loads(line)
+    assert "\u2028".encode() in raw and b"\\u2028" not in raw
+    assert "za\u017c\u00f3\u0142\u0107".encode() in raw and b"\\u017c" not in raw
+
+    # The legacy single-object shape is not written by ``write_gemini_tree``,
+    # so its own re-encode is pinned with a direct call.
+    legacy = gemini_provider.stamp_fork(
+        json.dumps(
+            {
+                "sessionId": parent,
+                "summary": "podsumowanie",
+                "startTime": "x",
+                "lastUpdated": "y",
+                "messages": [{"type": "user", "content": "za\u017c\u00f3\u0142\u0107"}],
+            },
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ),
+        new_uuid(),
+        "Fork",
+    )
+    assert legacy is not None
+    assert "\\u" not in legacy
+
+
+def test_gemini_lists_a_chat_whose_metadata_record_carries_a_line_separator(gemini):
+    """A separator inside the METADATA record hides the whole conversation.
+
+    Split on it, the record shreds into fragments, ``_parse_chat`` never sees
+    ``sessionId`` and the conversation is absent from the listing - a read-only
+    path, not the fork file.
+    """
+    store, root = gemini
+    parent = new_uuid()
+    chats = write_gemini_tree(
+        root, GEMINI_SHORT_ID, [{"id": parent, "summary": "Parent", "messages": 2}]
+    )
+    source = next(chats.iterdir())
+    lines = source.read_text(encoding="utf-8").split("\n")
+    meta = json.loads(lines[0])
+    meta["summary"] = "parent\u2028chat"
+    lines[0] = json.dumps(meta, separators=(",", ":"), ensure_ascii=False)
+    source.write_text("\n".join(lines), encoding="utf-8")
+
+    listing = store.list_branches(GEMINI_SHORT_ID)
+    assert listing is not None
+    seen = {b["session_id"] for b in listing["branches"]} | {listing["current"]}
+    assert parent in seen
+    assert store.fork(GEMINI_SHORT_ID, parent, "Branch") is not None
+
+
+def test_gemini_fork_declines_a_record_that_cannot_be_encoded(gemini):
+    """A lone surrogate survives ``json.loads`` and fails only at the write,
+    where it raises ``UnicodeEncodeError`` - a ``ValueError``, not an
+    ``OSError``. The store method the route awaits bare must not be the thing
+    that raises, and no zero-byte orphan may be left in the chats dir."""
+    store, root = gemini
+    parent = new_uuid()
+    chats = write_gemini_tree(
+        root, GEMINI_SHORT_ID, [{"id": parent, "summary": "Parent"}]
+    )
+    source = next(chats.iterdir())
+    with source.open("a", encoding="utf-8") as fh:
+        fh.write('{"type":"user","content":"bad \\ud800 here","id":"m1"}\n')
+    before = sorted(p.name for p in chats.iterdir())
+
+    assert store.fork(GEMINI_SHORT_ID, parent, "Branch") is None
+    assert sorted(p.name for p in chats.iterdir()) == before
 
 
 def test_gemini_launch_argv_resumes_by_chat_file_never_by_resume(gemini):

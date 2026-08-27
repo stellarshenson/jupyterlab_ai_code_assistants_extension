@@ -253,7 +253,7 @@ def _parse_chat(raw: bytes) -> dict | None:
             if first_prompt is None and message.get("type") == "user":
                 first_prompt = _preview(_content_text(message.get("content")))
     else:
-        for line in text.splitlines():
+        for line in text.split("\n"):
             line = line.strip()
             if not line:
                 continue
@@ -386,11 +386,14 @@ def stamp_fork(text: str, new_id: str, name: str) -> str | None:
         parsed = None
     if isinstance(parsed, dict) and isinstance(parsed.get("sessionId"), str):
         stamp(parsed)
-        return json.dumps(parsed, separators=(",", ":"))
+        return json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
 
     stamped = False
     lines: list[str] = []
-    for line in text.splitlines():
+    # Split on `\n` rather than ``str.splitlines()``, which additionally breaks
+    # on U+2028, U+2029 and U+0085 - a Node CLI's ``JSON.stringify`` writes
+    # those unescaped inside string content, shredding a record into fragments.
+    for line in text.split("\n"):
         line = line.strip()
         if not line:
             continue
@@ -403,7 +406,7 @@ def stamp_fork(text: str, new_id: str, name: str) -> str | None:
             continue
         if isinstance(record, dict) and stamp(record):
             stamped = True
-        lines.append(json.dumps(record, separators=(",", ":")))
+        lines.append(json.dumps(record, separators=(",", ":"), ensure_ascii=False))
     if not stamped:
         return None
     return "\n".join(lines) + "\n"
@@ -793,7 +796,7 @@ class GeminiStore(SessionStore):
                 return None
             with dst.open("w", encoding="utf-8") as fh:
                 fh.write(content)
-        except OSError:
+        except (OSError, UnicodeEncodeError):
             try:
                 dst.unlink()
             except OSError:

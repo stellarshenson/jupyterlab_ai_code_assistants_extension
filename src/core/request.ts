@@ -71,6 +71,7 @@ export function isRequestTimeout(err: unknown): boolean {
  * @returns The response body interpreted as JSON
  * @throws RequestTimeoutError when the deadline passes before the server
  *   answers
+ * @throws Error when a 200 carries a body this helper cannot parse
  */
 export async function requestAPI<T>(
   endPoint: string,
@@ -129,7 +130,26 @@ export async function requestAPI<T>(
     try {
       data = JSON.parse(data);
     } catch {
-      console.log(`${LOG_PREFIX} Not a JSON response body.`, response);
+      if (response.ok) {
+        // DEF-118: every handler in `core/routes.py` finishes `json.dumps`, so
+        // a 200 this helper cannot parse did not come from this server - it is
+        // an SSO or proxy interstitial served in its place. Returning the raw
+        // string let every caller read `undefined` off it: `probeStatus` wrote
+        // a roster with no `providers` and `reconcile` undocked all four
+        // panels, `_fetch` rendered an empty session list, and
+        // `ColourStore.load` replaced the cache with an empty map. Refusing it
+        // makes the probe FAIL, and a failed probe writes nothing (DEF-132),
+        // so the last known roster stands.
+        throw new Error(
+          `Response to ${endPoint} was not JSON (HTTP ${response.status})`
+        );
+      }
+      // Not ok: the `ResponseError` below carries this body as its message, so
+      // this side is no longer a silent path and a proxy's error page here is
+      // noise (DEF-116). This is the conditional DEF-118 recorded - `debug`
+      // only on the refusal side; the 200 side is now louder than the `warn`
+      // it asked for.
+      console.debug(`${LOG_PREFIX} Not a JSON response body.`, response);
     }
   }
 

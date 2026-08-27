@@ -296,6 +296,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
             { autoClose: 8000 }
           );
         }
+        // The latch is per ABSENCE, not per page load. Once the server reports
+        // the binary present again, a later disappearance gets its own warning:
+        // without this, one transient absence - a CLI upgrade unlinking the
+        // binary for a moment, or an obsolete roster from an overlapping probe -
+        // permanently suppresses the real one (DEF-125). It cannot make the
+        // warning repeat while the state is unchanged, which is what the
+        // once-per-id latch above exists to prevent: the two conditions are
+        // mutually exclusive.
+        if (probe !== null && probe.available !== false) {
+          warnedUnavailable.delete(id);
+        }
         if (enabled && available) {
           if (live.has(id)) {
             const panel = live.get(id)!.panel;

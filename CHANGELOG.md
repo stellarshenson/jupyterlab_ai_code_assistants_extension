@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.1] - 2026-08-28
+
+### Changed
+
+- Version line moved to 1.2 to mark the Launcher tiles as a feature release; the content is that of 1.1.13
+
 ## [1.1.13] - 2026-08-28
 
 ### Added

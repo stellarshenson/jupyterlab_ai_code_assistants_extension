@@ -183,3 +183,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 60. **Task [Short] - Release of the Launcher tiles** (v1.1.12): Shipped entries 52 to 59 - the Launcher tiles, the joint robot-head section icon, the section after Other, the launch-argv route and the lockfile repair - to npm and PyPI via the release lane<br>
     **Result**: `CHANGELOG.md` section written, README gains the Launcher feature, lint clean, `make publish` owns the version bump.
+
+61. **Task [Short] - Release opening the 1.2 line** (v1.2.0): Shipped the user-ordered minor bump from 1.1.13 to the 1.2 line via the release lane; same content as 1.1.13<br>
+    **Result**: `package.json` and the two root entries of `package-lock.json` set to 1.2.0 by hand on the user's word, `make publish` owns the patch from there.

@@ -32,8 +32,12 @@ dependencies = [
     # non-bundled webpack singleton (package.json sharedPackages), so it must be
     # present at runtime or the whole extension fails to load with "Shared
     # module jupyterlab_colourful_tab_extension doesn't exist in shared scope".
-    # 1.0.19 is the npm floor; PyPI's nearest release is 1.0.20.
-    "jupyterlab_colourful_tab_extension>=1.0.19",
+    # 1.1.20 is the release that first ships the ownership API this extension
+    # depends on - claim() and the colourChanged signal - together with the
+    # server route reporting each terminal's pty incarnation. Below it the
+    # extension loads and tints nothing, which is the degraded mode the
+    # runtime probe still covers for anyone pinning an older companion.
+    "jupyterlab_colourful_tab_extension>=1.1.20",
     # The move-to-trash half of every destructive action. jupyter_server pulls
     # it in transitively today, but a delete that promised the user a
     # recoverable outcome must not depend on somebody else's dependency graph.

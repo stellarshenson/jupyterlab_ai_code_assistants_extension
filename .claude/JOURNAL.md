@@ -195,3 +195,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 64. **Task [Short] - Ignore the logs directory** (v1.2.4): `logs/` added to `.gitignore`<br>
     **Result**: `*.log` already covered the log files, so the rule took effect only once the 66 tracked entries under `logs/` - `README.md` and 65 adversarial review transcripts - were untracked with `git rm --cached`. Files stay on disk and in history; a fresh clone no longer carries them.
+
+65. **Task - Raise the companion floor to the release carrying the ownership API** (v1.2.5): `package.json` to `^1.1.20` and `pyproject.toml` to `>=1.1.20`, now that `jupyterlab_colourful_tab_extension` 1.1.20 is on both registries<br>
+    **Result**: The floors still named 1.0.19, so a fresh install resolved the companion to the newest release satisfying it and got one without `claim` or `colourChanged`; `tabColourOwner` then narrowed to null and every assistant tab went untinted behind a warning notification. The floor could not be raised earlier because a floor naming an unpublished version cannot be installed. The runtime probe stays regardless - a floor binds the install only, and an operator can downgrade the companion afterwards. `docs/design-tab-colour-ownership.md` corrected on the same point, since it stated the floors still named 1.0.19.

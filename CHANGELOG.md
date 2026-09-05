@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.5] - 2026-09-05
+
+### Changed
+
+- `jupyterlab_colourful_tab_extension` is now required at 1.1.20 or newer (`^1.1.20` in `package.json`, `>=1.1.20` in `pyproject.toml`), which is the release that carries the tab ownership API and the terminal fingerprint route. Until now the requirement named 1.0.19, so a fresh install resolved to a companion without that API and every assistant tab went untinted behind a warning; the floor could not name 1.1.20 before it was published. The runtime check stays in place, because a requirement binds the install and a companion can be downgraded after it
+
 ## [1.2.4] - 2026-09-05
 
 ### Fixed

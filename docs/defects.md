@@ -196,6 +196,16 @@ Package manifest, shared-package and template leftovers that decide whether the 
   - test-tags: integration
   - log: 2026-08-27T22:03:53Z @kj added
   - log: 2026-08-27T22:03:53Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [ ] `DEF-PACK-165` **Installing this extension reinstalls the published companion over a locally built one** - MINOR; The PyPI dependency on jupyterlab_colourful_tab_extension is a lower bound, so pip satisfies it from PyPI on every install of this extension's wheel and replaces a locally built companion. Observed on 2026-09-05: make install here downgraded a locally built 1.1.17 to the published 1.1.16 and took its server extension with it. Local verification of anything spanning the two therefore requires installing the companion LAST. The same mechanism means CI exercises the published companion, never the local one
+  - repro: make install in the companion, then make install here, then jupyter server extension list
+  - test-tags: MANUAL
+  - root-cause: 2026-09-04T23:14:04Z @kj A version floor cannot express preferring what is already installed
+  - log: 2026-09-04T23:14:04Z @kj added
+- [ ] `DEF-PACK-173` **The companion misses two house conventions the sibling extensions hold** - MINOR; Its server route prefix is colourful-tab, where six sibling extensions serving routes use their hyphenated package name, and the same literal is re-spelled in six places rather than read from the handler module. Its server config ships from jupyter-config/jupyter_server_config.d/ where thirty siblings use jupyter-config/server-config/, six of them scaffolded from the same copier commit. Both install to the same place and neither harms a user; the cost is that a maintainer or a tooling glob keyed on the house path misses this repository. Declined in round six: the route prefix becomes a compatibility promise once the companion publishes, so the cheap moment to change it is before that
+  - repro: Compare jupyter-config/ and the route prefix constant against any sibling extension serving routes
+  - test-tags: MANUAL
+  - root-cause: 2026-09-04T23:56:35Z @kj The server half was added to a repository that had never had one, so it followed no local precedent
+  - log: 2026-09-04T23:56:35Z @kj added
 
 ## Retirement and migration `RETI`
 
@@ -358,6 +368,16 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: unit
   - log: 2026-08-27T22:03:53Z @kj added
   - log: 2026-08-27T22:03:53Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [ ] `DEF-PANE-169` **The default tab palette collapses to three distinguishable colours under red-green colour blindness** - MINOR; Measured on the companion's shipped defaults with a Vienot LMS dichromacy simulation and CIE76 colour difference. Under deuteranopia the light inactive palette gives peach against mint 1.7, below the roughly 2.3 just-noticeable threshold, so they are the same pixel; the dark palette gives sky against lavender 1.1 and peach against mint 2.4. Under protanopia the light palette gives sky against lavender 2.9. The same-colour divider draws its seam only between two adjacent tabs carrying the SAME colour id, so two tabs the user deliberately set to different colours fuse into one seamless block for a deuteranope - the exact failure the divider exists to prevent. Nothing non-colour carries the signal. Bounded to MINOR because the palette is user-editable in settings. Pre-existing, not introduced by the tab-colour ownership change
+  - repro: Render the six default tab colours through a deuteranopia simulation and compare peach against mint
+  - test-tags: MANUAL
+  - root-cause: 2026-09-04T23:56:14Z @kj The six defaults were chosen to separate by hue, and hue is the axis dichromacy removes
+  - log: 2026-09-04T23:56:14Z @kj added
+- [ ] `DEF-PANE-170` **Three vocabularies name the six tab colours, and the menu labels name colours the pixels are not** - MINOR; The companion's right-click menu labels the six Red, Orange, Yellow, Green, Blue and Purple, their ids are rose, peach, lemon, mint, sky and lavender, and the rendered shades are pastels - the dark theme's Yellow is a dark olive and its Red a maroon-brown. The id vocabulary is what this extension's store, its HTTP API and its Python providers speak, so a user who reads a settings key or a log line meets a third name for the thing they clicked. The colour picker also carries no current-selection mark and offers Clear on tabs with nothing to clear. Pre-existing; declined in round six as user-visible churn on a pre-existing vocabulary
+  - repro: Open the tab context menu in the dark theme and compare the label Yellow against the rendered swatch
+  - test-tags: MANUAL
+  - root-cause: 2026-09-04T23:56:15Z @kj The labels were written for a menu and the ids for a wire format, independently
+  - log: 2026-09-04T23:56:15Z @kj added
 
 ## Colour store `COLO`
 
@@ -382,6 +402,60 @@ Client colour store ordering, inheritance on fork and tint lifecycle
   - log: 2026-08-10T00:00:00Z @kj reported: reported by the bug-hunter adversary (whole-repo round 6, MINOR) citing `terminals.ts:432` and an unwired `clearColours()`; both are wrong and the impact agent said so - `clearColours` IS wired, from the `colourfulTabs` setter (`terminals.ts:262`) and from panel disposal (`panel.ts:217`), and `_applyColour` is never reached to be blamed. The mechanism above is the corrected one
   - log: 2026-08-10T00:00:00Z @kj deferred: bounded and self-clearing - the tint lives only on the widget's `title.className`, so it dies on reload or when the tab closes, and no stored colour, session or file is affected. The only honest fix is a client-side `Set` of the widget references this panel has tinted, so `clearColours` can reach them without asking a server that is now refusing - new retention and new state in a method with zero test coverage, which is exactly the shape that made 11 of this ledger's entries fix-induced
   - log: 2026-08-10T00:00:00Z @kj closed by ruling (Star Colonel's direction, close-19 campaign): wontfix. Bounded and self-clearing - the tint lives only on `title.className`, dies on reload or tab close, and no stored colour, session or file is affected. The only fix is a client-side `Set` of tinted widget references in a method with zero test coverage - new retention, new state, the exact shape this ledger's fix-induced entries share. The defect costs a transient cosmetic; the fix prices as the next entry
+- [x] `DEF-COLO-155` **Scraped tab colour promoted to a hand-set override** - MAJOR; reconcileColours read the companion extension's localStorage to discover a user-picked tab colour, and wrote what it found into the per-conversation colour store as hand-set. That storage is keyed by terminal session name; terminado recycles those names, so a dead terminal's colour was read back for a new terminal and became a permanent override outranking the conversation's own /color. Observed 2026-09-04 on conversation f5dec114 in jupyterlab_advanced_markdown_viewer_extension - four agent-color orange records in the transcript, tab rendered green, only a colour picked on the tab itself changed it. Root cause is the input, not the ladder or the store
+  - evidence: The scrape is gone: readUserSetTabColour and TAB_COLOUR_STORAGE_KEY removed from src/core/colour.ts, capture replaced by the companion's colourChanged signal, so only a click can produce a choice. Traced exhaustively by an adversarial lens - ColourStore.set(handSet) is reachable only from _fileChoice, whose two callers both descend from the signal, which is emitted only inside a command requiring a right-clicked tab. Pinned by src/__tests__/tab-colour-capture.spec.ts asserting the paint pass makes no Storage.getItem call. The visual half is closed by the companion's incarnation fingerprint; ui-tests/tests/terminal-fingerprints.spec.ts proves against a real server that terminado reissues a closed terminal's name and that the fingerprint differs. 193 jest / 192 pytest here, 110 jest / 10 pytest in the companion, 42 + 4 Galata
+  - related: fix designed in docs/design-tab-colour-ownership.md - capture becomes a colourChanged signal, ownership declared with claim(), and the companion gains a per-terminal incarnation fingerprint
+  - repro: Colour a terminal tab, shut that terminal down, open a new terminal that takes the same name, start an assistant in it - the new tab wears the dead terminal's colour and /color cannot change it
+  - test-tags: UNIT, E2E
+  - log: 2026-09-04T19:44:10Z @kj added
+  - log: 2026-09-04T19:44:16Z @kj cause confirmed: deadTerminalIds in the companion drops only ids ABSENT from the running list, and a recycled name is present, so the companion's prune structurally cannot see the substitution
+  - log: 2026-09-04T23:14:23Z @kj closed
+- [x] `DEF-COLO-157` **A colour write already on the wire is not undone when tab colouring is switched off** - MINOR; _captureColour re-checks the tab-colouring setting before the store write, but a write already issued cannot be recalled. Switching Coloured Tabs off during the POST leaves the colour on the hand-set rung of a ladder this extension has stopped drawing, and it surfaces when the setting is turned back on. Ruled: undoing it means a compensating delete that can itself fail, and the colour is the one the user asked for moments earlier
+  - related: DEF-COLO-155 - both are consequences of the ownership change
+  - evidence: Raised by the round-three bug-hunter at src/core/terminals.ts. The guard before the write is present and tested; only the in-flight window remains. A compensating delete can fail in the same ways the write can, and would leave the store in a state neither the user nor the code intended
+  - repro: Pick a colour on an assistant terminal tab and untick Coloured Tabs within the colour store round trip
+  - test-tags: UNIT
+  - log: 2026-09-04T21:50:09Z @kj added
+  - log: 2026-09-04T21:50:18Z @kj closed: ruled: logged not fixed
+- [x] `DEF-COLO-158` **A pick can be stamped with a fingerprint one incarnation out of date** - MINOR; The colour command stamps a pick with the fingerprint from the cached map when the terminal is already in it, and refetches only when it is absent. A terminal that dies and is recreated inside one HTTP round trip of the pick can therefore be stamped with the dead incarnation's fingerprint, and the next prune drops the colour. Ruled: the window is one round trip against an event the user themselves triggers, and the failure is a lost colour rather than a wrong one - the class of failure this whole change exists to remove is the opposite
+  - evidence: Raised by the round-three bug-hunter at the companion's src/index.ts. Requires a terminal to die and be recreated inside one HTTP round trip of a user click. The consequence is a colour dropped by the next prune, which is the safe direction: a lost colour is visible and re-settable, a wrongly inherited one is DEF-COLO-155
+  - repro: Pick a colour on a terminal, and within the same HTTP round trip shut that terminal down and create one that takes its name
+  - test-tags: UNIT
+  - log: 2026-09-04T21:50:09Z @kj added
+  - log: 2026-09-04T21:50:18Z @kj closed: ruled: logged not fixed
+- [x] `DEF-COLO-159` **A held colour choice outlives both the pick that replaced it and the conversation it was made in** - MAJOR; A colour picked in the window before the CLI writes its conversation id is held and re-attempted by the next reconcile pass. Two sequences file it wrongly. In the first, a second pick on the same tab files successfully and the reconcile that capture awaits then replays the held earlier pick straight over it, so the user's newest choice is silently discarded. In the second, the assistant exits and is started again in the same terminal - the widget id never changes - and the held pick is filed as hand-set against the NEW conversation, which the user picked no colour for
+  - related: DEF-COLO-155 - the same shape, one layer up: a dormant colour re-asserting itself over the user's real intent
+  - evidence: Fixed in src/core/terminals.ts: the capture drops the held choice for that widget before filing a newer one, and _dropStalePending also drops it when the probe POSITIVELY answers that the terminal is no longer this assistant's. Three tests in src/__tests__/tab-colour-capture.spec.ts, each mutation-checked - neutralising the capture delete fails one, inverting the disowned condition fails two in both directions. 193 jest green
+  - repro: Launch an assistant, right-click its tab and pick a colour before the CLI writes the conversation, then pick a second colour once it has. The first colour wins
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:13:19Z @kj The hold was released on only one condition, the terminal closing. Its premise is narrower than that: this provider's terminal, conversation not readable yet. A newer pick that CAN be filed falsifies the second half, and the terminal ceasing to run this assistant falsifies the first
+  - log: 2026-09-04T23:13:19Z @kj added
+  - log: 2026-09-04T23:13:26Z @kj closed
+- [ ] `DEF-COLO-161` **A pick made on a claim that has lapsed but not yet been released is lost, and takes the tab's dormant colour with it** - MINOR; Claims are released at the end of a reconcile pass and the pass runs every 30 seconds, so a tab stays claimed for up to that long after the assistant exits. A pick inside that window takes the companion's claimed branch: it persists nothing and deletes the entry it held. The assistant then probes, gets not-running, and correctly files nothing. Nothing holds the choice, and the colour that was stored before the assistant started is gone too, so the tab goes blank at the next tab switch rather than reverting
+  - repro: Colour a terminal, start an assistant in it, type /exit, then within 30 seconds pick a different colour on that tab and switch tabs
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:13:41Z @kj The claim is the companion's only signal that another extension will persist the colour, and it outlives the ownership it stands for by up to one pass
+  - log: 2026-09-04T23:13:41Z @kj added
+- [ ] `DEF-COLO-162` **A superseded fingerprint fetch republishes its stale snapshot over the newer map** - MINOR; resolveFingerprint in the companion publishes a fetched map only when its own fetch number is still the latest, and answers the caller from its own response either way. In the ordinary case where both fetches succeed, the overtaken answer can name a terminal the newer published map has already superseded, so a pick is stamped with a fingerprint the very next prune finds unequal and deletes. The rule is right only when the newer map does not hold the name
+  - repro: Issue two fingerprint fetches, let the older one answer last with a name the newer map also holds, then pick a colour on that terminal
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:13:51Z @kj Freshness is judged two ways at once - the publish ranks answers by issue order, the stamp by the answer the fetch itself received
+  - log: 2026-09-04T23:13:51Z @kj added
+- [ ] `DEF-COLO-163` **The prune leaves a recycled name's colour painted on a claimed tab until the next tab re-render** - MINOR; The prune deletes a stale entry for a claimed tab but no longer strips the colour class from it, because on a claimed tab the owner is the painter and stripping would take the owner's own tint away. Where the class came from the unclaimed repaint that ran before the claim landed, it stays until Lumino rebuilds the tab's class attribute at the next tab switch
+  - repro: Colour a terminal, close it, let terminado recycle its name, start an assistant in the new terminal and watch the tab before switching tabs
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:13:51Z @kj One guard serves two painters. The prune cannot tell a class the owner painted from a class its own earlier repaint painted
+  - log: 2026-09-04T23:13:51Z @kj added
+- [ ] `DEF-COLO-167` **A colour lost to a refused store write reverts the tab with only a console line** - MINOR; When the colour store refuses the write, or the terminal probe does not answer, the capture path warns to the console and returns. The class the companion put on the tab element survives only until Lumino rebuilds the tab from the widget title, so the user watches their colour apply and then revert with no account of it. The inverse gesture does tell them - the panel's colour release raises an inline error, on the stated reasoning that a failure the user never sees reads as a reset that silently did nothing. Round six declined the fix: both triggers are server failure states rather than the permanent, everything-is-plain condition the version-floor notification was added for
+  - repro: Make the colours route refuse, then pick a colour on an assistant terminal tab and switch tabs
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:56:01Z @kj The set direction was instrumented for the developer and the release direction for the user
+  - log: 2026-09-04T23:56:01Z @kj added
+- [ ] `DEF-COLO-168` **A newer pick that cannot be filed does not supersede a held one, so the older pick wins** - MINOR; A choice held because its conversation was unreadable is superseded only on the path where a newer pick CAN be filed. Pick a colour, let the probe route fail transiently, pick a different colour: the second is dropped with a warning and the first is filed once the conversation becomes readable. The user's newest choice loses to their older one. Declined in round six because the remedy makes the user's action override the rule that a failed probe is not evidence, an invariant two earlier rounds settled
+  - repro: Pick a colour before the CLI writes the conversation, break the probe route, pick another colour, then restore the route
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:56:01Z @kj Supersession is keyed on whether the newer choice could be filed rather than on the newer choice having been made
+  - log: 2026-09-04T23:56:01Z @kj added
 
 ## Guards, tests and tooling `GUARD`
 
@@ -693,3 +767,36 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - test-tags: unit
   - log: 2026-08-27T22:03:54Z @kj added
   - log: 2026-08-27T22:03:54Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-GUARD-156` **No end-to-end test crosses the two colour extensions** - MINOR; Tab colour ownership is a contract between this extension and jupyterlab_colourful_tab_extension - the colourChanged signal, claim(), and the terminal fingerprint route. Both sides are unit tested against that contract with the other side mocked, so a drift on one side alone passes both suites. Closing it needs both wheels installed into the ui-tests environment and a Galata case picking a colour on an assistant terminal tab, reloading, and asserting it survives
+  - evidence: Both sides carry unit coverage of the contract: the companion's jest suite covers the signal payload, the claim lifecycle and the fingerprint prune; this extension's src/**tests**/tab-colour-capture.spec.ts covers the handler and asserts the paint pass reads no browser storage at all. Closing the gap needs both wheels in ui-tests/.venv, which is a separate piece of work
+  - related: DEF-COLO-155 - the defect whose fix introduced this contract
+  - repro: Change the colourChanged payload shape in the companion only - both repositories' suites stay green
+  - test-tags: E2E
+  - log: 2026-09-04T20:28:53Z @kj added
+  - log: 2026-09-04T20:29:07Z @kj closed: ruled: logged not fixed, per the house rule that MINORs are logged rather than fixed
+- [ ] `DEF-GUARD-160` **The lib freshness guard accepts tsconfig.tsbuildinfo as proof, so four parity checks pass over a stale lib** - MEDIUM; _require_fresh_lib in jupyterlab_ai_code_assistants_extension/tests/test_descriptor_parity.py compares the newest src TypeScript mtime against the newest emitted JavaScript mtime, but substitutes tsconfig.tsbuildinfo's mtime when that is newer. tsc writes tsbuildinfo on a no-op incremental check, so the guard returns early over a lib that was never re-emitted. Observed on 2026-09-05 with every lib file dated 2026-08-28 and lib/core/colour.js still carrying readUserSetTabColour, which src/core/colour.ts no longer has. The four descriptor-parity assertions were green against that lib
+  - repro: Edit a file under src/, run tsc --noEmit, then run pytest jupyterlab_ai_code_assistants_extension/tests/test_descriptor_parity.py. The freshness guard passes without lib/ having been rebuilt
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:13:40Z @kj The substitution was meant to tolerate a build that emitted nothing because nothing changed. It cannot tell that case apart from a build that never ran
+  - log: 2026-09-04T23:13:40Z @kj added
+- [ ] `DEF-GUARD-164` **The Galata suite cannot reach the colour capture path, because its stub assistant is never recognised** - MINOR; Every colour behaviour hangs off the terminal probe answering that the process is this provider's assistant. The suite's stub binaries are shell scripts, so the probed process tree never matches and the probe answers not-running for every terminal the suite launches. A browser-level test of the capture path would therefore pass with the defect fully present, which is why one was written and discarded rather than kept. The version floor IS covered in a browser (ui-tests/tests/tab-colour-ownership.spec.ts), because the announcement happens at panel construction rather than at probe time
+  - repro: Seed a colour into the companion's browser storage, launch an assistant from the panel, and observe that the probe answers not-running so no capture path is entered
+  - test-tags: E2E
+  - root-cause: 2026-09-04T23:14:04Z @kj The stub is deliberately unrecognisable - claude-regression.spec.ts relies on the reuse ladder never matching, so every open spawns an independent terminal
+  - log: 2026-09-04T23:14:04Z @kj added
+- [ ] `DEF-GUARD-166` **Prettier silently corrupts test-file paths in the pm-tools ledger documents** - MINOR; docs/defects.md and docs/acc-crit-jupyterlab-ai-code-assistants.md were inside prettier's glob, and prettier reads the double underscores in a path like src/__tests__/x.spec.ts as markdown bold, rewriting it to src/**tests**/x.spec.ts. Seven evidence, test and repro lines already carry the corrupted form - acc-crit lines 460, 461 and 602, defects lines 713, 739, 741 and 746 - each naming a file that does not exist under that path. The two documents are now in .prettierignore, on the same reasoning as the journal: their format is gated by pm-tools check, not by prettier
+  - repro: Write an evidence line naming src/__tests__/anything.spec.ts through pm-tools, then run jlpm prettier --write on the document
+  - test-tags: MANUAL
+  - root-cause: 2026-09-04T23:16:36Z @kj Two tools own one file. Prettier's markdown emphasis rules are not aware that these lines carry filesystem paths
+  - log: 2026-09-04T23:16:36Z @kj added
+  - log: 2026-09-04T23:55:48Z @kj edited text
+- [ ] `DEF-GUARD-171` **Dead weight in the companion colour test and comment surface** - MINOR; Round six's slop-hunter lens confirmed five items by running delete-tests, and round six declined all five as immaterial or pre-existing. Two companion tests declare a literal colour array in the test body and assert its length, reaching nothing under src/, and one colour they pin appears nowhere in the source; they are pre-existing and the house rule is to name pre-existing dead code rather than delete it. One claim test stays green under both mutants it should die to, because its entry is fingerprint-verified so it takes the unclaimed path and duplicates its neighbour. The companion's class docstring restates its own interface docstring paragraph for paragraph. This extension has one redundant capture test whose assertions are all shared with its neighbour, and one pure fast-path guard whose removal changes nothing. A fifth byte-identical copy of the web-components jest stub extends DEF-GUARD-154's already-ruled class
+  - repro: Delete each named construct in a scratch copy and run the suite - it stays green
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:56:35Z @kj Six adversarial rounds each added tests and comments to answer a finding, and nothing removed the ones a later round made redundant
+  - log: 2026-09-04T23:56:35Z @kj added
+- [ ] `DEF-GUARD-172` **The companion server route guards a pty state the framework cannot produce** - MINOR; The fingerprint route skips a registry entry whose ptyproc or pid is absent. Verified against the installed packages that this cannot happen: terminado's PtyWithClients always sets ptyproc from a spawn, and a PtyProcess always carries an integer pid. The sibling guard for an absent registry is KEPT - the lens could not name an in-universe manager without one, but terminal_manager is a settings entry a downstream server can replace, so deleting it would remove a fail-safe on the one input nobody could rule out. The guard for a missing terminal_manager is also kept and is genuinely reachable, because terminals_enabled false leaves the key absent
+  - repro: Read terminado.management.PtyWithClients.__init__ and confirm ptyproc is set unconditionally
+  - test-tags: UNIT
+  - root-cause: 2026-09-04T23:56:35Z @kj The pid guard was written defensively by analogy with the two guards beside it, which are reachable
+  - log: 2026-09-04T23:56:35Z @kj added

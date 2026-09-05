@@ -1255,11 +1255,14 @@ export class AssistantSessionsPanel extends Widget {
    * until the next reconcile tick. One request for the whole set, so a release
    * is never left half applied.
    *
-   * The colourful-tab extension's own menu record is normally consumed when
-   * the colour is captured, so this is the release. A tab closed in the window
-   * between the capture write and the paint keeps that record, and reopening
-   * the terminal re-captures the colour - rare, and visible rather than
-   * silent, since the tab still wears it. */
+   * The colourful-tab extension persists nothing for a tab this extension has
+   * claimed, so it holds no record of the released colour to drop alongside
+   * the store entry: dropping that entry and repainting is the whole of it.
+   * Clearing the colour on the tab itself reaches the same place by the other
+   * route - the
+   * companion reports it as a choice with no colour and the handler forgets
+   * the conversation - but only for a conversation whose terminal is open and
+   * probes as this assistant's, which is why this path exists as well. */
   private async _resetColours(sessionIds: string[]): Promise<void> {
     if (!(await this._colours.forget(sessionIds))) {
       // No refresh afterwards: `_fetch` clears the inline error, and a failure
@@ -2314,11 +2317,13 @@ export class AssistantSessionsPanel extends Widget {
       }
     });
 
-    // The only way back out of a hand-set tab colour. The colourful-tab
-    // extension's own Clear touches its storage and the tab's classes, neither
-    // of which this extension reads once the colour is in its store, so
-    // without this item the override would be permanent - and on a native
-    // assistant that means `/color` silently never showing again.
+    // The way back out of a hand-set tab colour for a conversation whose
+    // terminal is not open. Clear on the tab itself is reported by the
+    // colourful-tab extension as a choice with no colour and does drop the
+    // override, but only for the conversation that terminal is running - so
+    // without this item an override on a branch with no tab open would be
+    // permanent, and on a native assistant that means `/color` silently never
+    // showing again.
     //
     // It covers every conversation of the row, not just the current one: a
     // terminal opened on a branch files its colour under THAT branch, and this

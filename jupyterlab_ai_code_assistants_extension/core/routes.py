@@ -576,8 +576,8 @@ class ColoursHandler(_ProviderHandler):
 
     A write that cannot be persisted answers 500 rather than 200. Elsewhere a
     colour is decoration and a failed write costs only the tint, but here the
-    colour IS the request - and the frontend releases the tab's own record of
-    the choice once it believes the store holds it.
+    colour IS the request - and this store is the only record of it, because
+    the companion extension never persists a tab another extension has claimed.
     """
 
     async def _finish_store(self, provider: registry.Provider) -> None:

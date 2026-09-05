@@ -327,10 +327,11 @@ def test_dropping_a_conversation_drops_its_override_marker():
 def test_a_colour_that_cannot_be_persisted_is_not_reported_as_stored(monkeypatch):
     """The write-back's answer is what the frontend trusts before it paints.
 
-    Painting a tab makes the companion extension release its own record of the
-    user's choice, so a write reported as stored but absent from disk destroys
-    the colour. Everywhere else a colour is decoration and a failed write costs
-    only the tint - here the colour IS the request.
+    This store is the only record of the user's choice, because the companion
+    extension persists nothing for a tab another extension has claimed, so a
+    write reported as stored but absent from disk destroys the colour.
+    Everywhere else a colour is decoration and a failed write costs only the
+    tint - here the colour IS the request.
     """
     monkeypatch.setattr(
         colour_store,

@@ -4,6 +4,22 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.4] - 2026-09-05
+
+### Fixed
+
+- A terminal tab could keep showing a colour that belonged to a conversation which had already ended, and the assistant's own `/color` was then powerless to change it. The server hands a closed terminal's number to the next terminal opened, and a colour stored against that number was read back as a colour you had chosen, which outranks everything the assistant picks. Colours you pick are now learned from the pick itself instead of being read out of the companion extension's browser storage, so a stored value can no longer be mistaken for a choice, and a colour kept against a terminal number survives only while the process behind that number is unchanged
+- Clearing a colour from the tab's own right-click menu now releases the colour recorded for that conversation, for a conversation whose terminal is open; before, only `Reset Tab Colour` could undo it
+
+### Changed
+
+- Terminal tab tinting now requires `jupyterlab_colourful_tab_extension` at the release that reports the colours you pick and lets another extension own a tab. Against an older companion this extension tints no tabs at all and says so once, in a notification that stays until dismissed; the companion's own right-click colours are unaffected
+- A terminal running an assistant is claimed with the companion, so the companion stores nothing for that tab and the two extensions no longer hold competing records of one tab's colour
+
+### Added
+
+- Design note `docs/design-tab-colour-ownership.md` describing the ownership protocol across the two extensions
+
 ## [1.2.1] - 2026-08-28
 
 ### Changed

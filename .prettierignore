@@ -8,3 +8,9 @@ eslint.config.mjs
 .venv
 tmp
 graphify-out
+# Owned by pm-tools, gated by `pm-tools check docs/`, not by prettier. Prettier
+# reads the double underscores in a path like src/__tests__/x.spec.ts as bold
+# and rewrites it to src/**tests**/x.spec.ts, so every evidence line naming a
+# test file was being silently corrupted (DEF-GUARD-166).
+docs/defects.md
+docs/acc-crit-jupyterlab-ai-code-assistants.md

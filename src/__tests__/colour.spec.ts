@@ -1,10 +1,12 @@
 /**
  * The colour ladder, and the write-back store under it.
  *
- * The hazard every `ColourStore` case below turns on: painting a tab makes the
- * companion extension release its own record of the user's choice, so a paint
- * that follows a write the server did not take destroys the colour with
- * nothing left holding it. `TerminalManager.reconcileColours` is the gate.
+ * The hazard every `ColourStore` case below turns on: a claimed tab is the one
+ * store the user's choice has, because the companion extension persists
+ * nothing for a tab this extension has claimed. So the answer these
+ * cases assert is what decides whether a choice survives at all -
+ * `TerminalManager` gates its repaint on it, and `_captureColour` paints
+ * nothing when the write is refused.
  *
  * Highest wins: a user-set colour, then the conversation's own colour for a
  * `native` assistant, then the derived hash, then nothing. Each step is a pure
@@ -17,7 +19,6 @@ import {
   TAB_COLOUR_IDS,
   effectiveColour,
   fnv1aColour,
-  readUserSetTabColour,
   sessionForCwds
 } from '../core/colour';
 import { readFileSync } from 'fs';
@@ -114,29 +115,6 @@ describe('effectiveColour', () => {
   it('answers nothing without a conversation', () => {
     expect(effectiveColour(null, 'derived', null, null)).toBeNull();
     expect(effectiveColour(null, 'none', null, null)).toBeNull();
-  });
-});
-
-describe('readUserSetTabColour', () => {
-  afterEach(() => window.localStorage.clear());
-
-  it('reads the colourful-tab extension menu choice', () => {
-    window.localStorage.setItem(
-      'jupyterlab-colourful-tab-colours',
-      JSON.stringify({ 'terminal:1': 3 })
-    );
-    expect(readUserSetTabColour('1')).toEqual('mint');
-  });
-
-  it('answers null for a terminal with no choice, and never throws', () => {
-    expect(readUserSetTabColour('1')).toBeNull();
-    window.localStorage.setItem('jupyterlab-colourful-tab-colours', 'not json');
-    expect(readUserSetTabColour('1')).toBeNull();
-    window.localStorage.setItem(
-      'jupyterlab-colourful-tab-colours',
-      JSON.stringify({ 'terminal:1': 99 })
-    );
-    expect(readUserSetTabColour('1')).toBeNull();
   });
 });
 
@@ -244,8 +222,8 @@ describe('ColourStore origins', () => {
     // that one write - a moment this caller did not order. Taking it whole
     // would let a POST whose answer happens not to carry another
     // conversation's colour drop that colour from the cache while the server
-    // still holds it, and the tab, already painted, has lost its own record by
-    // then.
+    // still holds it, and the cache is what the next pass paints that
+    // conversation's tab from.
     const colours = store();
     request.mockResolvedValueOnce({
       colours: { [SESSION_A]: 'sky' },
@@ -330,9 +308,10 @@ describe('ColourStore origins', () => {
 
   it('puts nothing in the cache before the server has taken it', async () => {
     // The capture gate reads the cache to decide whether the store is holding
-    // a colour, and paints on the strength of it - which is what makes the
-    // companion extension drop its own record. An entry that is merely hoped
-    // for is indistinguishable from a stored one to every reader.
+    // a colour, and paints on the strength of it - and this store is the only
+    // record there is, because the companion extension persists nothing for a
+    // tab this extension has claimed. An entry that is merely hoped for is
+    // indistinguishable from a stored one to every reader.
     const colours = store();
     let land = (_: any) => undefined as void;
     request.mockReturnValueOnce(

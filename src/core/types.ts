@@ -276,6 +276,43 @@ export interface IColourStoreResponse {
   overrides?: string[];
 }
 
+/** One colour choice made on a tab, as `jupyterlab_colourful_tab_extension`
+ * reports it: the widget whose tab was coloured, and the colour id chosen -
+ * null when the user cleared the colour. The id is the colour's NAME rather
+ * than an index into a palette, so the companion can reorder or rename its
+ * six colours without silently repainting every captured conversation. */
+export interface IColourChoice {
+  widgetId: string;
+  colourId: string | null;
+}
+
+/** The two members `jupyterlab_colourful_tab_extension` grew so that another
+ * extension can own a tab's colour: the signal that reports a choice, and the
+ * claim that stops the companion persisting a tab another extension owns.
+ *
+ * Declared structurally here instead of being read off the imported
+ * `IColourfulTabs`, because this repository compiles against the PUBLISHED
+ * companion typings, which carry `setColour` alone. Typing the members as
+ * optional and probing for them at run time is the one shape that both builds
+ * against those typings and degrades honestly against an older companion at
+ * run time. Honestly means all the way: where the probe fails this extension
+ * leaves tabs alone rather than painting ones whose colours it could never be
+ * told about. Both members ship in the same companion release, so one probe
+ * answers for the pair. */
+export interface ITabColourEvents {
+  colourChanged?: {
+    connect(
+      slot: (sender: unknown, choice: IColourChoice) => void,
+      thisArg?: unknown
+    ): boolean;
+    disconnect(
+      slot: (sender: unknown, choice: IColourChoice) => void,
+      thisArg?: unknown
+    ): boolean;
+  };
+  claim?: (widget: unknown) => { dispose(): void };
+}
+
 // ------------------------------------------------------------------- hooks
 
 /** Optional behaviour a provider module supplies on top of its descriptor.

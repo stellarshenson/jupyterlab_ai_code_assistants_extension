@@ -17,8 +17,10 @@ import { ColourSource, IColourStoreResponse, ISession } from './types';
 
 /** The colour vocabulary of `jupyterlab_colourful_tab_extension`, in its own
  * order - that extension owns the tab CSS and these six ids; this module only
- * feeds it one of them. The order is load-bearing: its localStorage records a
- * user's menu choice as an INDEX into this list. */
+ * feeds it one of them. The order is still load-bearing, for `fnv1aColour`:
+ * both halves of this extension index into this list to derive a tint, so a
+ * reorder repaints every derived tab and makes the browser and the server
+ * disagree about the same conversation until the Python list moves with it. */
 export const TAB_COLOUR_IDS: readonly string[] = [
   'rose',
   'peach',
@@ -27,11 +29,6 @@ export const TAB_COLOUR_IDS: readonly string[] = [
   'sky',
   'lavender'
 ];
-
-/** Key `jupyterlab_colourful_tab_extension` persists menu-set tab colours
- * under, and the `terminal:<session name>` shape of its entries. Read only -
- * this module never writes into another extension's storage. */
-const TAB_COLOUR_STORAGE_KEY = 'jupyterlab-colourful-tab-colours';
 
 /** Map a conversation id onto one of the six colour ids. FNV-1a (32-bit) - a
  * stable string hash with good avalanche on short hex-ish ids; `Math.imul`
@@ -53,32 +50,6 @@ export function fnv1aColour(sessionId: string): string {
     hash = Math.imul(hash, 0x01000193); // FNV prime
   }
   return TAB_COLOUR_IDS[(hash >>> 0) % TAB_COLOUR_IDS.length];
-}
-
-/** Colour the user set by hand on a terminal tab, or null.
- *
- * The colourful-tab extension stores its right-click menu choices as
- * `{ "terminal:<session name>": <index into TAB_COLOUR_IDS> }`. Reading it is
- * what makes "set the colour on the tab" register as the conversation's
- * colour - for every assistant, including one whose CLI has a colour concept
- * of its own. */
-export function readUserSetTabColour(terminalName: string): string | null {
-  try {
-    const raw = window.localStorage.getItem(TAB_COLOUR_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Record<string, number>;
-    const index = parsed[`terminal:${terminalName}`];
-    if (typeof index !== 'number') {
-      return null;
-    }
-    return TAB_COLOUR_IDS[index] ?? null;
-  } catch (_err) {
-    // localStorage unavailable, or another extension's schema changed under
-    // us - no user colour is a valid answer, a thrown error is not.
-    return null;
-  }
 }
 
 /** Resolve the ladder for one conversation. `userSet` is this extension's own
@@ -268,8 +239,8 @@ export class ColourStore {
    * `handSet` false marks it inherited - written on a fork's behalf rather
    * than chosen on its tab.
    *
-   * Answers whether the store now HOLDS the colour, which is what
-   * `reconcileColours` gates its paint on.
+   * Answers whether the store now HOLDS the colour, which is what the capture
+   * of a colour picked on a tab gates its repaint on - see `_captureColour`.
    *
    * The cache is written only once the server has confirmed. Writing it
    * eagerly and undoing that on failure looks cheaper and is not: nothing here

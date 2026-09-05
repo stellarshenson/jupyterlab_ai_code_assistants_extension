@@ -349,17 +349,32 @@
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
   display: inline-block;
 }
 
 .jp-AiAssistantsPanel-dot {
-  /* color0, at full opacity. This dot is the ONLY graphic for "a process is
-     running here", so WCAG 1.4.11's 3:1 applies to it; softened over color1 it
-     measured 2.12:1 on the stock light theme. color0 is the darker token, so
-     it reads quieter than a saturated color1 while clearing the bar. */
-  background-color: var(--jp-success-color0);
-  box-shadow: 0 0 4px var(--jp-success-color0);
+  display: inline-flex;
+  align-items: center;
+
+  /* drop-shadow, not box-shadow: the glyph is an svg now, and box-shadow would
+     halo its square element box rather than the circle inside it. */
+  filter: drop-shadow(0 0 2px var(--jp-success-color1));
+}
+
+.jp-AiAssistantsPanel-dot svg {
+  width: 8px;
+  height: 8px;
+}
+
+/* The theme picks the green, through the circle's own fill. This dot is the
+   ONLY graphic for "a process is running here", so WCAG 1.4.11's 3:1 applies:
+   color1 is md-green-700 on the light theme and md-green-500 on the dark one,
+   measuring 4.11:1 on white and 5.79:1 on the dark row. color0 clears the bar
+   too and was used before, but on the light theme it is md-green-900 - dark
+   enough at 8px to read as a near-black mark rather than a green light, which
+   is the whole of what the dot has to say (DEF-PANE-174). */
+.jp-AiAssistantsPanel-dotGlyph {
+  fill: var(--jp-success-color1);
 }
 
 .jp-AiAssistantsPanel-dotPlaceholder {

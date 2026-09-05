@@ -126,6 +126,19 @@ export const filterIcon = new LabIcon({
   svgstr: filterSvgStr
 });
 
+// Row status mark - one filled circle, drawn for a conversation that is live
+// or under remote control. An SVG rather than a rounded span so its colour is
+// a CSS `fill` on the circle itself and the theme decides it, the way every
+// other glyph here is recoloured through its class (DEF-PANE-174).
+const statusDotSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <circle class="jp-AiAssistantsPanel-dotGlyph" cx="8" cy="8" r="8" fill="#388e3c"/>
+</svg>`;
+
+export const statusDotIcon = new LabIcon({
+  name: `${ICON_PREFIX}:status-dot`,
+  svgstr: statusDotSvgStr
+});
+
 // Provider glyphs already built, by icon name. LabIcon warns and returns the
 // first registration for a duplicate name, so a provider re-registered by a
 // live settings toggle must resolve to the icon it built the first time

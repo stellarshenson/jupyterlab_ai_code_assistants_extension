@@ -33,6 +33,7 @@ import {
   removeIcon,
   shieldIcon,
   starFilledIcon,
+  statusDotIcon,
   switchIcon
 } from './icons';
 import {
@@ -1925,12 +1926,14 @@ export class AssistantSessionsPanel extends Widget {
     // words go on an aria-label.
     if (this._descriptor.hasRemoteControl && session.remote_control) {
       dot.className = 'jp-AiAssistantsPanel-dot';
+      statusDotIcon.element({ container: dot });
       dot.title = 'Remote control session is active';
       dot.setAttribute('aria-label', dot.title);
       return dot;
     }
     if (this._descriptor.hasLiveProcess && session.live) {
       dot.className = 'jp-AiAssistantsPanel-dot';
+      statusDotIcon.element({ container: dot });
       dot.title = `A ${this._descriptor.label} session is active in this project`;
       dot.setAttribute('aria-label', dot.title);
       return dot;

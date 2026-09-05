@@ -378,6 +378,12 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: MANUAL
   - root-cause: 2026-09-04T23:56:15Z @kj The labels were written for a menu and the ids for a wire format, independently
   - log: 2026-09-04T23:56:15Z @kj added
+- [x] `DEF-PANE-174` **Status dot is near-black on the light theme** - MEDIUM; The live/remote-control dot draws from `--jp-success-color0`, which is md-green-900 (#1b5e20) on the light theme and reads as a near-black blob rather than a green light; the token was chosen for the dark theme, where it is md-green-700. The dot is the only graphic for "this conversation is live" or "remote control is active", so a colour that does not read as green defeats it
+  - evidence: The dot is now an SVG circle whose fill is a CSS property reading --jp-success-color1, so the theme picks it. Measured in a running JupyterLab with the panel open: light theme fill rgb(56,142,60) = #388e3c on white (4.11:1); dark-theme tokens applied to the same page give rgb(76,175,80) = #4caf50 on #212121 (5.79:1). Both clear WCAG 1.4.11's 3:1. The old token measured #1b5e20 on white. Screenshots at 8x in scratchpad: zoom-light-OLD.png, zoom-light-NEW.png, zoom-dark-NEW.png
+  - repro: Open the panel on the stock light theme with a live or remote-controlled session; the leading dot is dark green, near-black at 8px
+  - test-tags: MANUAL, E2E
+  - log: 2026-09-05T08:40:03Z @kj added
+  - log: 2026-09-05T08:47:14Z @kj closed
 
 ## Colour store `COLO`
 

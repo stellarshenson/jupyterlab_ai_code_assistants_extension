@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.7] - 2026-09-05
+
+### Fixed
+
+- The green dot marking a live or remote-controlled conversation was tuned for the dark theme and came out near-black on the light one. It is now drawn as an icon whose colour the theme picks, so it reads as a green light on both - a mid green on the light theme and a brighter one on the dark
+
 ## [1.2.5] - 2026-09-05
 
 ### Changed

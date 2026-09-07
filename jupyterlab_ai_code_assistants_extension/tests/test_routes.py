@@ -608,6 +608,70 @@ async def test_a_new_session_launch_clears_a_pin_without_minting_an_id(
     assert state.read_pin("kimi", encoded) is None
 
 
+async def test_a_new_session_launch_also_releases_the_switch(
+    jp_fetch, jp_serverapp, tmp_path, present, monkeypatch
+):
+    """Clearing the pin is half of it; the store's own mark has to go too.
+
+    A store may steer the assistant's CLI by leaving something outside its
+    state - Claude stamps a transcript's mtime - and that mark is justified
+    only by the pin. Asserting the pin alone let the panel move to the new
+    conversation while a terminal kept resuming the abandoned one for the
+    length of the lead (docs/defects.md DEF-PANE-184).
+    """
+    monkeypatch.setitem(
+        jp_serverapp.web_app.settings, "terminal_manager", _FakeTerminalManager()
+    )
+    released: list[str] = []
+    monkeypatch.setattr(
+        type(registry.get("kimi").store),
+        "release_switch",
+        lambda self, encoded_path: released.append(encoded_path),
+        raising=False,
+    )
+    await jp_fetch(
+        URL,
+        "providers",
+        "kimi",
+        "launch",
+        method="POST",
+        body=json.dumps({"project_path": str(tmp_path), "encoded_path": "wd-demo"}),
+    )
+    assert released == ["wd-demo"]
+
+
+async def test_resuming_a_conversation_leaves_the_switch_alone(
+    jp_fetch, jp_serverapp, tmp_path, present, monkeypatch
+):
+    """A resume IS the switch, so its mark must survive the launch."""
+    monkeypatch.setitem(
+        jp_serverapp.web_app.settings, "terminal_manager", _FakeTerminalManager()
+    )
+    released: list[str] = []
+    monkeypatch.setattr(
+        type(registry.get("kimi").store),
+        "release_switch",
+        lambda self, encoded_path: released.append(encoded_path),
+        raising=False,
+    )
+    pinned = "session_11111111-2222-3333-4444-555555555555"
+    await jp_fetch(
+        URL,
+        "providers",
+        "kimi",
+        "launch",
+        method="POST",
+        body=json.dumps(
+            {
+                "project_path": str(tmp_path),
+                "encoded_path": "wd-demo",
+                "session_id": pinned,
+            }
+        ),
+    )
+    assert released == []
+
+
 async def test_resuming_a_conversation_leaves_the_pin_alone(
     jp_fetch, jp_serverapp, tmp_path, present, monkeypatch
 ):

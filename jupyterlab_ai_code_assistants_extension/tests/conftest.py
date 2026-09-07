@@ -79,9 +79,14 @@ def write_claude_tree(root: Path, sessions: list[dict]) -> Path:
     project_dir = root / claude_provider.PROJECTS_DIRNAME / CLAUDE_ENCODED
     project_dir.mkdir(parents=True, exist_ok=True)
     for entry in sessions:
-        lines = [{"type": "user", "cwd": entry.get("cwd", PROJECT_PATH)}]
+        # ``timestamp`` is the record's own clock, which the store prefers over
+        # the file mtime; omitted by default so a tree stays mtime-ordered.
+        stamp = {"timestamp": entry["timestamp"]} if entry.get("timestamp") else {}
+        lines = [{"type": "user", "cwd": entry.get("cwd", PROJECT_PATH), **stamp}]
         for _ in range(entry.get("turns", 0)):
-            lines.append({"type": "assistant", "cwd": entry.get("cwd", PROJECT_PATH)})
+            lines.append(
+                {"type": "assistant", "cwd": entry.get("cwd", PROJECT_PATH), **stamp}
+            )
         if entry.get("title"):
             lines.append({"type": "custom-title", "customTitle": entry["title"]})
         if entry.get("colour"):

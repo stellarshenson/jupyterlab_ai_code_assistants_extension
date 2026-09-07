@@ -1,4 +1,5 @@
 import { Clipboard, Dialog } from '@jupyterlab/apputils';
+import { TranslationBundle, nullTranslator } from '@jupyterlab/translation';
 import { copyIcon } from '@jupyterlab/ui-components';
 import { Widget } from '@lumino/widgets';
 
@@ -15,6 +16,10 @@ import { IBranch } from './types';
  */
 export namespace ManageSessionsPopup {
   export interface IOptions {
+    /** Bundle every user-visible string passes through. Optional so a
+     * caller that does not translate keeps working - the null bundle
+     * returns each string unchanged. */
+    trans?: TranslationBundle;
     /** Conversations other than the current one. */
     branches: IBranch[];
     /** The project's current conversation id, pinned at the top. */
@@ -50,11 +55,14 @@ export namespace ManageSessionsPopup {
 
 /** Compact copy button for a popup row. `stopPropagation` keeps the click from
  * switching or selecting the row it sits in. */
-function copyButton(sessionId: string): HTMLButtonElement {
+function copyButton(
+  sessionId: string,
+  trans: TranslationBundle
+): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'jp-AiAssistantsPanel-branchCopy';
-  btn.title = 'Copy session id';
+  btn.title = trans.__('Copy session id');
   copyIcon.element({ container: btn });
   btn.addEventListener('click', e => {
     e.stopPropagation();
@@ -66,6 +74,9 @@ function copyButton(sessionId: string): HTMLButtonElement {
 export function showManageSessionsPopup(
   options: ManageSessionsPopup.IOptions
 ): void {
+  const trans =
+    options.trans ??
+    nullTranslator.load('jupyterlab_ai_code_assistants_extension');
   // Local working copy so deletions can refresh the list in place.
   let items = [...options.branches];
   const selected = new Set<string>();
@@ -82,7 +93,7 @@ export function showManageSessionsPopup(
   const search = document.createElement('input');
   search.type = 'search';
   search.placeholder = 'Filter sessions...';
-  search.setAttribute('aria-label', 'Filter sessions');
+  search.setAttribute('aria-label', trans.__('Filter sessions'));
   search.className = 'jp-AiAssistantsPanel-branchSearch';
   body.appendChild(search);
 
@@ -105,7 +116,7 @@ export function showManageSessionsPopup(
   list.className = 'jp-AiAssistantsPanel-branchList';
   // role=group makes the aria-label apply to the conversation list region.
   list.setAttribute('role', 'group');
-  list.setAttribute('aria-label', 'Conversations');
+  list.setAttribute('aria-label', trans.__('Conversations'));
   body.appendChild(list);
 
   const footer = document.createElement('div');
@@ -134,12 +145,12 @@ export function showManageSessionsPopup(
 
   const bodyWidget = new Widget({ node: body });
   const dialog = new Dialog({
-    title: 'Manage Sessions',
+    title: trans.__('Manage Sessions'),
     body: bodyWidget,
     // `Close`, not `Cancel`: deletions here are committed as they happen, so
     // the only exit must not read as an offer to undo them. The cleanup dialog
     // in the panel already says Close for the same reason.
-    buttons: [Dialog.okButton({ label: 'Close' })]
+    buttons: [Dialog.okButton({ label: trans.__('Close') })]
   });
 
   // Per-row "Open" launches that conversation in its own terminal and closes
@@ -232,7 +243,7 @@ export function showManageSessionsPopup(
     badge.textContent = 'current';
     currentRow.appendChild(badge);
     currentRow.appendChild(openButton(options.current));
-    currentRow.appendChild(copyButton(options.current));
+    currentRow.appendChild(copyButton(options.current, trans));
     list.appendChild(currentRow);
 
     const matches = visibleMatches();
@@ -314,7 +325,7 @@ export function showManageSessionsPopup(
       row.appendChild(time);
 
       row.appendChild(openButton(b.session_id));
-      row.appendChild(copyButton(b.session_id));
+      row.appendChild(copyButton(b.session_id, trans));
 
       const activate = (): void => {
         // Selection mode: while anything is ticked, row clicks toggle

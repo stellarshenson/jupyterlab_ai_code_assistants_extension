@@ -270,7 +270,12 @@ class SessionStore(ABC):
         Each row carries at least ``project_path``, ``encoded_path``,
         ``session_id``, ``name``, ``name_source``, ``message_count``,
         ``file_mtime``, ``extra_sessions``; optionally ``git_branch``,
-        ``colour``, ``remote_control``. ``colour`` is British on the wire and
+        ``colour``, ``remote_control``. ``file_mtime`` is when the
+        conversation was last active, in milliseconds, read from whichever
+        field its assistant keeps honest, which differs by store. A value ahead
+        of now latches the panel's under-a-minute
+        styling on for good, which is why the one store that writes a future
+        mtime deliberately corrects for it in its answer. ``colour`` is British on the wire and
         inside the store alike, and carries the conversation's OWN colour for
         an assistant that records one. ``favourite`` is added by the core, not
         by the store. ``root_dir`` is the directory Jupyter serves, for stores
@@ -295,12 +300,39 @@ class SessionStore(ABC):
     def resolve_current(self, encoded_path: str) -> str | None:
         """The project's current conversation id, or None."""
 
+    def release_switch(self, encoded_path: str) -> None:
+        """Give back whatever ``switch`` took to make a conversation current.
+
+        A store is free to leave a mark outside its own state - typically on the
+        filesystem - so that the assistant's own CLI resolves to the
+        conversation the panel chose. This releases the marks that OUTLIVE a
+        later append; a store whose switch only touches a file to "now" needs
+        nothing here, because the next append overtakes it on its own.
+        The core calls this on the two launch branches that move the pin off a
+        switched conversation - a launch that opens a new one, and a fork - and
+        a store that leaves a lasting mark releases its own previous one inside
+        ``switch``, since a second switch moves the pin without the core. The
+        server-minted fork branch does not call it, and needs not: no store
+        reaching that branch leaves a mark. Without this the mark outlives its
+        reason and the CLI keeps resuming a conversation the panel has moved
+        off.
+
+        Must be total. The core calls this AFTER the terminal exists and the
+        pin has already moved, so raising here would fail a launch that has
+        entirely succeeded and orphan its terminal.
+
+        Not abstract, and doing nothing is the right body for a store whose
+        switch leaves nothing behind to give back.
+        """
+
     @abstractmethod
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
         """Make ``session_id`` the project's current conversation.
 
         Returns ``{"requested"}`` on success - the store's job is validation
-        plus, where the provider has one, a recency-aligning touch. The route
+        plus whatever its assistant's CLI needs in order to resolve to that
+        conversation, which may be more than a touch and may outlive the call
+        (see ``release_switch``). The route
         writes the pin and resolves ``current`` once this returns
         (docs/defects.md DEF-102/DEF-103). ``{"error": "branch_not_found"}``
         when it no longer exists (removed between menu display and click),

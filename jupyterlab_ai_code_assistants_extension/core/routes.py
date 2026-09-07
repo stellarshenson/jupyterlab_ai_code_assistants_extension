@@ -860,7 +860,7 @@ class _LaunchBase(_ProviderHandler):
             argv=argv,
         )
 
-    def update_pin(
+    async def update_pin(
         self, provider: registry.Provider, request: _LaunchRequest
     ) -> None:
         """Settle the project's branch pin for a launch that just happened.
@@ -883,6 +883,17 @@ class _LaunchBase(_ProviderHandler):
             state.clear_pin(provider.id, request.encoded_path)
         elif request.fork_session_id:
             state.write_pin(provider.id, request.encoded_path, request.fork_session_id)
+        else:
+            return
+        # The pin has stopped naming whatever the user last switched to, so
+        # anything the store left outside its state to steer the assistant's own
+        # CLI has to go with it - or the terminal keeps resuming the abandoned
+        # conversation while this row shows the new one (DEF-PANE-184). On the
+        # executor: it touches the filesystem, and only state writes belong on
+        # the loop (DEF-99/DEF-101).
+        await asyncio.get_running_loop().run_in_executor(
+            None, provider.store.release_switch, request.encoded_path
+        )
 
 
 class LaunchHandler(_LaunchBase):
@@ -934,7 +945,7 @@ class LaunchHandler(_LaunchBase):
             self.set_status(500)
             self.finish(json.dumps({"error": "terminal_create_failed"}))
             return
-        self.update_pin(provider, request)
+        await self.update_pin(provider, request)
         self.finish(json.dumps({"terminal_name": terminal_name}))
 
 
@@ -959,7 +970,7 @@ class LaunchArgvHandler(_LaunchBase):
         request = await self.validated_argv(provider, body)
         if request is None:
             return
-        self.update_pin(provider, request)
+        await self.update_pin(provider, request)
         self.finish(json.dumps({"argv": request.argv}))
 
 

@@ -1,5 +1,6 @@
 import { JupyterFrontEnd } from '@jupyterlab/application';
 import { Dialog, Notification } from '@jupyterlab/apputils';
+import { TranslationBundle, nullTranslator } from '@jupyterlab/translation';
 import { ServerConnection } from '@jupyterlab/services';
 import { ITerminalTracker } from '@jupyterlab/terminal';
 import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
@@ -76,7 +77,10 @@ function warnLegacyCompanion(): void {
  * Hide does not abort the request - it only takes the app-wide scrim away, so
  * a stalled launch cannot leave the user staring at a modal with no exit. If
  * the launch later succeeds the terminal simply appears. */
-export function showLaunchSpinner(title: string): Dialog<unknown> {
+export function showLaunchSpinner(
+  title: string,
+  trans: TranslationBundle
+): Dialog<unknown> {
   const body = new Widget();
   body.node.className = 'jp-AiAssistantsPanel-launchOverlay';
 
@@ -92,7 +96,7 @@ export function showLaunchSpinner(title: string): Dialog<unknown> {
     // the request is already on the wire and the terminal will still open and
     // take focus. A button named Cancel that does not cancel is worse than no
     // button.
-    buttons: [Dialog.okButton({ label: 'Hide' })]
+    buttons: [Dialog.okButton({ label: trans.__('Hide') })]
   });
   // `launch()` returns a promise nobody awaits - disposing an open Lumino
   // dialog rejects it with `undefined`, so swallow that here and keep a benign
@@ -117,6 +121,9 @@ export class TerminalManager {
     this._colours = options.colourStore;
     this._tracker = options.terminalTracker;
     this._serverSettings = options.serverSettings;
+    this._trans =
+      options.trans ??
+      nullTranslator.load('jupyterlab_ai_code_assistants_extension');
 
     // This narrowing decides whether the extension tints at all. Against a
     // companion with no ownership API it paints nothing: a colour the user
@@ -226,7 +233,10 @@ export class TerminalManager {
    * that conversation now belongs to reuses this very terminal.
    */
   async launch(request: ILaunchRequest, tagSessionId?: string): Promise<any> {
-    const spinner = showLaunchSpinner(`Opening ${this._descriptor.label}`);
+    const spinner = showLaunchSpinner(
+      `Opening ${this._descriptor.label}`,
+      this._trans
+    );
     try {
       const launched = await requestProvider<ILaunchResponse>(
         this._descriptor.id,
@@ -821,6 +831,7 @@ export class TerminalManager {
 
   private readonly _app: JupyterFrontEnd;
   private readonly _descriptor: IProviderDescriptor;
+  private readonly _trans: TranslationBundle;
   private readonly _colours: ColourStore;
   private readonly _tracker: ITerminalTracker | null;
   /** The injected colour token narrowed to its ownership API, or null when the
@@ -867,5 +878,9 @@ export namespace TerminalManager {
     terminalTracker: ITerminalTracker | null;
     colourfulTabs: IColourfulTabs | null;
     serverSettings: ServerConnection.ISettings;
+    /** Bundle every user-visible string passes through. Optional so a
+     * caller that does not translate keeps working - the null bundle
+     * returns each string unchanged. */
+    trans?: TranslationBundle;
   }
 }

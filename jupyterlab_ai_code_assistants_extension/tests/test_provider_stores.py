@@ -10,6 +10,7 @@ import io
 import json
 import os
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -41,6 +42,15 @@ from .conftest import (
     write_gemini_tree,
     write_kimi_tree,
 )
+
+
+def _iso_ago(seconds: float) -> str:
+    """A transcript timestamp, the shape Claude writes them."""
+    return (
+        datetime.fromtimestamp(time.time() - seconds, timezone.utc)
+        .strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+        + "Z"
+    )
 
 
 def cmdline(*args: str) -> bytes:
@@ -205,34 +215,248 @@ def test_claude_branches_exclude_the_current_conversation(claude):
     assert set(store.project_session_ids(CLAUDE_ENCODED)) == {first, second}
 
 
-def test_claude_switch_touches_and_the_route_side_pin_outlives_recency(claude):
+def test_claude_the_route_side_pin_outlives_recency(claude):
     store, root = claude
     first, second = new_uuid(), new_uuid()
     project_dir = write_claude_tree(
         root, [{"id": first, "cwd": PROJECT_PATH}, {"id": second, "cwd": PROJECT_PATH}]
     )
-    # Age the rival: with no store-side pin, `current` resolves by recency,
-    # and both transcripts are written in the same second - the switch's own
-    # utime must be the unambiguous newest.
-    touch(project_dir / f"{second}.jsonl", -600)
-    # The target is aged too, so the touch assertion below compares against a
-    # clearly-older stamp rather than racing the clock on a same-instant one.
-    touch(project_dir / f"{first}.jsonl", -300)
-    before = (project_dir / f"{first}.jsonl").stat().st_mtime
     result = store.switch(CLAUDE_ENCODED, first)
     assert result == {"requested": first}
-    # The touch is the switch's one remaining side effect - it aligns Claude's
-    # own --resume picker - so its loss must redden something.
-    assert (project_dir / f"{first}.jsonl").stat().st_mtime > before
     # The route writes the pin once the store's switch returns (state writes
     # are loop-owned, DEF-99/DEF-101), so the fixture reproduces both halves -
     # the same split kimi's test below documents.
     state.write_pin("claude", CLAUDE_ENCODED, first)
     # The pin outlives recency: the other transcript being newer must not drag
-    # the row back to it.
-    touch(project_dir / f"{second}.jsonl", 60)
+    # the row back to it. The rival has to clear the switch's own stamp, or the
+    # stamp alone would keep `first` current and the pin would prove nothing.
+    touch(
+        project_dir / f"{second}.jsonl",
+        claude_provider.SWITCH_MTIME_LEAD_S + 60,
+    )
     assert store.resolve_current(CLAUDE_ENCODED) == first
     assert store.switch(CLAUDE_ENCODED, new_uuid()) == {"error": "branch_not_found"}
+
+
+def test_claude_switch_outranks_a_sibling_that_keeps_being_written(claude):
+    """The panel, not recency, decides what `claude -c` resumes (DEF-PANE-176).
+
+    `claude -c` resolves a project to its newest transcript by file mtime. The
+    switch used to touch its target to "now", which any later append anywhere in
+    the project overtook - and a sibling conversation open in a panel terminal
+    appends constantly, so the panel's choice lost the lead within seconds.
+    """
+    store, root = claude
+    chosen, rival = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": chosen, "cwd": PROJECT_PATH}, {"id": rival, "cwd": PROJECT_PATH}]
+    )
+    assert store.switch(CLAUDE_ENCODED, chosen) == {"requested": chosen}
+    # The rival is written to AFTER the switch. An append can only ever stamp
+    # "now", which is the whole reason the switch stamps ahead of now.
+    touch(project_dir / f"{rival}.jsonl", 0)
+    newest = max(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    assert newest.stem == chosen
+
+
+def test_claude_switch_never_reports_the_future_stamp_to_the_panel(claude):
+    """The stamp is for `claude -c` only; the UI must still see real activity.
+
+    A future ``file_mtime`` makes the row's age negative, so the panel's
+    "recently active" rule - under a minute old - would latch its blue on for
+    good. The transcript's own last record is what the panel reports instead,
+    and it stays the answer after the stamp has aged into the past, where the
+    mtime is no longer distinguishable from a real one.
+    """
+    store, root = claude
+    chosen, rival = new_uuid(), new_uuid()
+    stamp_iso = "2026-01-02T03:04:05.678Z"
+    stamp_ms = 1767323045678
+    project_dir = write_claude_tree(
+        root,
+        [
+            {"id": chosen, "cwd": PROJECT_PATH, "timestamp": stamp_iso},
+            {"id": rival, "cwd": PROJECT_PATH},
+        ],
+    )
+    store.switch(CLAUDE_ENCODED, chosen)
+    # The stamp really is in the future - without this the assertions below
+    # would pass against a switch that never stamped at all.
+    assert (project_dir / f"{chosen}.jsonl").stat().st_mtime > time.time()
+    # The route writes the pin once the store's switch returns (DEF-99/DEF-101).
+    state.write_pin("claude", CLAUDE_ENCODED, chosen)
+
+    row = next(r for r in store.list_sessions() if r["session_id"] == chosen)
+    assert row["file_mtime"] == stamp_ms
+
+    # SWITCH_MTIME_LEAD_S later the stamp has aged into the past, where nothing
+    # distinguishes it from an mtime a real append wrote. The record is still
+    # the answer; reading the mtime here would report the switch as activity.
+    touch(project_dir / f"{chosen}.jsonl", 0)
+    row = next(r for r in store.list_sessions() if r["session_id"] == chosen)
+    assert row["file_mtime"] == stamp_ms
+
+    state.write_pin("claude", CLAUDE_ENCODED, rival)
+    branch = next(
+        b
+        for b in store.list_branches(CLAUDE_ENCODED)["branches"]
+        if b["session_id"] == chosen
+    )
+    assert branch["file_mtime"] == stamp_ms
+
+
+def test_claude_new_conversation_takes_the_row_and_the_cli_together(claude):
+    """Switch, then start a new conversation: BOTH must follow, not just the row.
+
+    A launch that opens a new conversation clears the pin deliberately
+    (core/routes.py) - the new one is meant to become current on its own. The
+    stamp ``switch`` left behind is 30 days ahead, so until it is given back it
+    outranks that new conversation for ``claude -c``, and the terminal keeps
+    resuming the abandoned one while this panel shows the new one. Asserting
+    only the panel side is what let that ship (docs/defects.md DEF-PANE-184),
+    so the CLI's own rule - newest file mtime, nothing else - is asserted here
+    beside it.
+    """
+    store, root = claude
+    old, fresh = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": old, "cwd": PROJECT_PATH, "timestamp": "2026-01-02T03:04:05.678Z"}]
+    )
+    store.switch(CLAUDE_ENCODED, old)
+    state.write_pin("claude", CLAUDE_ENCODED, old)
+    write_claude_tree(
+        root, [{"id": fresh, "cwd": PROJECT_PATH, "timestamp": _iso_ago(0)}]
+    )
+
+    def claude_c() -> str:
+        """What the CLI would resume: the newest transcript by file mtime."""
+        return max(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime).stem
+
+    # Before the release the stamp still speaks for the abandoned conversation.
+    assert claude_c() == old
+
+    # The route's own sequence for a launch that opens a new conversation.
+    state.clear_pin("claude", CLAUDE_ENCODED)
+    store.release_switch(CLAUDE_ENCODED)
+
+    assert store.resolve_current(CLAUDE_ENCODED) == fresh
+    assert claude_c() == fresh
+    assert [b["session_id"] for b in store.list_branches(CLAUDE_ENCODED)["branches"]] == [
+        old
+    ]
+
+
+def test_claude_picks_the_conversation_the_cli_would_pick(claude):
+    """With no pin, the row and ``claude -c`` must name the SAME conversation.
+
+    That is the whole point of the panel: what sits on top is what a terminal
+    resumes. The CLI orders by file mtime and nothing else, so the selection
+    scan has to order by it too. Ordering the scan by real activity instead
+    reads better and is wrong here - a transcript's mtime runs ahead of its last
+    turn whenever anything touched the file without adding one, which on a real
+    store is the common case, not the exception (docs/defects.md DEF-PANE-184).
+    The time each row REPORTS is still the honest one; only the choice is the
+    CLI's.
+    """
+    store, root = claude
+    touched, recent = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [
+            # Last turn ten days ago, but the file was written a minute ago by
+            # something that added no turn - a restore, a sync, a repair.
+            {"id": touched, "cwd": PROJECT_PATH, "timestamp": _iso_ago(10 * 86400)},
+            {"id": recent, "cwd": PROJECT_PATH, "timestamp": _iso_ago(2 * 86400)},
+        ],
+    )
+    touch(project_dir / f"{touched}.jsonl", -60)
+    touch(project_dir / f"{recent}.jsonl", -2 * 86400)
+    state.clear_pin("claude", CLAUDE_ENCODED)
+
+    cli_would_take = max(
+        project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime
+    ).stem
+    assert cli_would_take == touched
+    assert store.resolve_current(CLAUDE_ENCODED) == cli_would_take
+
+    # ...and the row still tells the truth about when it last ran.
+    row = next(r for r in store.list_sessions() if r["session_id"] == touched)
+    assert row["file_mtime"] < (time.time() - 9 * 86400) * 1000
+
+
+def test_claude_release_leaves_an_unstamped_transcript_alone(claude):
+    """Only a future mtime is a stamp; a real one is not the store's to rewrite."""
+    store, root = claude
+    sid = new_uuid()
+    project_dir = write_claude_tree(root, [{"id": sid, "cwd": PROJECT_PATH}])
+    path = project_dir / f"{sid}.jsonl"
+    touch(path, -3600)
+    before = path.stat().st_mtime
+
+    store.release_switch(CLAUDE_ENCODED)
+    assert path.stat().st_mtime == before
+
+
+def test_claude_branches_are_ordered_by_the_time_they_report(claude):
+    store, root = claude
+    current, switched, recent = new_uuid(), new_uuid(), new_uuid()
+    write_claude_tree(
+        root,
+        [
+            {"id": current, "cwd": PROJECT_PATH, "timestamp": _iso_ago(0)},
+            {
+                "id": switched,
+                "cwd": PROJECT_PATH,
+                "timestamp": "2026-01-02T03:04:05.678Z",
+            },
+            {"id": recent, "cwd": PROJECT_PATH, "timestamp": _iso_ago(3600)},
+        ],
+    )
+    state.write_pin("claude", CLAUDE_ENCODED, current)
+    store.switch(CLAUDE_ENCODED, switched)
+    branches = store.list_branches(CLAUDE_ENCODED)["branches"]
+    assert [b["session_id"] for b in branches] == [recent, switched]
+
+
+def test_claude_survives_a_transcript_timestamp_outside_the_epoch(claude):
+    """One unusable timestamp costs its own row's precision, not the listing."""
+    store, root = claude
+    sid = new_uuid()
+    write_claude_tree(
+        root, [{"id": sid, "cwd": PROJECT_PATH, "timestamp": "0001-01-01T00:00:00"}]
+    )
+    assert [r["session_id"] for r in store.list_sessions()] == [sid]
+
+
+def test_claude_ignores_the_file_mtime_its_own_index_records(claude):
+    """The index's ``fileMtime`` is a file mtime, and the row reports activity.
+
+    The two answer different questions, and the file's is always the later of
+    them, so taking the larger handed every maintained index entry a raw mtime -
+    including a switch's future stamp, whose negative age latches the panel's
+    "recently active" blue on for good.
+    """
+    store, root = claude
+    sid = new_uuid()
+    stamp_iso, stamp_ms = "2026-01-02T03:04:05.678Z", 1767323045678
+    project_dir = write_claude_tree(
+        root, [{"id": sid, "cwd": PROJECT_PATH, "timestamp": stamp_iso}]
+    )
+    (project_dir / claude_provider.INDEX_FILENAME).write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "sessionId": sid,
+                        "fileMtime": int((time.time() + claude_provider.SWITCH_MTIME_LEAD_S) * 1000),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    row = next(r for r in store.list_sessions() if r["session_id"] == sid)
+    assert row["file_mtime"] == stamp_ms
 
 
 def test_claude_delete_never_touches_the_current_conversation(claude):
@@ -980,6 +1204,25 @@ def test_a_compacted_transcript_gets_a_root_claude_c_will_select(claude):
     assert boundary["logicalParentUuid"]
 
 
+def test_a_repair_keeps_the_mtime_the_transcript_carried(claude):
+    """A repair is not a turn, and it must not spend a switch's stamp.
+
+    A conversation that was live when the panel switched to it is repaired
+    later, on the launch that opens it. Rewriting through ``os.replace`` gave
+    the file a fresh mtime - which is the one thing ``switch`` stamped ahead of
+    now so a sibling's appends could not overtake it (DEF-PANE-176).
+    """
+    store, root = claude
+    sid = new_uuid()
+    path = _compacted(write_claude_tree(root, []), sid)
+    stamp = time.time() + claude_provider.SWITCH_MTIME_LEAD_S
+    os.utime(path, (stamp, stamp))
+
+    assert claude_provider.ensure_continuable(path) is True
+
+    assert path.stat().st_mtime == pytest.approx(stamp)
+
+
 def test_an_already_continuable_transcript_is_left_byte_for_byte(claude):
     """The common case, and the one that makes a repair on every launch safe to
     run: a conversation that was never compacted is not rewritten at all."""
@@ -1167,3 +1410,182 @@ def test_a_record_that_cannot_be_encoded_declines_instead_of_raising(claude):
     assert path.read_bytes() == before
     assert list(project_dir.glob("*.continuable")) == []
     assert store.switch(CLAUDE_ENCODED, sid) == {"requested": sid}
+
+
+def test_claude_a_second_switch_hands_the_first_one_its_time_back(claude):
+    """Two switches must leave ONE lead, or the CLI resumes the abandoned one.
+
+    The stamp outranks every real append for thirty days, so a lead left on a
+    conversation the user has switched away from is not a stale label - it is
+    the CLI's answer. The panel would show the second conversation and the
+    terminal would open the first (docs/defects.md DEF-PANE-184).
+    """
+    store, root = claude
+    first, second = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [
+            {"id": first, "cwd": PROJECT_PATH, "timestamp": _iso_ago(10 * 86400)},
+            {"id": second, "cwd": PROJECT_PATH, "timestamp": _iso_ago(86400)},
+        ],
+    )
+
+    def claude_c() -> str:
+        return max(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime).stem
+
+    store.switch(CLAUDE_ENCODED, first)
+    assert claude_c() == first
+
+    store.switch(CLAUDE_ENCODED, second)
+    assert (project_dir / f"{first}.jsonl").stat().st_mtime <= time.time()
+    assert claude_c() == second
+
+
+def test_claude_release_gives_back_exactly_what_the_switch_took(claude):
+    """The release subtracts the lead it added; it does not invent a time.
+
+    A transcript's mtime and its last recorded turn are routinely far apart -
+    a repair, a sync or this extension's own touch moves one and not the other
+    - so restoring "the last turn" moves the file somewhere it has never been.
+    Backwards, at that: on the author's own store the gap reaches 85 days,
+    which is past the CLI's own retention window.
+    """
+    store, root = claude
+    sid = new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": sid, "cwd": PROJECT_PATH, "timestamp": _iso_ago(60 * 86400)}]
+    )
+    jsonl = project_dir / f"{sid}.jsonl"
+    before = time.time() - 5 * 86400
+    os.utime(jsonl, (before, before))
+
+    switched_at = time.time()
+    store.switch(CLAUDE_ENCODED, sid)
+    store.release_switch(CLAUDE_ENCODED)
+
+    # Back to the moment of the switch - never to the 60-day-old turn, which
+    # would drop the file behind conversations the user never chose.
+    assert jsonl.stat().st_mtime == pytest.approx(switched_at, abs=5)
+    assert jsonl.stat().st_mtime > time.time() - 10 * 86400
+
+
+def test_claude_release_drops_the_retired_extension_s_own_pin(claude):
+    """The sidecar is a pin too, so the release has to reach it.
+
+    ``_pin`` falls back to the standalone extension's ``.jl-current`` when the
+    core holds none, which is exactly the state a launch that opens a new
+    conversation leaves behind. Clearing only the core's pin leaves the panel
+    reading the retired one and naming the conversation just abandoned.
+    """
+    store, root = claude
+    old, fresh = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [
+            {"id": old, "cwd": PROJECT_PATH, "timestamp": _iso_ago(10 * 86400)},
+            {"id": fresh, "cwd": PROJECT_PATH, "timestamp": _iso_ago(60)},
+        ],
+    )
+    (project_dir / claude_provider.LEGACY_PIN_FILENAME).write_text(old, encoding="utf-8")
+    store.switch(CLAUDE_ENCODED, old)
+    assert store.resolve_current(CLAUDE_ENCODED) == old
+
+    state.clear_pin("claude", CLAUDE_ENCODED)
+    store.release_switch(CLAUDE_ENCODED)
+    assert not (project_dir / claude_provider.LEGACY_PIN_FILENAME).exists()
+
+    # The launch that cleared the pin writes its own transcript a moment later,
+    # which is what makes it current by recency. With the sidecar still in
+    # place the pin would override that and name the abandoned conversation.
+    written = time.time() + 1
+    os.utime(project_dir / f"{fresh}.jsonl", (written, written))
+    assert store.resolve_current(CLAUDE_ENCODED) == fresh
+
+
+def test_claude_a_turn_stamped_ahead_of_this_host_is_not_reported_as_activity(claude):
+    """A future record latches the same blue a future mtime would.
+
+    ``~/.claude`` shared with a machine whose clock runs ahead, or a backward
+    time step on this one, leaves a transcript whose last turn is stamped after
+    now. Reported verbatim it makes the row's age negative, which latches the
+    panel's under-a-minute "recently active" blue and sorts the row first for
+    as long as the file exists - permanently, where the switch stamp at least
+    expires (DEF-PANE-189).
+    """
+    store, root = claude
+    sid = new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": sid, "cwd": PROJECT_PATH, "timestamp": _iso_ago(-600)}]
+    )
+    honest = time.time() - 3600
+    os.utime(project_dir / f"{sid}.jsonl", (honest, honest))
+
+    row = next(r for r in store.list_sessions() if r["session_id"] == sid)
+    assert row["file_mtime"] <= time.time() * 1000
+    # Falls through to the mtime, which here is the honest one.
+    assert row["file_mtime"] == pytest.approx(honest * 1000, abs=1000)
+
+
+def test_claude_a_pinned_row_reports_the_directory_path_not_the_pin_own_cwd(claude):
+    """The project's path is a property of the directory, not of the pin.
+
+    A pinned transcript re-homed from another project records THAT tree's cwd.
+    Adopting it renamed the row, launched the terminal in the wrong directory,
+    and pointed ``claude -c`` at a different store than the switch had just
+    stamped; where the foreign directory was itself a Claude project, the
+    dedupe by ``project_path`` absorbed this project's row and it left the
+    panel altogether (DEF-PANE-197). The filesystem walk cannot stand in for
+    this - it refuses any encoded name with two adjacent dashes - so a sibling
+    that does encode to this directory is what answers for it.
+    """
+    store, root = claude
+    foreign, native = new_uuid(), new_uuid()
+    write_claude_tree(
+        root,
+        [
+            {"id": foreign, "cwd": "/somewhere/else", "timestamp": _iso_ago(600)},
+            {"id": native, "cwd": PROJECT_PATH, "timestamp": _iso_ago(300)},
+        ],
+    )
+    state.write_pin("claude", CLAUDE_ENCODED, foreign)
+
+    row = next(r for r in store.list_sessions() if r["encoded_path"] == CLAUDE_ENCODED)
+
+    # The pin still decides WHICH conversation (DEF-PANE-192) ...
+    assert row["session_id"] == foreign
+    # ... and the directory still decides WHERE it runs.
+    assert row["project_path"] == PROJECT_PATH
+
+
+def test_claude_a_pin_outranks_a_cwd_that_does_not_encode_to_its_directory(claude):
+    """An explicit choice is not overruled by a heuristic meant for ranking.
+
+    ``switch`` stamps its target and drops the retired extension's sidecar
+    before anything decides whether the pin will be honoured. A pin the scan
+    then discarded left the panel reporting the switch as failed while the
+    stamp it had already written kept steering ``claude -c`` to that very
+    conversation for thirty days, and the sidecar that had been the working pin
+    was gone (DEF-PANE-192). The cwd check ranks UNPINNED transcripts; a pin is
+    the user saying which one, and it wins.
+    """
+    store, root = claude
+    foreign, native = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [
+            {"id": foreign, "cwd": "/somewhere/else", "timestamp": _iso_ago(600)},
+            {"id": native, "cwd": PROJECT_PATH, "timestamp": _iso_ago(300)},
+        ],
+    )
+
+    result = store.switch(CLAUDE_ENCODED, foreign)
+    assert result == {"requested": foreign}
+    state.write_pin("claude", CLAUDE_ENCODED, foreign)
+
+    # What the panel reports and what the CLI resumes must be the same
+    # conversation - the failure this guards was the two disagreeing.
+    assert store.resolve_current(CLAUDE_ENCODED) == foreign
+    assert (
+        max(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime).stem
+        == foreign
+    )

@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from ..core import state
@@ -59,9 +60,23 @@ SESSIONS_DIRNAME = "sessions"
 INDEX_FILENAME = "sessions-index.json"
 # Sidecar the RETIRED standalone extension wrote into a project dir to pin that
 # project's current conversation. Read as a fallback so an upgrading user keeps
-# the conversation they had switched to; never written - pins live in the
-# core's own state now (see ``core.state``).
+# the conversation they had switched to, and UNLINKED by ``release_switch``
+# when the pin stops naming that conversation (DEF-PANE-188). Never written -
+# pins live in the core's own state now (see ``core.state``).
 LEGACY_PIN_FILENAME = ".jl-current"
+
+# ``claude -c`` resolves a project to its newest transcript BY FILE MTIME, so the
+# only lever the panel has over what a terminal resumes is that mtime - and a
+# plain touch loses the lead within seconds to any sibling conversation still
+# being written to, which is exactly the case where the panel and the terminal
+# were seen to disagree. The switch therefore stamps its target this far AHEAD of
+# now: an append can only ever set an mtime of "now", so no SIBLING overtakes
+# it. An append to the stamped transcript itself spends the lead, which ends
+# it at the user's next turn in the conversation they chose rather than at
+# thirty days (docs/defects.md DEF-PANE-190). ``_activity_ms`` corrects the
+# stamp back to real activity for everything the panel shows, so the lie
+# never reaches the UI.
+SWITCH_MTIME_LEAD_S = 30 * 86400
 
 # The launch mode, in Claude's own terminology. The core rejects anything else
 # with 400 ``mode_unsupported`` before ``launch_argv`` is reached.
@@ -86,8 +101,8 @@ BG_AGENTS_TIMEOUT_S = 5.0
 # AND its markers agree with the row chips (same snapshot).
 BG_AGENTS_CACHE_MAX_AGE_S = 35.0
 
-# 128 KiB is enough to hold the last ``cwd``, ``custom-title`` and
-# ``agent-color`` records: measured across live transcripts the newest of each
+# 128 KiB is enough to hold the last ``cwd``, ``custom-title``,
+# ``agent-color`` and ``timestamp`` records: measured across live transcripts the newest of each
 # sits within ~14 KiB of EOF, so a tens-of-MB transcript is never read whole.
 _TAIL_BYTES = 131072
 # Lines read from the FRONT of a transcript when its tail carries no cwd at all.
@@ -135,9 +150,9 @@ _TAIL_CACHE_MAX = 1024
 
 
 def _tail_records(path: Path) -> dict:
-    """``{"cwd", "custom_title", "agent_colour"}`` from a transcript's tail.
+    """``{"cwd", "custom_title", "agent_colour", "last_timestamp"}`` from a tail.
 
-    One pass over the last ``_TAIL_BYTES`` for all three, because all three are
+    One pass over the last ``_TAIL_BYTES`` for all four, because all four are
     "the last record of this type wins" and the panel needs them together:
 
     * ``cwd`` - the directory the conversation last ran in, which differs from
@@ -150,6 +165,9 @@ def _tail_records(path: Path) -> dict:
     * ``agent_colour`` - ``/color`` appends ``{"type": "agent-color", ...}``;
       auto-assigned multi-session colours land there too, so a conversation
       that never ran ``/color`` still carries one
+    * ``last_timestamp`` - the newest record's own clock, which is what
+      ``_activity_ms`` reports rather than the file mtime, since the mtime is
+      not only the assistant's to write
     """
     key = str(path)
     try:
@@ -190,6 +208,12 @@ def _tail_records(path: Path) -> dict:
             colour = record.get("agentColor")
             if isinstance(colour, str) and colour.strip():
                 records["agent_colour"] = colour.strip().lower()
+        # Same "last one wins" pass: the newest record's own clock, which is
+        # what ``_activity_ms`` answers with for a transcript whose mtime the
+        # switch deliberately put in the future.
+        stamp = record.get("timestamp")
+        if isinstance(stamp, str) and stamp:
+            records["last_timestamp"] = stamp
 
     if len(_tail_cache) >= _TAIL_CACHE_MAX:
         _tail_cache.clear()
@@ -209,6 +233,51 @@ def _mtime(path: Path) -> float:
         return path.stat().st_mtime
     except OSError:
         return 0.0
+
+
+def _iso_ms(value: object) -> int | None:
+    """An ISO-8601 transcript timestamp as epoch ms, or None if it is not one."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return int(
+            datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000
+        )
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def _activity_ms(path: Path) -> int:
+    """When a conversation was last written, in epoch ms.
+
+    The last record's own timestamp, because the file mtime is not only the
+    assistant's: ``switch`` stamps it ``SWITCH_MTIME_LEAD_S`` into the future so
+    ``claude -c`` resolves to that transcript, and a repair rewrites the file
+    without adding a turn. Neither is activity, and neither is distinguishable
+    from a real mtime once the lead has aged into the past - which is why the
+    record is preferred whenever it parses rather than only while the stamp is
+    still ahead of now.
+
+    A tail carrying no timestamp falls back to the mtime, and to the mtime minus
+    the lead while it is still in the future, so a switched transcript is
+    ordered and labelled by the moment of the switch rather than by a time that
+    has not happened yet - a future value would make the row's age negative and
+    latch the panel's under-a-minute "recently active" blue on for good.
+
+    A RECORD ahead of now is rejected for that same reason and not for the
+    stamp's: a transcript written by a clock ahead of this host's - a home
+    directory shared with another machine, a backward time step - carries one,
+    and returning it verbatim latches the same blue and sorts the row first for
+    as long as the file exists (DEF-PANE-189).
+    """
+    now = time.time()
+    from_record = _iso_ms(_tail_records(path).get("last_timestamp"))
+    if from_record is not None and from_record <= now * 1000:
+        return from_record
+    raw = _mtime(path)
+    if raw > now:
+        return int((raw - SWITCH_MTIME_LEAD_S) * 1000)
+    return int(raw * 1000)
 
 
 def _head_cwd(path: Path) -> str | None:
@@ -269,6 +338,23 @@ def _project_path_for_cwd(cwd: str, dirname: str) -> str | None:
     if enc.startswith(dirname) and len(cwd) > len(dirname) and cwd[len(dirname)] == "/":
         return cwd[: len(dirname)]
     return None
+
+
+def _newest_matching(
+    jsonls: list[Path], dirname: str
+) -> tuple[Path | None, str | None]:
+    """The newest transcript whose recorded cwd encodes to ``dirname``, and that
+    cwd. ``jsonls`` is newest first; ``(None, None)`` when none of them does.
+
+    This is the DIRECTORY's own answer to where the project lives, which is why
+    it is asked independently of which conversation is current.
+    """
+    for jsonl in jsonls:
+        cwd = _jsonl_cwd(jsonl)
+        project_path = _project_path_for_cwd(cwd, dirname) if cwd else None
+        if project_path:
+            return jsonl, project_path
+    return None, None
 
 
 def _find_path_matching_encoded(encoded_dir_name: str, root: str = "/") -> str | None:
@@ -687,6 +773,10 @@ def ensure_continuable(transcript: Path) -> bool:
             tmp.unlink(missing_ok=True)
             return False
         os.chmod(tmp, before.st_mode & 0o777)
+        # The mtime is carried across for the same reason as the mode: this is
+        # a repair, not a turn. It also keeps a switch's stamp (``switch``),
+        # which a fresh mtime would silently spend.
+        os.utime(tmp, (before.st_atime, before.st_mtime))
         os.replace(tmp, transcript)
     except (OSError, UnicodeEncodeError) as err:
         # ``UnicodeEncodeError`` is a ``ValueError``, not an ``OSError``: a lone
@@ -761,8 +851,9 @@ class ClaudeStore(SessionStore):
 
         The core's state file is authoritative. The retired standalone
         extension's ``.jl-current`` sidecar is read as a fallback so an
-        upgrading user keeps the conversation they had switched to; it is never
-        written, because pins are the core's to keep now.
+        upgrading user keeps the conversation they had switched to. It is never
+        written, because pins are the core's to keep now - only removed, by
+        ``release_switch`` when the pin stops naming it (DEF-PANE-188).
         """
         return state.read_pin(self.provider_id, encoded_path) or _read_legacy_pin(
             project_dir
@@ -785,8 +876,28 @@ class ClaudeStore(SessionStore):
         folder rename: Claude re-homes the old transcripts under the new
         directory but their records still carry the old cwd, so the newest file
         on disk can point at a path that no longer exists. A pin wins over
-        recency, but only while it still resolves - a dangling or cwd-foreign
-        pin is ignored and the recency scan resumes.
+        recency while it still names a file; a dangling one is ignored and the
+        recency scan resumes.
+
+        A pin whose transcript records a cwd that does not encode to this
+        directory is HONOURED. The cwd check below ranks unpinned transcripts,
+        where it is the only evidence of which conversation belongs here; a pin
+        is the user saying so outright, and a heuristic does not overrule that.
+        It used to, silently, and the cost was not a mis-ranked row: ``switch``
+        stamps the transcript and drops the retired extension's sidecar before
+        anything consults this function, so the panel reported the switch as
+        failed while the stamp it had already written kept ``claude -c`` on
+        that conversation for thirty days (docs/defects.md DEF-PANE-192).
+
+        The scan ranks on the raw mtime, not on ``_activity_ms``, and that is
+        deliberate: this sort CHOOSES the conversation, and the choice has to
+        agree with the one ``claude -c`` makes, which is by mtime and nothing
+        else. Ranking on real activity made the panel truthful and the terminal
+        disagree with it, which is the reverse of the point - a transcript's
+        mtime runs ahead of its last turn whenever anything touched the file
+        without adding one. ``_activity_ms`` still answers everywhere a time is
+        REPORTED, so the row's label stays honest while its identity stays in
+        step with the CLI (docs/defects.md DEF-PANE-184).
         """
         jsonls = list(project_dir.glob("*.jsonl"))
         if not jsonls:
@@ -802,16 +913,27 @@ class ClaudeStore(SessionStore):
             if is_safe_segment(pinned) and pin_jsonl.is_file():
                 cwd = _jsonl_cwd(pin_jsonl)
                 project_path = _project_path_for_cwd(cwd, dirname) if cwd else None
-                if project_path:
-                    chosen, chosen_cwd = pin_jsonl, project_path
+                chosen = pin_jsonl
+                # The path is a property of the DIRECTORY, not of whichever
+                # conversation is current. A pinned transcript re-homed from
+                # another project records a cwd belonging to THAT tree, and
+                # adopting it renames the row, launches the terminal in the
+                # wrong directory, and points `claude -c` at a different store
+                # than the switch just stamped (DEF-PANE-197). The walk does not
+                # save it either: it refuses any encoded name with two adjacent
+                # dashes, which is every path holding a `.`, `_` or `-` beside a
+                # separator. So ask the siblings, which answer for the
+                # directory - the same ladder, and the same last resort, as the
+                # no-pin branch below.
+                chosen_cwd = (
+                    project_path
+                    or _newest_matching(jsonls, dirname)[1]
+                    or _find_path_matching_encoded(dirname)
+                    or cwd
+                )
 
         if chosen is None:
-            for jsonl in jsonls:
-                cwd = _jsonl_cwd(jsonl)
-                project_path = _project_path_for_cwd(cwd, dirname) if cwd else None
-                if project_path:
-                    chosen, chosen_cwd = jsonl, project_path
-                    break
+            chosen, chosen_cwd = _newest_matching(jsonls, dirname)
         if chosen is None:
             # No transcript records a cwd that encodes to this directory name -
             # the user renamed both the project folder and the encoded dir after
@@ -822,7 +944,7 @@ class ClaudeStore(SessionStore):
             chosen_cwd = _find_path_matching_encoded(dirname) or _jsonl_cwd(chosen)
 
         sid = chosen.stem
-        fs_mtime = int(_mtime(chosen) * 1000)
+        fs_mtime = _activity_ms(chosen)
         records = _tail_records(chosen)
 
         indexed: dict | None = None
@@ -840,15 +962,17 @@ class ClaudeStore(SessionStore):
         # The index is distrusted on exactly the two fields it is known to get
         # wrong: an mtime it never refreshed, and an ``originalPath`` that a
         # folder rename left stale.
-        indexed_mtime = latest.get("fileMtime") or 0
-        if not isinstance(indexed_mtime, (int, float)) or isinstance(
-            indexed_mtime, bool
-        ):
-            # Same blast radius as ``updatedAt``: an unparseable mtime in the
-            # assistant's own index would take the entire listing down rather
-            # than cost this one row its recency.
-            indexed_mtime = 0
-        latest["fileMtime"] = max(int(indexed_mtime), fs_mtime)
+        #
+        # The index's own ``fileMtime`` is discarded outright rather than taken
+        # as an upper bound. It is a FILE mtime, and ``_activity_ms`` answers a
+        # different question - when the conversation was last written to - whose
+        # answer is at or before it. Keeping the larger of the two therefore
+        # handed every maintained index entry the raw mtime, which is the one
+        # value this row exists to keep off the wire: a switched transcript
+        # would report a time 30 days ahead, and the panel's under-a-minute
+        # "recently active" blue never turns off for a row whose age is
+        # negative (DEF-PANE-180).
+        latest["fileMtime"] = fs_mtime
         if chosen_cwd:
             latest["projectPath"] = chosen_cwd
         latest["customTitle"] = records.get("custom_title")
@@ -1000,12 +1124,12 @@ class ClaudeStore(SessionStore):
                         summaries[entry["sessionId"]] = summary
 
         jsonls = [p for p in project_dir.glob("*.jsonl") if p.stem != current]
-        jsonls.sort(key=_mtime, reverse=True)
+        jsonls.sort(key=_activity_ms, reverse=True)
         bg_owned = bg_agents_cached() if include_extras else {}
         branches = [
             {
                 "session_id": jsonl.stem,
-                "file_mtime": int(_mtime(jsonl) * 1000),
+                "file_mtime": _activity_ms(jsonl),
                 "label": (
                     _tail_records(jsonl).get("custom_title")
                     or summaries.get(jsonl.stem)
@@ -1035,14 +1159,28 @@ class ClaudeStore(SessionStore):
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
         """Make ``session_id`` the project's current conversation.
 
-        One write: the transcript's mtime is touched so Claude's own
-        ``--resume`` picker stays roughly aligned. The PIN is the route's job,
+        On disk: any earlier switch's stamp and the retired
+        extension's sidecar are released, the transcript is made selectable,
+        and its mtime is stamped ``SWITCH_MTIME_LEAD_S`` into the future -
+        which is what makes the panel, not recency, decide what a terminal's
+        ``claude -c`` resumes. A plain touch only aligned the
+        two until the next append anywhere else in the project, and a sibling
+        conversation open in a panel terminal appends constantly, so the panel's
+        choice was overtaken within seconds (docs/defects.md DEF-PANE-176). An
+        append can only ever write an mtime of "now", so nothing overtakes a
+        stamp that is ahead of now. The PIN is the route's job,
         written on the IOLoop thread after this returns - state writes are
         loop-serialised (docs/defects.md DEF-99/DEF-101), and this store used
         to be the one of four whose switch also pinned, from the executor. Its
         old cwd-eligibility condition went with the write: the route pinned
         unconditionally right after, so the condition was unreachable through
         the wire since the port (DEF-101 records the intent it once carried).
+
+        The lead holds until the chosen transcript is itself next written
+        to: an append to the chosen file spends its own lead, after which a
+        sibling can overtake it. Holding it past that would mean re-stamping on
+        a timer, and this extension runs no timers (docs/defects.md
+        DEF-PANE-190).
         """
         if not is_safe_segment(session_id):
             return None
@@ -1052,16 +1190,80 @@ class ClaudeStore(SessionStore):
         jsonl = project_dir / f"{session_id}.jsonl"
         if not jsonl.is_file():
             return {"error": "branch_not_found"}
+        # One project, one lead. A stamp left on whatever was chosen before
+        # outranks every real append for thirty days, so a second switch that
+        # only stamped its own target would leave the CLI resolving to the
+        # conversation the user just moved off while this row shows the new one
+        # (DEF-PANE-186). Released before the stamp below, never after: the two
+        # touch the same directory.
+        self.release_switch(encoded_path)
         # Making this transcript newest is only half of making `claude -c` land
         # on it; being selectable at all is the other half, and a compacted
-        # conversation is not (``make_continuable``). Runs BEFORE the touch so
-        # the mtime the picker sorts on is the last write to the file.
+        # conversation is not (``make_continuable``).
         make_continuable(session_id)
         try:
-            os.utime(jsonl, None)
-        except OSError:
-            pass
+            stamp = time.time() + SWITCH_MTIME_LEAD_S
+            os.utime(jsonl, (stamp, stamp))
+        except OSError as err:
+            # Not fatal - the pin still moves the row - but it is the whole of
+            # what makes the terminal agree with the row, so a silent failure
+            # would read as a working switch. Warned like every other
+            # best-effort write in this module.
+            _log.warning("claude could not stamp %s: %s", jsonl.name, err)
         return {"requested": session_id}
+
+    def release_switch(self, encoded_path: str) -> None:
+        """Give the mtime lead back, and with it the claim on ``claude -c``.
+
+        The stamp ``switch`` writes is only ever justified by the pin: it says
+        "the panel chose this one". Once the pin stops naming that conversation
+        the stamp is a second, stale answer to the same question, and because a
+        stamp is 30 days ahead it outranks every real append for a month - so a
+        terminal kept resuming the conversation the user had already moved on
+        from, silently, while the panel showed the right one (DEF-PANE-184).
+
+        Every future-stamped transcript gives back exactly the lead the switch
+        added - its mtime minus ``SWITCH_MTIME_LEAD_S``, which is the moment
+        the switch happened. That is a subtraction, not a reconstruction: the
+        pre-switch mtime is not recorded anywhere, and the file's last recorded
+        turn is NOT it. The two routinely disagree, because a repair, a sync or
+        this module's own touch moves the mtime without adding a turn; measured
+        across the author's own store the gap is 52 minutes at the median and
+        85.7 days at the worst. Restoring the turn time would therefore move
+        the file backwards to somewhere it has never been, behind conversations
+        the user never chose and, at the tail, past the CLI's own retention
+        window (DEF-PANE-187).
+
+        A transcript whose mtime is in the future for some OTHER reason - a
+        clock ahead of this host's, a home directory shared with a machine that
+        has one - is sent back a full lead it never received. That input has
+        not been observed here and a guard for it would be a guess at the
+        threshold; it is the same assumption the reporting fallback already
+        makes, and it is recorded with it under DEF-PANE-182.
+
+        The retired standalone extension's ``.jl-current`` sidecar goes with the
+        stamp. ``_pin`` reads it whenever the core holds no pin of its own,
+        which is precisely the state a release leaves behind, so a sidecar left
+        in place would name the abandoned conversation and the release would
+        have moved only half of what says "current" (DEF-PANE-188).
+        """
+        project_dir = self._project_dir(encoded_path)
+        if project_dir is None:
+            return
+        legacy = project_dir / LEGACY_PIN_FILENAME
+        try:
+            legacy.unlink(missing_ok=True)
+        except OSError as err:
+            _log.warning("claude could not drop %s: %s", legacy, err)
+        for jsonl in project_dir.glob("*.jsonl"):
+            raw = _mtime(jsonl)
+            if raw <= time.time():
+                continue
+            real = raw - SWITCH_MTIME_LEAD_S
+            try:
+                os.utime(jsonl, (real, real))
+            except OSError as err:
+                _log.warning("claude could not release %s: %s", jsonl.name, err)
 
     # -- mutation --------------------------------------------------------
 
@@ -1157,12 +1359,16 @@ class ClaudeStore(SessionStore):
             attach_id = bg_agents(cli_path).get(session_id)
 
         if session_id and not attach_id:
-            # Opening a conversation from the panel is what pins `claude -c` to
-            # it. Called off the IOLoop with the rest of this method, and total
-            # by construction - a launch may not fail over a transcript's
-            # shape. An attach resumes through the agent, never through `-c`,
-            # so that path is excluded here rather than left to the liveness
-            # check inside.
+            # Makes the conversation SELECTABLE by `claude -c`, which a
+            # compacted one is not. It no longer makes it selected: the repair
+            # carries the old mtime across (see ``ensure_continuable``), so
+            # opening a conversation does not move it to the top of the CLI's
+            # order - only ``switch`` does that, and only until the pin that
+            # justifies it moves. Called off the IOLoop with the rest of this
+            # method, and total by construction - a launch may not fail over a
+            # transcript's shape. An attach resumes through the agent, never
+            # through `-c`, so that path is excluded here rather than left to
+            # the liveness check inside.
             make_continuable(session_id)
 
         if attach_id:

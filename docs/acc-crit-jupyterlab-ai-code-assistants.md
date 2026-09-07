@@ -327,6 +327,7 @@ Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. 
   - log: 2026-08-26T00:00:00Z @kj closed: closed - DEF-127: switch and launch repair a compact_boundary root so -c can select it; verified end to end against the real CLI, 7 mutation-checked tests
   - log: 2026-08-26T00:00:00Z @kj qualified - -c picks by mtime, and only the SWITCH path touches it; an already-continuable conversation opened by launch alone still leaves -c on the project's newest transcript until the resumed CLI appends (round-1 architect)
   - log: 2026-08-26T00:00:00Z @kj qualified - launching a conversation held by a background agent attaches to that agent and does NOT repair it, so an agent-held compacted conversation is not made -c-selectable by launch (see DEF-128)
+  - log: 2026-09-06T21:24:57Z @kj qualified - the carve-out now covers ANY conversation opened by launch alone, compacted or not. ensure_continuable used to give the repaired file a fresh mtime through os.replace; it now carries the old mtime across, so that a switch's stamp is not silently spent. Launch therefore repairs a compacted conversation without making it the CLI's newest; only switch moves -c (DEF-PANE-197 round, round-5 architect)
 
 ## Codex Provider `CODE`
 

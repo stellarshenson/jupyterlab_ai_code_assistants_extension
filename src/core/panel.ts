@@ -17,6 +17,7 @@ import {
   folderIcon,
   terminalIcon
 } from '@jupyterlab/ui-components';
+import { TranslationBundle, nullTranslator } from '@jupyterlab/translation';
 import { CommandRegistry } from '@lumino/commands';
 import { UUID } from '@lumino/coreutils';
 import { Message } from '@lumino/messaging';
@@ -177,6 +178,9 @@ export class AssistantSessionsPanel extends Widget {
     this._app = options.app;
     this._descriptor = options.descriptor;
     this._hooks = options.hooks ?? {};
+    this._trans =
+      options.trans ??
+      nullTranslator.load('jupyterlab_ai_code_assistants_extension');
     this._serverSettings = options.app.serviceManager.serverSettings;
     this.setRoot(options.rootDir, options.deleteToTrash !== false);
     this._fileBrowser = options.fileBrowser ?? null;
@@ -190,7 +194,8 @@ export class AssistantSessionsPanel extends Widget {
       colourStore: this._colours,
       terminalTracker: options.terminalTracker ?? null,
       colourfulTabs: options.colourfulTabs ?? null,
-      serverSettings: this._serverSettings
+      serverSettings: this._serverSettings,
+      trans: this._trans
     });
 
     this.id = panelWidgetId(this._descriptor.id);
@@ -364,7 +369,7 @@ export class AssistantSessionsPanel extends Widget {
 
     const filterBtn = document.createElement('button');
     filterBtn.className = 'jp-AiAssistantsPanel-iconButton';
-    filterBtn.title = 'Filter sessions';
+    filterBtn.title = this._trans.__('Filter sessions');
     // The pressed state is drawn with a class, which says nothing to a screen
     // reader; the filter bar starts hidden, so this starts false.
     filterBtn.setAttribute('aria-pressed', 'false');
@@ -375,7 +380,7 @@ export class AssistantSessionsPanel extends Widget {
 
     const refreshBtn = document.createElement('button');
     refreshBtn.className = 'jp-AiAssistantsPanel-iconButton';
-    refreshBtn.title = 'Refresh';
+    refreshBtn.title = this._trans.__('Refresh');
     refreshIcon.element({ container: refreshBtn });
     refreshBtn.addEventListener('click', () => this.refresh());
     header.appendChild(refreshBtn);
@@ -395,7 +400,7 @@ export class AssistantSessionsPanel extends Widget {
     search.type = 'search';
     search.className = 'jp-AiAssistantsPanel-search';
     search.placeholder = 'Filter sessions...';
-    search.setAttribute('aria-label', 'Filter sessions');
+    search.setAttribute('aria-label', this._trans.__('Filter sessions'));
     search.spellcheck = false;
     search.addEventListener('input', () => {
       this._filter = search.value;
@@ -406,7 +411,7 @@ export class AssistantSessionsPanel extends Widget {
 
     const searchClear = document.createElement('button');
     searchClear.className = 'jp-AiAssistantsPanel-searchClear';
-    searchClear.title = 'Clear filter';
+    searchClear.title = this._trans.__('Clear filter');
     searchClear.hidden = true;
     closeIcon.element({ container: searchClear });
     searchClear.addEventListener('click', () => {
@@ -697,7 +702,10 @@ export class AssistantSessionsPanel extends Widget {
         `Remove "${name}" from ${this._descriptor.label}? This drops the ` +
         `entire project history and every conversation it holds - ` +
         `${this._disposalVerb}. This cannot be undone.`,
-      buttons: [Dialog.cancelButton(), Dialog.warnButton({ label: 'Remove' })],
+      buttons: [
+        Dialog.cancelButton(),
+        Dialog.warnButton({ label: this._trans.__('Remove') })
+      ],
       // Cancel, explicitly. JupyterLab defaults `defaultButton` to the LAST
       // button and focuses it on attach, so omitting this handed the keyboard
       // to Remove - one Enter on a dialog that has just appeared and the
@@ -737,12 +745,15 @@ export class AssistantSessionsPanel extends Widget {
     const extra = session.extra_sessions;
     const name = this._lookupName(session);
     const confirm = await showDialog({
-      title: 'Clean Up Parallel Sessions',
+      title: this._trans.__('Clean Up Parallel Sessions'),
       body:
         `Remove ${extra} parallel session${extra === 1 ? '' : 's'} from ` +
         `"${name}"? The current conversation is kept; the rest are ` +
         `${this._disposalVerb}. This cannot be undone.`,
-      buttons: [Dialog.cancelButton(), Dialog.warnButton({ label: 'Remove' })],
+      buttons: [
+        Dialog.cancelButton(),
+        Dialog.warnButton({ label: this._trans.__('Remove') })
+      ],
       // Cancel, as above (DEF-51).
       defaultButton: 0
     });
@@ -768,9 +779,9 @@ export class AssistantSessionsPanel extends Widget {
     body.node.appendChild(bar);
 
     const dialog = new Dialog<unknown>({
-      title: 'Clean Up Parallel Sessions',
+      title: this._trans.__('Clean Up Parallel Sessions'),
       body,
-      buttons: [Dialog.okButton({ label: 'Close' })]
+      buttons: [Dialog.okButton({ label: this._trans.__('Close') })]
     });
     // Close stays live while the work runs. Hiding it took away the only exit
     // a keyboard user has: the dialog listens for Escape on its own node, it
@@ -1771,7 +1782,7 @@ export class AssistantSessionsPanel extends Widget {
       row.classList.add('jp-mod-busy');
       const spinner = document.createElement('span');
       spinner.className = 'jp-AiAssistantsPanel-spinner';
-      spinner.title = 'Removing...';
+      spinner.title = this._trans.__('Removing...');
       row.appendChild(spinner);
     } else {
       row.appendChild(this._renderIndicator(session));
@@ -1824,7 +1835,7 @@ export class AssistantSessionsPanel extends Widget {
       // menu, rather than becoming a second hit target inside the row.
       const star = document.createElement('span');
       star.className = 'jp-AiAssistantsPanel-favStar';
-      star.setAttribute('aria-label', 'Favorite');
+      star.setAttribute('aria-label', this._trans.__('Favorite'));
       star.setAttribute('role', 'img');
       starFilledIcon.element({ container: star });
       row.appendChild(star);
@@ -1927,7 +1938,7 @@ export class AssistantSessionsPanel extends Widget {
     if (this._descriptor.hasRemoteControl && session.remote_control) {
       dot.className = 'jp-AiAssistantsPanel-dot';
       statusDotIcon.element({ container: dot });
-      dot.title = 'Remote control session is active';
+      dot.title = this._trans.__('Remote control session is active');
       dot.setAttribute('aria-label', dot.title);
       return dot;
     }
@@ -2169,6 +2180,12 @@ export class AssistantSessionsPanel extends Widget {
     return this._resolvedVariant()?.unsafe ? shieldIcon : undefined;
   }
 
+  /* eslint-disable jupyter/command-described-by --
+     These commands go on the private CommandRegistry built below, which only
+     this panel's own row context menu reads. `describedBy` is metadata for
+     the application registry's consumers - the palette, settings, other
+     extensions - and none of them can see or invoke a command registered
+     here. */
   private _setupCommands(): void {
     this._commands = new CommandRegistry();
     const active = (): ISession | null => this._activeSession;
@@ -2236,7 +2253,7 @@ export class AssistantSessionsPanel extends Widget {
     }
 
     this._commands.addCommand(this._cmd('open-terminal'), {
-      label: 'Open Terminal',
+      label: this._trans.__('Open Terminal'),
       icon: terminalIcon,
       execute: () => {
         const s = active();
@@ -2270,7 +2287,7 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     this._commands.addCommand(this._cmd('show-in-filebrowser'), {
-      label: 'Show in File Browser',
+      label: this._trans.__('Show in File Browser'),
       icon: folderIcon,
       execute: () => {
         const s = active();
@@ -2301,7 +2318,7 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     this._commands.addCommand(this._cmd('copy-path'), {
-      label: 'Copy Path',
+      label: this._trans.__('Copy Path'),
       execute: () => {
         const s = active();
         if (s) {
@@ -2311,7 +2328,7 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     this._commands.addCommand(this._cmd('copy-session-id'), {
-      label: 'Copy Session ID',
+      label: this._trans.__('Copy Session ID'),
       execute: () => {
         const id = active()?.session_id;
         if (id) {
@@ -2451,6 +2468,7 @@ export class AssistantSessionsPanel extends Widget {
 
     this._buildMenus();
   }
+  /* eslint-enable jupyter/command-described-by */
 
   /** How many forced launch variants would actually render right now. Zero
    * means every variant builds the launch the plain item already builds, so a
@@ -2473,19 +2491,23 @@ export class AssistantSessionsPanel extends Widget {
     // Lists the project's other conversations. Items are rebuilt on every
     // context-menu open from a fresh branches fetch.
     this._switchSubmenu = this._menu();
-    this._switchSubmenu.title.label = 'Switch and Manage Sessions';
+    this._switchSubmenu.title.label = this._trans.__(
+      'Switch and Manage Sessions'
+    );
     this._switchSubmenu.title.icon = switchIcon;
 
     // Opens a conversation directly in its own terminal, as opposed to the
     // switch submenu which only changes which one the row points at. Several
     // conversations can be open at once, independently.
     this._openBranchSubmenu = this._menu();
-    this._openBranchSubmenu.title.label = 'Open Branched Conversation';
+    this._openBranchSubmenu.title.label = this._trans.__(
+      'Open Branched Conversation'
+    );
     this._openBranchSubmenu.title.icon = terminalIcon;
 
     // Groups the branch launch modes.
     this._branchSessionMenu = this._menu();
-    this._branchSessionMenu.title.label = 'Branch Session';
+    this._branchSessionMenu.title.label = this._trans.__('Branch Session');
     this._branchSessionMenu.title.icon = branchIcon;
     this._branchSessionMenu.addItem({ command: this._cmd('branch-session') });
     for (const mode of this._variantModes) {
@@ -2722,6 +2744,7 @@ export class AssistantSessionsPanel extends Widget {
       return;
     }
     showManageSessionsPopup({
+      trans: this._trans,
       branches: this._lastBranches,
       current: this._lastBranchesCurrent || session.session_id,
       projectName: this._lookupName(session),
@@ -2805,6 +2828,7 @@ export class AssistantSessionsPanel extends Widget {
 
   private readonly _app: JupyterFrontEnd;
   private readonly _descriptor: IProviderDescriptor;
+  private readonly _trans: TranslationBundle;
   private readonly _hooks: IProviderHooks;
   private readonly _serverSettings: ServerConnection.ISettings;
   private _rootDir = '';
@@ -2869,5 +2893,9 @@ export namespace AssistantSessionsPanel {
     terminalTracker?: ITerminalTracker | null;
     fileBrowser?: IDefaultFileBrowser | null;
     colourfulTabs?: IColourfulTabs | null;
+    /** Bundle every user-visible string passes through. Optional so a
+     * caller that does not translate keeps working - the null bundle
+     * returns each string unchanged. */
+    trans?: TranslationBundle;
   }
 }

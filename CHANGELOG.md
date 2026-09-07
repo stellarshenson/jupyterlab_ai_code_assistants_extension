@@ -4,6 +4,22 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.18] - 2026-09-07
+
+### Added
+
+- The panel's own text now goes through JupyterLab's translation system, so a translation shipped for the interface language reaches this extension too. Nothing changes for an English interface
+
+### Changed
+
+- Last-activity times in the panel are read from each conversation's own records rather than from its file timestamp, so a row's label stays truthful even when something has touched the file without adding a turn
+
+### Fixed
+
+- The dot marking a live or remote-controlled conversation lost its dark-theme rendering in 1.2.7, drawing a doubled near-black contour instead of a lit green mark. The stylesheet now branches on the theme, so dark is restored exactly as it was before 1.2.7 and light gets a brighter green with a pale green halo, chosen on sight from rendered candidates over a white ring that read as a blob on grey rows. The halo is pale rather than high-contrast by choice: no light halo can reach WCAG 1.4.11's 3:1 against the light row colours, because even pure white on them measures 1.77:1
+- Switching to a conversation now holds against a sibling conversation that keeps being written to. `claude -c` resolves a project to its newest transcript by file modification time alone, so the switch's own touch was overtaken within seconds by any other conversation open in a terminal, and the panel and the terminal disagreed about which conversation was current. The switch marks its target far enough ahead that no append overtakes it, and gives that mark back when the panel moves off the conversation
+- A conversation moved from another project and then switched to could make the panel report that other project's directory, rename the row to it, open terminals there, and in some cases drop the project from the panel altogether. Where a project lives is now settled from the project's own directory rather than from whichever conversation is current
+
 ## [1.2.7] - 2026-09-05
 
 ### Fixed

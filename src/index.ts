@@ -9,6 +9,7 @@ import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
 import { ILauncher } from '@jupyterlab/launcher';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { ITerminalTracker } from '@jupyterlab/terminal';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
 import { IDisposable } from '@lumino/disposable';
 
@@ -73,7 +74,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     ITerminalTracker,
     IDefaultFileBrowser,
     IColourfulTabs,
-    ILauncher
+    ILauncher,
+    ITranslator
   ],
   activate: async (
     app: JupyterFrontEnd,
@@ -83,10 +85,18 @@ const plugin: JupyterFrontEndPlugin<void> = {
     terminalTracker: ITerminalTracker | null,
     fileBrowser: IDefaultFileBrowser | null,
     colourfulTabs: IColourfulTabs | null,
-    launcher: ILauncher | null
+    launcher: ILauncher | null,
+    translator: ITranslator | null
   ) => {
     console.log(
       'JupyterLab extension jupyterlab_ai_code_assistants_extension is activated!'
+    );
+
+    // Every user-visible string in the panels goes through this bundle.
+    // `ITranslator` is optional, and the null translator returns each string
+    // unchanged, so an install without one behaves exactly as before.
+    const trans = (translator ?? nullTranslator).load(
+      'jupyterlab_ai_code_assistants_extension'
     );
 
     // A duplicate id throws here, at registration, rather than surfacing later
@@ -229,7 +239,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
           deleteToTrash: status ? status.delete_to_trash !== false : false,
           terminalTracker,
           fileBrowser,
-          colourfulTabs
+          colourfulTabs,
+          trans
         });
         applySharedSettings(panel);
         dock(panel);
@@ -238,6 +249,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
         restorer?.add(panel, panelWidgetId(id));
         const command = app.commands.addCommand(commandId(id, 'refresh'), {
           label: `Refresh ${module.descriptor.panelTitle}`,
+          // Takes no arguments, which is what `null` says here.
+          describedBy: { args: null },
           execute: () => panel.refresh()
         });
         // The Launcher tile's command. It is registered whether or not a
@@ -252,6 +265,18 @@ const plugin: JupyterFrontEndPlugin<void> = {
           icon: launcherTileIcon(
             providerIcon(module.descriptor.iconName, module.descriptor.iconSvg)
           ),
+          describedBy: {
+            args: {
+              type: 'object',
+              properties: {
+                cwd: {
+                  type: 'string',
+                  description:
+                    'Folder to start the assistant in. The server root when absent.'
+                }
+              }
+            }
+          },
           // The Launcher puts the file browser's folder in `cwd` on every
           // click; the panel resolves it against the server root.
           execute: args => panel.launchHere(args.cwd as string | undefined)

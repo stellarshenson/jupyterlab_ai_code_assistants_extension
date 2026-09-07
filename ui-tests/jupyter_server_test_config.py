@@ -163,6 +163,27 @@ for _i in range(3):
     # all three are recent so this project sorts to the top of the list.
     os.utime(_jsonl, (_now - 30 + _i, _now - 30 + _i))
 
+# A remote-control record for the branchy project, so one row draws the live
+# status dot. The panel draws it only for a session Claude reports as
+# remote-controlled, which the provider reads as a live pid plus a non-null
+# bridge id on a record inside its one-hour freshness window - a launched stub
+# can never satisfy it, because the stub is a shell script and its pid file is
+# Claude's to write, not ours. The server's own pid is the one pid guaranteed
+# alive for the length of the run.
+_sessions_dir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "sessions"
+_sessions_dir.mkdir(parents=True, exist_ok=True)
+(_sessions_dir / "remote-controlled.json").write_text(
+    json.dumps(
+        {
+            "cwd": str(_project_cwd),
+            "pid": os.getpid(),
+            "updatedAt": int(_now * 1000),
+            "bridgeSessionId": "galata-bridge",
+        }
+    ),
+    encoding="utf-8",
+)
+
 # A second Claude project whose NAME is far wider than the sidebar, holding two
 # conversations so it carries a branch badge. DEF-41 was a clipping defect -
 # the name's ellipsis ate the badges that followed it - and clipping is a

@@ -366,15 +366,49 @@
   height: 8px;
 }
 
-/* The theme picks the green, through the circle's own fill. This dot is the
-   ONLY graphic for "a process is running here", so WCAG 1.4.11's 3:1 applies:
-   color1 is md-green-700 on the light theme and md-green-500 on the dark one,
-   measuring 4.11:1 on white and 5.79:1 on the dark row. color0 clears the bar
-   too and was used before, but on the light theme it is md-green-900 - dark
-   enough at 8px to read as a near-black mark rather than a green light, which
-   is the whole of what the dot has to say (DEF-PANE-174). */
+/* The theme picks the green, through the circle's own fill rather than a
+   presentation attribute on the svg, the way every other glyph here is
+   recoloured (DEF-PANE-174). This dot is the ONLY graphic for "a process is
+   running here", so WCAG 1.4.11's 3:1 applies: color1 is md-green-500 on every
+   dark theme installed, 5.79:1 against the stock dark row. color0 clears the
+   bar too and was used before, but it is a step darker again and at 8px reads
+   as a near-black mark rather than a green light, which is the whole of what
+   the dot has to say. The light themes need a different answer entirely - see
+   the rule below. */
 .jp-AiAssistantsPanel-dotGlyph {
   fill: var(--jp-success-color1);
+}
+
+/* Light themes take a different dot, because both halves of the one above stop
+   working there. JupyterLab stamps the theme's own `isLight` onto the body, so
+   the switch is CSS and no TypeScript sees it.
+
+   Fill - `--jp-success-color1` is a dark green on every light theme installed
+   (md-green-700 on JupyterLab Light, #27632a on the others), which is the
+   near-black mark the rule above rejects (DEF-PANE-175). md-green-500 is the
+   green the dark themes already carry, defined on `:root` by JupyterLab's own
+   materialcolors.css, so no fallback copy belongs here.
+
+   Glow - a mint ring, md-green-200, three passes at 2px. The dot's own green
+   would separate nothing from the dot, and white was tried and rejected on
+   sight (DEF-PANE-201): on the mid-grey rows the installed light themes draw
+   (#bec3ca, #c0c0c0) a white ring reads as a bright blob, not a light. A pale
+   green three steps lighter than the fill reads as the fill's own glow instead.
+   Three passes because drop-shadow spreads its alpha over the blur, so one
+   pass stays faint; 2px because at 1px the ring is barely wider than the
+   circle's anti-aliasing and at 3px stacked deeper it washes over the first
+   letter of the name. Size and shade chosen from rendered candidates on the
+   live row (2026-09-07). Stated plainly: no pale halo reaches WCAG 1.4.11's
+   3:1 on those rows - pure white against #bec3ca is 1.77:1, the ceiling - and
+   the dark contour that would was rejected on sight (DEF-PANE-185). */
+body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dot {
+  filter: drop-shadow(0 0 2px var(--md-green-200))
+    drop-shadow(0 0 2px var(--md-green-200))
+    drop-shadow(0 0 2px var(--md-green-200));
+}
+
+body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotGlyph {
+  fill: var(--md-green-500);
 }
 
 .jp-AiAssistantsPanel-dotPlaceholder {

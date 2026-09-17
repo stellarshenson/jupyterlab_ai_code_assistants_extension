@@ -77,6 +77,7 @@ const DESCRIPTOR: IProviderDescriptor = {
   cliBinary: 'testbed',
   forkStrategy: 'native-flag',
   colourSource: 'derived',
+  terminalScope: 'conversation',
   promptsForBranchName: true,
   mintsNewSessionId: true,
   launchModes: [

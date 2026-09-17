@@ -24,7 +24,7 @@ import { Message } from '@lumino/messaging';
 import { Menu, Widget } from '@lumino/widgets';
 
 import { ColourStore } from './colour';
-import { shortSessionId } from './labels';
+import { branchMenuLabel, shortSessionId } from './labels';
 import {
   addIcon,
   branchIcon,
@@ -691,6 +691,13 @@ export class AssistantSessionsPanel extends Widget {
     }
   }
 
+  /** The warning a permanent deletion earns and a trashed one does not - a
+   * trashed conversation is recoverable, and the popup one click away says
+   * so; the same sentence on both would be false half the time. */
+  private get _irreversibleNote(): string {
+    return this._deleteToTrash ? '' : ' This cannot be undone.';
+  }
+
   private get _disposalVerb(): string {
     return this._deleteToTrash ? 'moved to trash' : 'deleted permanently';
   }
@@ -702,7 +709,7 @@ export class AssistantSessionsPanel extends Widget {
       body:
         `Remove "${name}" from ${this._descriptor.label}? This drops the ` +
         `entire project history and every conversation it holds - ` +
-        `${this._disposalVerb}. This cannot be undone.`,
+        `${this._disposalVerb}.${this._irreversibleNote}`,
       buttons: [
         Dialog.cancelButton(),
         Dialog.warnButton({ label: this._trans.__('Remove') })
@@ -750,7 +757,7 @@ export class AssistantSessionsPanel extends Widget {
       body:
         `Remove ${extra} parallel session${extra === 1 ? '' : 's'} from ` +
         `"${name}"? The current conversation is kept; the rest are ` +
-        `${this._disposalVerb}. This cannot be undone.`,
+        `${this._disposalVerb}.${this._irreversibleNote}`,
       buttons: [
         Dialog.cancelButton(),
         Dialog.warnButton({ label: this._trans.__('Remove') })
@@ -992,7 +999,10 @@ export class AssistantSessionsPanel extends Widget {
       if (row) {
         // A terminal already holding that conversation IS the answer: a second
         // process on one history is never what the click meant (ACC-LNCH-152).
-        const found = await this._terminals.findForSession(row.session_id);
+        const found = await this._terminals.findForSession(
+          row.session_id,
+          folder
+        );
         if (found) {
           this._terminals.focus(found.widget);
           return found.widget;
@@ -2090,17 +2100,12 @@ export class AssistantSessionsPanel extends Widget {
   }
 
   /** Branch entry display: conversation name plus short session id. Branches
-   * share a project path, so the name and id are all that tell them apart. The
-   * suffix is dropped when the label already IS the short id. */
+   * share a project path, so the name and id are all that tell them apart. */
   private _branchDisplayName(b: IBranch): string {
-    const shortId = shortSessionId(
-      b.session_id,
-      this._descriptor.sessionIdPrefix
+    return branchMenuLabel(
+      b.label,
+      shortSessionId(b.session_id, this._descriptor.sessionIdPrefix)
     );
-    if (this._hooks.branchLabel) {
-      return this._hooks.branchLabel(b, shortId);
-    }
-    return b.label === shortId ? b.label : `${b.label} (${shortId})`;
   }
 
   /** Menu-item label for a branch: display name, relative time, and a trailing
@@ -2584,10 +2589,14 @@ export class AssistantSessionsPanel extends Widget {
     add('reset-colour');
     this._contextMenu.addItem({ type: 'separator' });
     if (withBranches) {
-      this._contextMenu.addItem({
-        type: 'submenu',
-        submenu: this._openBranchSubmenu
-      });
+      // A project-scoped assistant has one terminal for every conversation,
+      // so opening a branch in its own terminal is not an action it has.
+      if (this._descriptor.terminalScope === 'conversation') {
+        this._contextMenu.addItem({
+          type: 'submenu',
+          submenu: this._openBranchSubmenu
+        });
+      }
       this._contextMenu.addItem({
         type: 'submenu',
         submenu: this._switchSubmenu
@@ -2764,11 +2773,15 @@ export class AssistantSessionsPanel extends Widget {
     if (!session) {
       return;
     }
+    const current = this._lastBranchesCurrent || session.session_id;
     showManageSessionsPopup({
       trans: this._trans,
       branches: this._lastBranches,
-      current: this._lastBranchesCurrent || session.session_id,
-      projectName: this._lookupName(session),
+      current,
+      currentName: `${this._lookupName(session)} (${shortSessionId(
+        current,
+        this._descriptor.sessionIdPrefix
+      )})`,
       deleteToTrash: this._deleteToTrash,
       branchName: b => this._branchDisplayName(b),
       formatTime: ms => this._formatRelativeTime(ms),
@@ -2790,6 +2803,13 @@ export class AssistantSessionsPanel extends Widget {
    * is attached to and carries none. The row's own conversation is not in
    * `_lastBranches`, so it answers from the session. */
   private _openBranchTitle(session: ISession, sessionId: string): string {
+    // One terminal serves a project-scoped assistant, so the button focuses
+    // or starts it, under the provider's own verb for that.
+    if (this._descriptor.terminalScope === 'project') {
+      return (
+        this._hooks.resumeLabel?.(session) ?? "Open the project's terminal"
+      );
+    }
     const base = 'Open this conversation in its own terminal';
     const target =
       sessionId === session.session_id

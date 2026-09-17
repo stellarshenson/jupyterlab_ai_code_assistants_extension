@@ -21,6 +21,7 @@ from jupyterlab_ai_code_assistants_extension.core.store import SessionNotFound
 from jupyterlab_ai_code_assistants_extension.providers import codex as codex_provider
 from jupyterlab_ai_code_assistants_extension.providers import deepseek as deepseek_provider
 from jupyterlab_ai_code_assistants_extension.providers import gemini as gemini_provider
+from jupyterlab_ai_code_assistants_extension.providers import kimi as kimi_provider
 from jupyterlab_ai_code_assistants_extension.providers import claude as claude_provider
 from jupyterlab_ai_code_assistants_extension.providers.claude import ClaudeStore
 from jupyterlab_ai_code_assistants_extension.providers.codex import CodexStore
@@ -687,7 +688,9 @@ KIMI_WD = "wd-7788"
 @pytest.fixture
 def kimi(scratch_stores):
     store = KimiStore(scratch_stores / "kimi")
+    # What the registry binds at discovery.
     store.provider_id = "kimi"
+    store.session_id_prefix = kimi_provider.DESCRIPTOR.session_id_prefix
     return store, scratch_stores / "kimi"
 
 
@@ -1606,7 +1609,9 @@ def _dsh_id() -> str:
 @pytest.fixture
 def deepseek(scratch_stores):
     store = DeepSeekStore()
+    # What the registry binds at discovery.
     store.provider_id = "deepseek"
+    store.session_id_prefix = deepseek_provider.DESCRIPTOR.session_id_prefix
     return store, scratch_stores / "dsh"
 
 
@@ -1669,6 +1674,7 @@ def test_deepseek_a_torn_log_lists_with_the_records_it_holds_whole(deepseek):
     project = write_deepseek_tree(root, [{"id": session, "title": "T", "messages": 4}])
     log = next((project / session).iterdir())
     intact = log.read_bytes()
+    text = deepseek_provider.read_log(log)
     log.write_bytes(intact[:-2])
     (row,) = store.list_sessions()
     assert (row["session_id"], row["name"], row["message_count"]) == (session, "T", 4)
@@ -1680,10 +1686,7 @@ def test_deepseek_a_torn_log_lists_with_the_records_it_holds_whole(deepseek):
     # A raw log torn mid-record drops that record and nothing else.
     raw = project / session / "session.v3.jsonl"
     log.unlink()
-    raw.write_text(
-        deepseek_provider._decode(intact, True) + '{"type":"user/message","seq":9',
-        encoding="utf-8",
-    )
+    raw.write_text(text + '{"type":"user/message","seq":9', encoding="utf-8")
     assert store.list_sessions()[0]["message_count"] == 4
 
 
@@ -1711,6 +1714,10 @@ def test_deepseek_fork_copies_the_log_in_the_harness_layout(deepseek):
     project = write_deepseek_tree(
         root, [{"id": parent, "title": "Parent", "messages": 2}]
     )
+    # The copy must be current by recency alone (the route's pin is not in
+    # play here), so the parent is backdated past the mtime tie a same-burst
+    # write leaves.
+    touch(next((project / parent).iterdir()), -600)
     new_id = store.fork(DEEPSEEK_ENCODED, parent, "Branch")
     assert new_id and new_id != parent and deepseek_provider.SESSION_ID_RE.fullmatch(new_id)
     copy = project / new_id / "session.v3.jsonl.zstd"
@@ -1729,6 +1736,7 @@ def test_deepseek_fork_copies_the_log_in_the_harness_layout(deepseek):
     (row,) = store.list_sessions()
     assert (row["session_id"], row["name"], row["extra_sessions"]) == (new_id, "Branch", 1)
     # A fork of a fork defaults its name to the parent's.
+    touch(copy, -300)
     grandchild = store.fork(DEEPSEEK_ENCODED, new_id)
     assert store.list_branches(DEEPSEEK_ENCODED)["current"] == grandchild
     assert next(

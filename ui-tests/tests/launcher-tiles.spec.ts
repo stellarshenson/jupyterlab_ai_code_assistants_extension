@@ -6,6 +6,7 @@ import {
   AVAILABLE,
   fetchStatus,
   setProviderEnabled,
+  terminalCount,
   waitForApplication
 } from './shared';
 
@@ -104,14 +105,6 @@ async function addLauncher(page: any): Promise<void> {
 /** Click one provider's tile by its label. */
 async function clickTile(page: any, label: string): Promise<void> {
   await page.locator(CARDS).filter({ hasText: label }).first().click();
-}
-
-/** How many terminals the server is running. */
-async function terminalCount(page: any): Promise<number> {
-  const running = (await (
-    await page.request.get('/api/terminals')
-  ).json()) as unknown[];
-  return running.length;
 }
 
 /** The terminal name of the current main-area widget, or null when the

@@ -49,15 +49,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ..core import state
 from ..core.registry import Capabilities, ProviderDescriptor
 from ..core.store import (
+    NODE_COMMS,
     FileMemo,
     SessionNotFound,
     SessionStore,
     cmdline_args,
     dispose_path,
     flag_value,
-    git_branch,
     is_safe_segment,
     load_json,
     mtime_ms,
@@ -65,14 +66,6 @@ from ..core.store import (
     process_cmdline,
     process_comm,
 )
-
-
-# What Node reports as its main thread's ``comm``, across the releases the
-# Gemini CLI supports. Node 24 and earlier write ``MainThread``; Node 26 writes
-# ``node-MainThread``; a build that names the process itself writes ``node``.
-# The argv check is the real discriminator (docs/defects.md DEF-24) - this set
-# only keeps the cheap pre-filter from failing closed on a version skew.
-_NODE_COMMS = frozenset({"node", "MainThread", "node-MainThread"})
 
 
 # A refused deletion is otherwise invisible: the count simply comes back short
@@ -483,8 +476,11 @@ class GeminiStore(SessionStore):
             out.append((child, meta))
         return out
 
+    def _pin(self, encoded_path: str) -> str | None:
+        return state.read_pin(self.provider_id, encoded_path)
+
     def _pick_current(
-        self, encoded_path: str, chats: list[tuple[Path, dict]]
+        self, pinned: str | None, chats: list[tuple[Path, dict]]
     ) -> tuple[Path, dict] | None:
         """The project's current conversation - the core's pin-or-newest rule.
 
@@ -493,8 +489,8 @@ class GeminiStore(SessionStore):
         with the metadata updates, and a fork's own copy carries the parent's
         field until its first turn.
         """
-        current = self.pick_current(
-            encoded_path, {meta["session_id"]: mtime_ms(path) for path, meta in chats}
+        current = state.pick_current(
+            pinned, {meta["session_id"]: mtime_ms(path) for path, meta in chats}
         )
         for item in chats:
             if item[1]["session_id"] == current:
@@ -549,7 +545,8 @@ class GeminiStore(SessionStore):
         if not projects:
             return []
 
-        git_cache: dict[str, str | None] = {}
+        # Read once for the whole listing, not once per project.
+        pins = state.load_state(self.provider_id)["pins"]
         rows: list[dict] = []
         for project_path in sorted(projects):
             short_id = projects[project_path]
@@ -557,7 +554,7 @@ class GeminiStore(SessionStore):
             if not chats_dir.is_dir():
                 continue
             chats = self._chats(chats_dir)
-            current = self._pick_current(short_id, chats)
+            current = self._pick_current(pins.get(short_id), chats)
             if current is None:
                 continue
             path, meta = current
@@ -573,9 +570,6 @@ class GeminiStore(SessionStore):
                     "basename",
                 )
 
-            if project_path not in git_cache:
-                git_cache[project_path] = git_branch(project_path)
-
             rows.append({
                 "project_path": project_path,
                 "encoded_path": short_id,
@@ -584,7 +578,6 @@ class GeminiStore(SessionStore):
                 "name_source": name_source,
                 "message_count": meta["message_count"],
                 "file_mtime": mtime_ms(path),
-                "git_branch": git_cache[project_path],
                 "extra_sessions": max(len(chats) - 1, 0),
             })
 
@@ -603,7 +596,7 @@ class GeminiStore(SessionStore):
         if chats_dir is None:
             return None
         chats = self._chats(chats_dir)
-        current = self._pick_current(encoded_path, chats)
+        current = self._pick_current(self._pin(encoded_path), chats)
         if current is None:
             return None
         current_id = current[1]["session_id"]
@@ -633,7 +626,7 @@ class GeminiStore(SessionStore):
         chats_dir = self._chats_dir(encoded_path)
         if chats_dir is None:
             return None
-        current = self._pick_current(encoded_path, self._chats(chats_dir))
+        current = self._pick_current(self._pin(encoded_path), self._chats(chats_dir))
         return current[1]["session_id"] if current else None
 
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
@@ -708,7 +701,7 @@ class GeminiStore(SessionStore):
         if chats_dir is None:
             return None
         chats = self._chats(chats_dir)
-        current = self._pick_current(encoded_path, chats)
+        current = self._pick_current(self._pin(encoded_path), chats)
         keep = current[1]["session_id"] if current else None
         by_id = {meta["session_id"]: path for path, meta in chats}
         removed: list[str] = []
@@ -845,7 +838,7 @@ class GeminiStore(SessionStore):
         ELEMENT that IS the CLI - the ``gemini`` binary on PATH or the
         ``gemini.js`` bundle behind it.
         """
-        if process_comm(pid) not in _NODE_COMMS:
+        if process_comm(pid) not in NODE_COMMS:
             return False
         cmdline = process_cmdline(pid)
         if cmdline is None:

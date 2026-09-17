@@ -19,6 +19,9 @@
 // * `mintsNewSessionId: false` - the web UI mints its own ids when a
 //   conversation is started in the browser; nothing on the command line takes
 //   one
+// * `terminalScope: 'project'` - one `dsh --profile web` serves every
+//   conversation of the project, so every open of the project focuses the
+//   terminal already running it rather than starting a second server
 // * `sessionIdPrefix: 'session-'` - every id is `session-<uuid>`, so the short
 //   id shown in menus is sliced past the constant part
 // * no launch modes: the web surface has no approval switch on its command
@@ -47,6 +50,7 @@ export const descriptor: IProviderDescriptor = {
   cliBinary: 'dsh',
   forkStrategy: 'server-copy',
   colourSource: 'none',
+  terminalScope: 'project',
   promptsForBranchName: true,
   mintsNewSessionId: false,
   sessionIdPrefix: 'session-',

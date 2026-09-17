@@ -92,6 +92,33 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - test-tags: integration
   - log: 2026-08-27T19:42:15Z @kj added
   - log: 2026-08-27T21:12:19Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-GUARD-104/107/110
+- [x] `DEF-SERV-210` **Id-less new session resumes in a second terminal** - MINOR; MINOR; a conversation started without a minted id (Codex or Kimi +, Codex fork) is never identifiable from its process, so the next click on its row opens a second terminal; the terminal fix is an id the CLI accepts at launch, which those CLIs do not offer; README.md:32 'an open terminal for the project is reused' is unqualified for this path
+  - evidence: wontfix: the id is minted by the CLI at launch and neither codex nor kimi accepts one; README 'One-click resume' now states the exception for a Codex or Kimi + conversation and a Codex fork
+  - repro: Kimi panel, +, then click the project's row: a second terminal
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:46:56Z @kj the CLI mints the id after launch and the probe reads nothing until then; bug-hunter lens, round 1, deferred as out of this extension's hands
+  - log: 2026-09-17T18:46:56Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-SERV-219` **comm_name doubles as the probe-candidate flag** - MINOR; MINOR; the terminal probe treats a non-empty comm_name as 'this store can own a pid', so three stores set a decoy literal to be probed at all; affects the add-a-provider path only
+  - evidence: wontfix: today's five providers are unaffected, the harm is on the add-a-provider path only; adjudicator round 1
+  - repro: read routes.py:166-170 and the comm_name of deepseek, gemini and kimi
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:47:18Z @kj one attribute carrying two meanings; architect and slop-hunter lenses, round 1
+  - log: 2026-09-17T18:47:18Z @kj added
+  - log: 2026-09-17T18:47:28Z @kj closed
+- [x] `DEF-SERV-221` **Fork docstrings describe a retired minting model** - MINOR; MINOR; store.py:470-476 and registry.py:44-45 describe a fork minting model the code no longer has and registry.py:60-61 contradicts it; documentation only
+  - evidence: wontfix: documentation only, folded into a later round; adjudicator round 1
+  - repro: read the two docstrings against the fork strategies in use
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:47:19Z @kj docstrings not updated when the strategies changed; architect lens, round 1
+  - log: 2026-09-17T18:47:19Z @kj added
+  - log: 2026-09-17T18:47:28Z @kj closed
+- [x] `DEF-SERV-231` **update_pin docstring named the Launcher tile as the argv route's only client** - MINOR; core/routes.py update_pin said the argv route's only client reaches neither pin branch; since DEF-FRONT-222 TerminalManager.launch POSTs the new-conversation shape to launch-argv to reach the clear branch, so both clauses were false; round-3 architect and slop-hunter lenses
+  - evidence: docstring now names both clients and the branch each reaches; test_routes.py test_the_argv_route_answers_the_store_argv_and_clears_the_pin guards the clear branch; pytest 227 green
+  - repro: read core/routes.py update_pin against src/core/terminals.ts launch()
+  - test-tags: MANUAL
+  - log: 2026-09-17T19:42:48Z @kj added
+  - log: 2026-09-17T19:42:48Z @kj closed
 
 ## Providers `PROV`
 
@@ -155,6 +182,27 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - log: 2026-08-26T00:00:00Z @kj reported: `stamp_fork` writes with `json.dumps(record, separators=(",", ":"))` at `:389` and `:406`, which leaves `ensure_ascii` at its default True, and splits with `text.splitlines()` at `:393`; the read-only `_parse_chat` splits the same way at `:256`. Reproduced against the live function: a two-line chat containing one raw U+2028 comes back as three lines, two of which no longer parse, at 1.42x size. Its own docstring says message records are copied through untouched - they are not
   - log: 2026-08-26T00:00:00Z @kj logged, not fixed: outside the blast radius this round's review was capped to, and the consequence is confined to the fork file rather than the user's live conversation, which is what ranks it below the Claude case. When taken it is four edits - `ensure_ascii=False` on the two `json.dumps` calls, `text.split("\n")` on the two loops
   - log: 2026-08-27T16:09:38Z @kj closed: fixed (close-out campaign, v1.0.40): five edits in gemini.py, not the four this entry recorded - splitlines() -> split('\n') at both read sites, ensure_ascii=False at both write sites, AND except (OSError, UnicodeEncodeError) at fork - without the fifth a lone surrogate raises UnicodeEncodeError (a ValueError) out of fork as a 500 instead of a 400, the exact regression the DEF-127 adjudication caught in claude.py. Three tests, each edit severed in turn reds one (test_provider_stores.py 48->51)
+- [x] `DEF-PROV-204` **DeepSeek rows carry no git branch** - MINOR; MINOR; the deepseek store emitted git_branch None for every row, so the branch badge every other assistant's row shows was absent on DeepSeek rows with no stated reason
+  - evidence: routes._list_with_git_branches fills git_branch in the executor for every row a store omits it on, and gemini, kimi and deepseek no longer compute it; pytest 227, Galata 44/44 at 1.2.21
+  - repro: DeepSeek panel over a project inside a git checkout; the row shows no branch badge
+  - test-tags: UNIT, FUNCTIONAL
+  - root-cause: 2026-09-17T18:01:30Z @kj the badge was computed per store, so a new store had to remember to copy the git_cache loop; found by the /simplify altitude lens
+  - log: 2026-09-17T18:01:30Z @kj added
+  - log: 2026-09-17T18:01:37Z @kj closed
+- [x] `DEF-PROV-212` **Model-generated titles used as row names** - MINOR; MINOR; deepseek and gemini rows are named by the assistant's generated title, which the assistant re-titles as the conversation grows, while kimi names a row by title only when isCustomTitle is set; whether a generated title counts as a name is a product decision
+  - evidence: wontfix: the DeepSeek title and the Gemini summary are the names those assistants' own UIs show for the conversation, so the row matches what the user sees there; Kimi's gate exists because its auto title is the first prompt reworded; ACC-DEEP criteria and the Galata row assertion pin the title
+  - repro: DeepSeek panel, watch a row's name change under the poll as the harness re-titles the conversation
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:46:56Z @kj name_source rule differs per provider; ux lens, round 1, deferred as a product decision
+  - log: 2026-09-17T18:46:56Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-PROV-220` **Codex rollout fallback opts out of the route's git branch fill** - MINOR; MINOR; the route fills git_branch when the key is absent, and the Codex rollout scan emits git_branch None, so on the db-unreadable path Codex rows show no branch; a value test in the route would cost one git subprocess per non-git Claude project per poll, so the fix is the rollout scan omitting the key
+  - evidence: wontfix: cosmetic on the degraded db-unreadable path; the rollout scan omitting the key is the honest fix when that path is next touched; adjudicator round 1
+  - repro: make the Codex sqlite unreadable and list; rows carry git_branch null
+  - test-tags: UNIT
+  - root-cause: 2026-09-17T18:47:18Z @kj key-presence contract met by a store that emits an empty value; architect lens, round 1
+  - log: 2026-09-17T18:47:18Z @kj added
+  - log: 2026-09-17T18:47:28Z @kj closed
 
 ## Frontend / server contract `FRONT`
 
@@ -178,6 +226,27 @@ Route shapes, payloads and timeouts where the panel and the server must agree
   - log: 2026-08-10T00:00:00Z @kj reported: reported by the bug-hunter adversary (whole-repo round 6) as a MAJOR naming two call sites, and rescoped by its impact agent - there are three, and the severity does not hold. A breach costs a spurious toast, not data: the tornado executor thread runs to completion regardless of the client aborting, `colour_store.drop_colours` still executes, and a retry is idempotent. Logged now because `DEF-72`'s closing note acknowledged this residual in prose and never gave it an id
   - log: 2026-08-10T00:00:00Z @kj deferred: a constant cannot bound an N-scaling route, so the fix is a different shape entirely - a per-route bound, or a delete that reports progress instead of blocking on one request - and neither is worth building against a symptom whose worst outcome is a toast on a project with 86 Codex conversations
   - log: 2026-08-10T00:00:00Z @kj closed by ruling (Star Colonel's direction, close-19 campaign): accepted residual. A breach needs 86 Codex conversations in one project at the measured ~0.7s per CLI invocation (858 at the fast path) and costs a spurious toast, never data - the executor thread completes, `drop_colours` still runs, retry is idempotent. No constant can bound N-scaling work, and a progress-reporting delete is machinery priced against a toast
+- [x] `DEF-FRONT-218` **Retired enum launch-mode ladder residue** - MINOR; MINOR; types.ts, modes.ts, panel.ts and gemini.ts still carry the vocabulary of the retired enum-valued launch-mode ladder that no provider implements; no runtime effect
+  - evidence: wontfix: no runtime harm, six-file radius for a documentation promise; adjudicator round 1
+  - repro: grep the four files for the enum ladder comments
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:47:18Z @kj doc promise outlived its implementor; architect lens, round 1
+  - log: 2026-09-17T18:47:18Z @kj added
+  - log: 2026-09-17T18:47:28Z @kj closed
+- [x] `DEF-FRONT-222` **Plus on a running project-scoped terminal never clears the branch pin** - MAJOR; src/core/terminals.ts launch() returned the project's running terminal before the launch POST, so for DeepSeek with its web UI terminal open the + request never reached routes.py update_pin and a pin written by a prior switch stayed; the row kept the switched conversation after the user created a new one in the browser, and Clean Up would keep it and delete the new one; round-2 ux and slop-hunter lenses, dropped by the adjudicator, confirmed from the code
+  - evidence: launch() project-scope gate POSTs a request with no session_id and an encoded_path to launch-argv before focusing, which runs update_pin without spawning; jest 'settles the pin for + on a running project without opening anything' reddens against the pre-edit file; 219 green at 1.2.24
+  - related: DEF-FRONT-9 - the pin bookkeeping this path skipped
+  - repro: DeepSeek row, switch to an older conversation, click +, create a conversation in the web UI, poll: the row stays on the switched conversation
+  - test-tags: UNIT
+  - root-cause: 2026-09-17T19:13:26Z @kj the round-1 project-scope gate answered every launch shape with focus and returned before any request; the pin bookkeeping lives only behind the launch and launch-argv routes
+  - log: 2026-09-17T19:13:26Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-FRONT-226` **ColourSource doc comment attached to TerminalScope** - MINOR; src/core/types.ts: the round-1 insertion of TerminalScope landed between ColourSource's JSDoc and its declaration, so the tint-source comment documented the scope alias and ColourSource had none; round-2 ux and architect lenses
+  - evidence: TerminalScope and its comment moved above the ColourSource JSDoc in src/core/types.ts; tsc clean at 1.2.24
+  - repro: hover ColourSource in an editor: the terminalScope comment shows
+  - test-tags: MANUAL
+  - log: 2026-09-17T19:13:26Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
 
 ## Packaging `PACK`
 
@@ -589,6 +658,120 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: E2E, MANUAL
   - log: 2026-09-07T09:43:15Z @kj added
   - log: 2026-09-07T09:45:40Z @kj closed: fixed: style/base.css light rule is three drop-shadow passes of md-green-200 at 2px; galata ui-tests/tests/dot-theme.spec.ts asserts the mint ring and rejects white and the fill's green
+- [x] `DEF-PANE-203` **Manage Sessions current row shows the id prefix** - MINOR; MINOR; Manage Sessions popup labels the current row with the first 8 characters of the conversation id; for a provider whose ids carry a prefix (session_, session-) every project reads the prefix instead of the uuid head, while the branch rows below slice past the prefix
+  - evidence: panel derives currentName through shortSessionId with the descriptor prefix and the popup renders what it is handed; jest 'the Manage Sessions popup is handed the current row name' passes, jest 206 green at 1.2.21
+  - repro: kimi or deepseek panel, right-click a row, Manage Sessions..., read the current row label
+  - test-tags: UNIT
+  - root-cause: 2026-09-17T18:01:30Z @kj popup.ts front-sliced options.current itself instead of taking the panel's short id; found by the /simplify reuse and altitude lenses over the DeepSeek change
+  - log: 2026-09-17T18:01:30Z @kj added
+  - log: 2026-09-17T18:01:37Z @kj closed
+- [x] `DEF-PANE-205` **DeepSeek row opens a second dsh web server** - MAJOR; MAJOR; the deepseek store answers the terminal probe with running true and no conversation id, and the reuse ladder matches on the id alone, so after a switch, a fork, a reload or the poll moving the row's current conversation every click starts another dsh --profile web server for the same project
+  - evidence: terminalScope on the descriptor ('project' for deepseek), TerminalManager._projectTerminal gates launch, findForSession and _doOpenSession; jest src/__tests__/terminals.spec.ts 5 tests pass (probe-confirmed reuse, microcache after the row moved, one launch for + and fork, Launcher path, conversation scope unchanged); jest 212, Galata 44/44 at 1.2.22
+  - repro: DeepSeek panel, click a row, switch to another conversation, click the row again: two terminals each running dsh --profile web
+  - test-tags: UNIT, FUNCTIONAL
+  - root-cause: 2026-09-17T18:46:30Z @kj terminal reuse keyed on the conversation id for an assistant whose one process serves every conversation of the project; found by the ux and bug-hunter lenses, round 1
+  - log: 2026-09-17T18:46:30Z @kj added
+  - log: 2026-09-17T18:46:39Z @kj closed
+- [x] `DEF-PANE-206` **Inline error strip unreadable on the dark theme** - MINOR; MINOR; the panel's error strip used --jp-error-color3 as background, which the dark theme sets to a light pink under white text, about 1.3:1
+  - evidence: background is var(--jp-rendermime-error-background), defined by both themes; prettier and Galata 44/44 at 1.2.22
+  - repro: dark theme, stop the server or remove the CLI from PATH, read the strip at the top of the panel
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:46:30Z @kj background token chosen for the light theme only; ux lens, round 1
+  - log: 2026-09-17T18:46:30Z @kj added
+  - log: 2026-09-17T18:46:39Z @kj closed
+- [x] `DEF-PANE-207` **Remove dialogs say moved to trash and cannot be undone in one sentence** - MINOR; MINOR; Remove and Clean Up dialog bodies appended This cannot be undone unconditionally, also when the deletion goes to the trash and is recoverable
+  - evidence: sentence appended only when deleteToTrash is off; jest 'says a deletion cannot be undone only when it is permanent' passes, 212 green at 1.2.22
+  - repro: trash setting on, right-click a row, Remove from <assistant>, read the dialog body
+  - test-tags: UNIT
+  - root-cause: 2026-09-17T18:46:30Z @kj the irreversibility sentence was not gated on the trash setting the verb next to it already reads; ux lens, round 1
+  - log: 2026-09-17T18:46:30Z @kj added
+  - log: 2026-09-17T18:46:39Z @kj closed
+- [x] `DEF-PANE-209` **Manage Sessions row click flips from switch to select** - MEDIUM; MEDIUM; a row click switches to the conversation until any row is ticked, then every row click selects - a mode latched by a prior action and shown only visually; sources: .claude/review-research/ux-designer/research.md 'Row click: select or invoke' (WAI-ARIA listbox, WinUI ListView one meaning per click, Sellen 1992 mode-error variance 15.6 percent for the switch method against 4.8 percent for visual feedback); remedy is a design decision - the checkbox as the only selection control and the row click always switching, or the reverse
+  - evidence: ruled 2026-09-17: row click always switches, the checkbox cell is the only select control; src/core/popup.ts activate() selection-mode branch removed; src/__tests__/popup.spec.ts 2 tests, the row-click test reddens against the old code (mutation check); jest 214 green, pytest 227 green, v1.2.23
+  - repro: open Manage Sessions, tick one row, click another row: it selects instead of switching
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:46:56Z @kj one click carrying two meanings decided by a latched selection state (popup.ts:328-344); ux lens, round 1, deferred by the adjudicator pending research, research done
+  - log: 2026-09-17T18:46:56Z @kj added
+  - log: 2026-09-17T19:03:14Z @kj closed
+- [x] `DEF-PANE-211` **Per-conversation open copy on a project-scoped assistant** - MINOR; MINOR; Open Branched Conversation submenu, the popup Open buttons ('Open this conversation in its own terminal') and the Launcher caption name a per-conversation terminal; for a project-scoped assistant they focus the project's one terminal, so the copy is a mislabel
+  - evidence: Open Branched Conversation submenu inserted only for terminalScope conversation; popup Open title answers the provider's resumeLabel for project scope ('Open Web UI' for DeepSeek); jest DEF-PANE-211 tests (3) redden against the pre-edit panel.ts; 219 green at 1.2.24
+  - repro: DeepSeek panel, right-click a row with branches, read the submenu and the popup Open tooltips
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:46:56Z @kj copy written for conversation-scoped assistants before terminalScope existed; ux lens, round 1, deferred to the next round
+  - log: 2026-09-17T18:46:56Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-PANE-213` **Recently-active rows drop below AA on hover** - MINOR; MINOR; a row active within the last minute has 2.45:1 (light) and 1.98:1 (dark) contrast against the hover and context-menu backgrounds
+  - evidence: wontfix: MINOR accessibility, logged not fixed per the project's rule; adjudicator round 1
+  - repro: hover a row that lights up as active, measure the text against the hover background
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:47:18Z @kj the active tint and the hover tint were chosen independently (base.css:979-982); ux lens, round 1
+  - log: 2026-09-17T18:47:18Z @kj added
+  - log: 2026-09-17T18:47:27Z @kj closed
+- [x] `DEF-PANE-214` **The + button title never names the folder** - MINOR; MINOR; the new-session button's tooltip does not say which folder the conversation starts in; DEF-36, DEF-113 and DEF-114 settled it as deliberately unnamed on path-depth grounds
+  - evidence: wontfix: DEF-36, DEF-113 and DEF-114 settled the tooltip as deliberately unnamed on path-depth grounds; adjudicator round 1
+  - repro: hover the + button in any panel
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:47:18Z @kj settled design; ux lens, round 1
+  - log: 2026-09-17T18:47:18Z @kj added
+  - log: 2026-09-17T18:47:27Z @kj closed
+- [x] `DEF-PANE-215` **Every launch raises a full-window spinner dialog** - MINOR; MINOR; a launch that answers in under a second still flashes the modal spinner; a show-after-threshold would be a new mechanism, and Claude's pre-flight measures seconds on large transcripts
+  - evidence: wontfix: a show-after-threshold is a new mechanism for a MINOR and the sub-second premise does not hold for Claude's pre-flight; adjudicator round 1
+  - repro: click a row on a small store and watch the modal
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:47:18Z @kj one spinner for every launch length; ux lens, round 1
+  - log: 2026-09-17T18:47:18Z @kj added
+  - log: 2026-09-17T18:47:27Z @kj closed
+- [x] `DEF-PANE-216` **Cold-load veil stays over drawn rows** - MINOR; MINOR; on first load the rows are drawn under the loading veil for the rest of the 500 ms floor
+  - evidence: wontfix: MINOR, logged not fixed; adjudicator round 1
+  - repro: reload JupyterLab and watch the panel's first paint
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:47:18Z @kj the veil's floor is timed, not tied to the rows' arrival (panel.ts:239-256); ux lens, round 1
+  - log: 2026-09-17T18:47:18Z @kj added
+  - log: 2026-09-17T18:47:27Z @kj closed
+- [x] `DEF-PANE-217` **Conversation-count badge has no accessible name** - MINOR; MINOR; the badge showing the number of parallel conversations carries no aria-label, so a screen reader reads a bare number
+  - evidence: wontfix: MINOR accessibility, two attributes, logged for a later round; adjudicator round 1
+  - repro: inspect a row with branches; the badge span has no aria-label
+  - test-tags: MANUAL
+  - root-cause: 2026-09-17T18:47:18Z @kj two attributes missing (panel.ts:1808-1817); ux lens, round 1
+  - log: 2026-09-17T18:47:18Z @kj added
+  - log: 2026-09-17T18:47:27Z @kj closed
+- [x] `DEF-PANE-223` **Project-scope microcache answered without a probe holds every open on a dead shell** - MAJOR; src/core/terminals.ts _projectTerminal returned the cached widget on isDisposed alone, so after the user stopped the dsh server in that terminal every row click, + and popup Open focused the bash prompt and nothing restarted the web UI until the tab was closed or the page reloaded; round-2 slop-hunter lens with a scratch Jest reproduction, dropped by the adjudicator, confirmed from the code
+  - evidence: _projectTerminal probes the cached widget; a running:false answer evicts it only once the server has confirmed it running, so a fresh launch whose process is still starting is kept and the Galata /bin/sh stub stays reused; jest 'relaunches once the server it confirmed has stopped' reddens against the pre-edit file; Galata 44 green at 1.2.24
+  - repro: DeepSeek row click, Ctrl+C the server in the terminal, click the row again: the shell is focused, no server starts
+  - test-tags: UNIT
+  - root-cause: 2026-09-17T19:13:26Z @kj the microcache rung trusted the widget's liveness for the process's liveness; the conversation-scope same-id rung has done the same since the port, and project scope routed every open through it
+  - log: 2026-09-17T19:13:26Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-PANE-224` **Plus on a project-scoped assistant with its terminal open says nothing** - MINOR; src/core/terminals.ts launch() answers + with focus(running); when that terminal is already the front tab nothing visible changes and no cue says the conversation is started in the web UI; round-2 bug-hunter lens; every remedy (a Notification, hiding +, an inline cue) is a branch in core keyed on terminalScope for a missing cue
+  - evidence: wontfix: the correct outcome of + for a project-scoped assistant is the terminal holding the web UI URL, which is what is focused, and the pin is now settled (DEF-FRONT-222); a cue is a new mechanism for a MINOR
+  - repro: DeepSeek project with its web UI terminal as the front tab, click +: no visible change
+  - test-tags: MANUAL
+  - log: 2026-09-17T19:13:26Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-PANE-225` **Project terminal not recognised for a folder with no conversation row** - MINOR; src/core/terminals.ts _projectTerminal matches a running terminal to a project through sessionForCwds over _sessions, so a folder the harness has written no session log for never matches; reached only by the Launcher tile on such a folder, then a reload, then the tile again, where the outcome is the pre-round-1 duplicate; round-2 bug-hunter lens; a cwd-prefix fallback would reopen the nested-project ambiguity the sessionForCwds rule resolves
+  - evidence: wontfix: the primary path is a row click, which presupposes a row and a _sessions entry; the miss needs the tile on a folder with no session log, a reload and the tile again, and a cwd-prefix fallback would reopen the nested-project ambiguity
+  - repro: DeepSeek Launcher tile on a folder with no session log, reload, tile again: a second server terminal
+  - test-tags: MANUAL
+  - log: 2026-09-17T19:13:26Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-PANE-227` **Project-scope gate not atomic across two in-flight opens** - MINOR; src/core/terminals.ts _pending is keyed on project plus conversation id, so two opens of different conversations of one project inside the pre-spinner probe walk both miss the cache and both launch; needs the popup or the Open Branched submenu inside a sub-second window after a row click; round-2 architect and slop-hunter lenses; keying _pending by project for project scope is a branch on terminalScope in openSession for a MINOR
+  - evidence: wontfix: the window is the pre-spinner probe walk after a row click, the second open must come from the popup or the submenu inside it, and the outcome is the pre-round-1 duplicate on that sequence only; a double-click on one row shares the key and coalesces
+  - repro: DeepSeek project, click a row and within the probe walk open another conversation from the popup: two server terminals
+  - test-tags: MANUAL
+  - log: 2026-09-17T19:13:26Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-PANE-228` **Two guards in the project-scope code no production input reaches** - MINOR; src/core/terminals.ts: the projectPath-less arm of findForSession is reached only by a test, since panel.ts launchHere always passes the folder and _doOpenSession returns before it for project scope; the !this._tracker return in _projectTerminal duplicates the optional chaining _liveTerminals already does; round-2 ux lens; private symbols, and the proposed edits trade an unreachable arm for a dead argument
+  - evidence: wontfix: private symbols with no user effect; making projectPath required forces the conversation-scope call to pass an argument it never reads, and the tracker guard mirrors the one in findForSession
+  - repro: read src/core/terminals.ts findForSession and _projectTerminal
+  - test-tags: MANUAL
+  - log: 2026-09-17T19:13:26Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-PANE-229` **_doOpenSession project-scope early return duplicates the fresh-launch call** - MINOR; src/core/terminals.ts _doOpenSession: the project-scope branch calls launch() with the same five-field request as the step-3 call below it; wrapping steps 1-2 in the conversation-scope condition would leave one launch; round-2 ux lens; behaviour identical
+  - evidence: wontfix: behaviour identical; the early return keeps the project-scope path readable as one block and the launch call is five fields
+  - repro: read src/core/terminals.ts _doOpenSession
+  - test-tags: MANUAL
+  - log: 2026-09-17T19:13:26Z @kj added
+  - log: 2026-09-17T19:13:45Z @kj closed
 
 ## Colour store `COLO`
 
@@ -1038,3 +1221,17 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - root-cause: 2026-09-17T17:24:14Z @kj The alternation was applied with RegExp.test over the whole line, which has no word boundary
   - log: 2026-09-17T17:24:14Z @kj added
   - log: 2026-09-17T17:24:27Z @kj closed
+- [x] `DEF-GUARD-208` **DeepSeek fork-layout test ties on mtime** - MINOR; MINOR; test_deepseek_fork_copies_the_log_in_the_harness_layout asserts the copy is current by recency while the parent and the copy are written within one millisecond, so the recency fallback ties and the parent wins about one run in six
+  - evidence: parent backdated 600 s and the copy 300 s before each fork; the test passed 10 of 10 isolated runs and pytest 227 green at 1.2.22
+  - repro: run the test ten times in isolation; one fails on assert row session_id == new_id
+  - test-tags: UNIT
+  - root-cause: 2026-09-17T18:46:30Z @kj fixture written in one burst with no touch backdating the parent, the race the file's touch helper documents
+  - log: 2026-09-17T18:46:30Z @kj added
+  - log: 2026-09-17T18:46:39Z @kj closed
+- [x] `DEF-GUARD-230` **Galata launch specs exercised a plain shell, not the launched assistant** - MAJOR; Galata's terminals fixture routes GET /api/terminals through a map of the terminals the page itself created via the API, so the pty the extension's launch route creates server-side is missing from the list JupyterLab's terminal:open reads; terminal:open then calls startNew with the same name and jupyter_server_terminals overwrites the entry with a default login shell (server log: 'New terminal with automatic name: 1' twice, no close between); every launch spec opened a shell at the server root while the launched stub ran orphaned; found while checking the round-3 MAJOR empirically; curl against the same server lists the launched pty, so the product is unaffected
+  - evidence: ui-tests/tests/shared.ts waitForApplication calls page.unroute(galata.Routes.terminals) before the readiness wait; the DeepSeek widget now shows 'stub .../dsh running' (scratchpad ctrlc-before.png) and its probe answers the project cwd; Galata run at 1.2.24 in logs/galata-round3-1224.log
+  - repro: Galata spec: click a DeepSeek row, then probe the widget's terminal name - cwds is the server root, not the project; screenshot shows the login MOTD
+  - test-tags: FUNCTIONAL
+  - root-cause: 2026-09-17T19:42:48Z @kj ui-tests/node_modules/@jupyterlab/galata/lib/galata.js mockRunners filters the terminals listing to the page-created map; this Galata version has no option to switch it off
+  - log: 2026-09-17T19:42:48Z @kj added
+  - log: 2026-09-17T19:42:48Z @kj closed

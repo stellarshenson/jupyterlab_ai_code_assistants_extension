@@ -4,6 +4,26 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.25] - 2026-09-17
+
+### Added
+
+- DeepSeek joins Claude Code, Codex, Kimi and Gemini as the fifth assistant. Its panel lists the projects under `~/.dsh/sessions` (or `$DSH_HOME`) and a row's `Open Web UI` starts the DeepSeek Harness's browser UI in the project's terminal; branching and deleting work from the panel as for every other assistant. Requires the `zstandard` Python package, which installs with the extension
+- A terminal-scope capability on the provider descriptor. An assistant whose one process serves every conversation of a project, as the DeepSeek web UI does, reuses the project's running terminal for every open - row click, `+`, fork, Launcher tile - instead of starting a second server
+
+### Changed
+
+- In the Manage Sessions popup a row click always switches to that conversation; the checkbox is the only control that selects rows for deletion. A click no longer changes meaning once something is selected
+- DeepSeek's context menu no longer offers Open Branched Conversation, and its popup Open buttons say `Open Web UI`, since one terminal serves every conversation of the project
+- The README states the one case where a click opens a second terminal: a Codex or Kimi conversation started with `+`, and a Codex fork, run without an id until the CLI writes one
+
+### Fixed
+
+- `+` on a DeepSeek project whose web UI was already running left a prior switch's pin in place, so a conversation then created in the browser was not the row's current one. The pin is now cleared without starting a second server
+- A DeepSeek web server the user had started by hand and then stopped was focused as a dead shell on every later open; the panel now starts the harness afresh
+- The Remove and Clean Up dialogs said "This cannot be undone" also when the deletion went to the trash and was recoverable; the sentence appears only for a permanent deletion
+- The inline error strip used a colour token the stock dark theme does not define; it now uses the theme's own error background
+
 ## [1.2.18] - 2026-09-07
 
 ### Added

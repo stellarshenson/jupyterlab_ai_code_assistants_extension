@@ -104,6 +104,10 @@ class ProviderDescriptor:
     cli_binary: str
     capabilities: Capabilities = field(default_factory=Capabilities)
     legacy: LegacySource | None = None
+    #: A constant prefix every conversation id carries (``session_``), or
+    #: empty for bare uuids. Shared verbatim with the frontend descriptor's
+    #: ``sessionIdPrefix``: both runtimes slice the short id past it.
+    session_id_prefix: str = ""
 
 
 class Provider:
@@ -169,6 +173,7 @@ def _discover() -> dict[str, Provider]:
         # The store reaches its own favourites, pins and colours by id; binding
         # it here keeps the id declared in exactly one place.
         store.provider_id = descriptor.id
+        store.session_id_prefix = descriptor.session_id_prefix
         found[descriptor.id] = Provider(descriptor, store)
     return dict(sorted(found.items()))
 

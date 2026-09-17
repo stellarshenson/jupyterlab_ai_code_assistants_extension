@@ -407,14 +407,10 @@ class CodexStore(SessionStore):
 
     @staticmethod
     def _resolve(threads: list[dict], pin: str | None) -> dict:
-        """A project's representative thread: the pin when it still exists,
-        else the most recently active one. ``threads`` must be non-empty and
-        recency-sorted descending."""
-        if pin:
-            for t in threads:
-                if t["id"] == pin:
-                    return t
-        return threads[0]
+        """A project's representative thread - the core's pin-or-newest rule
+        over ``recency_ms``. ``threads`` must be non-empty."""
+        current = state.pick_current(pin, {t["id"]: t["recency_ms"] for t in threads})
+        return next(t for t in threads if t["id"] == current)
 
     def _resolve_project_current(
         self, project_path: str, threads: list[dict]
@@ -451,9 +447,11 @@ class CodexStore(SessionStore):
             by_cwd.setdefault(thread["cwd"], []).append(thread)
 
         active = live_cwds()
+        # Read once for the whole listing, not once per project.
+        pins = state.load_state(self.provider_id)["pins"]
         rows: list[dict] = []
         for cwd, threads in by_cwd.items():
-            current = self._resolve(threads, self._pin(cwd))
+            current = self._resolve(threads, pins.get(cwd))
             basename = os.path.basename(cwd.rstrip("/")) or cwd
             name = current["name"]
             if isinstance(name, str) and name.strip():

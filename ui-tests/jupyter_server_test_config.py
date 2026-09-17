@@ -25,7 +25,6 @@ same value for a hand-launched server.
 """
 import json
 import os
-import re
 import stat
 import sys
 import time
@@ -215,7 +214,7 @@ for _i, _wide_id in enumerate(("wide-0", _BG_SESSION_ID)):
 # session file - the same lines a ``compression: 'none'`` root holds.
 _dsh_cwd = _root / "harness"
 _dsh_cwd.mkdir(parents=True, exist_ok=True)
-_dsh_key = "--" + re.sub(r"[/\\:]+", "-", str(_dsh_cwd)).lstrip("-") + "--"
+_dsh_key = "--" + str(_dsh_cwd).strip("/").replace("/", "-") + "--"
 _dsh_session = Path(os.environ["DSH_HOME"]) / "sessions" / _dsh_key / "session-1a2b3c4d-0000-4000-8000-000000000001"
 _dsh_session.mkdir(parents=True, exist_ok=True)
 (_dsh_session / "session.v3.jsonl").write_text(

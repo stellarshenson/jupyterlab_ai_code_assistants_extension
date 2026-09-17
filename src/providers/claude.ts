@@ -46,6 +46,7 @@ export const descriptor: IProviderDescriptor = {
   // its transcript, so the assistant supplies the DEFAULT tint - a colour the
   // user then sets on the tab diverges from it deliberately and wins.
   colourSource: 'native',
+  terminalScope: 'conversation',
   // `-n <name>` at launch: Claude stamps the name itself and re-stamps it on
   // every turn, which is the only way a fork's name survives - a title written
   // after the fact loses to the parent title the fork inherits.

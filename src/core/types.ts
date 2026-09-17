@@ -22,6 +22,9 @@
  */
 export type ForkStrategy = 'native-flag' | 'native-command' | 'server-copy';
 
+/** See `IProviderDescriptor.terminalScope`. */
+export type TerminalScope = 'conversation' | 'project';
+
 /** Where a conversation's DEFAULT tab tint comes from. A user-set colour in
  * the extension's own write-back store always wins over all three. */
 export type ColourSource = 'native' | 'derived' | 'none';
@@ -65,6 +68,14 @@ export interface IProviderDescriptor {
   cliBinary: string;
   forkStrategy: ForkStrategy;
   colourSource: ColourSource;
+  /** What one terminal of this assistant holds. `conversation`: the process
+   * runs exactly one conversation, so a terminal is reused only when the
+   * server reads the wanted id off it. `project`: the process serves every
+   * conversation of the project (a web UI chosen in the browser), so the
+   * project's one running terminal is the answer to every open - a row click,
+   * `+`, a fork, a Launcher tile - and a second process on the same project
+   * is always a duplicate. */
+  terminalScope: TerminalScope;
   /** Whether the branch flow asks the user to name the new conversation.
    * Where that name then GOES is `forkStrategy`'s job. */
   promptsForBranchName: boolean;
@@ -330,10 +341,6 @@ export interface IProviderHooks {
   resumeLabel?: (session: ISession | null) => string;
   /** Extra lines for the row tooltip. */
   tooltipLines?: (session: ISession) => string[];
-  /** Menu label for one branch. Defaults to `<label> (<short id>) - <time>`;
-   * a provider whose titles are written in wide scripts overrides it to bound
-   * the menu by display columns rather than by code units. */
-  branchLabel?: (branch: IBranch, shortId: string) => string;
 }
 
 /** What `providers/index.ts` registers: one descriptor, optionally with hooks. */

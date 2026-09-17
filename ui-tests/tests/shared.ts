@@ -8,6 +8,8 @@
  * fails loudly instead of quietly weakening an assertion.
  */
 
+import { galata } from '@jupyterlab/galata';
+
 /** Providers whose stub binary is on PATH, so a panel is expected. In the
  * server's roster order, which is alphabetical by id. */
 export const AVAILABLE = ['claude', 'codex', 'deepseek', 'kimi'];
@@ -59,6 +61,14 @@ export const waitForApplication = async (
 ): Promise<void> => {
   void baseURL;
   const waitIsReady = async (page: any): Promise<void> => {
+    // Galata answers GET /api/terminals from a map of the terminals THIS page
+    // created through the API, so a pty the extension's launch route creates
+    // server-side is missing from the list JupyterLab's `terminal:open` reads.
+    // It then starts a default shell under the same name, which the server
+    // lets overwrite the launched entry - every launch spec was exercising a
+    // plain login shell instead of the assistant (DEF-GUARD-230). The route
+    // mock goes, and the page reads the server's own list.
+    await page.unroute(galata.Routes.terminals);
     await page.locator('#jupyterlab-splash').waitFor({ state: 'detached' });
     await page.locator('.jp-LabShell').first().waitFor({ state: 'visible' });
     const status = await fetchStatus(page);
@@ -138,4 +148,12 @@ export async function fetchStatus(page: any): Promise<{
     throw new Error(`status probe failed: ${response.status()}`);
   }
   return response.json();
+}
+
+/** How many terminals the server is running. */
+export async function terminalCount(page: any): Promise<number> {
+  const running = (await (
+    await page.request.get('/api/terminals')
+  ).json()) as unknown[];
+  return running.length;
 }

@@ -122,6 +122,22 @@ def _is_pin(value: object) -> bool:
     )
 
 
+def pick_current(pinned: str | None, activity: dict[str, int]) -> str | None:
+    """The project's current conversation among ``activity`` (conversation
+    id to ms-epoch of last activity): ``pinned`` when it is still one of
+    them, otherwise the most recently active. None for an empty project.
+
+    A dangling pin is ignored and recency resumes. A store whose assistant
+    keeps its own notion of "current" resolves that instead and never calls
+    this.
+    """
+    if not activity:
+        return None
+    if pinned in activity:
+        return pinned
+    return max(activity, key=activity.__getitem__)
+
+
 def read_pin(provider_id: str, encoded_path: str) -> str | None:
     """The conversation pinned as this project's current one, or None."""
     return load_state(provider_id)["pins"].get(encoded_path)

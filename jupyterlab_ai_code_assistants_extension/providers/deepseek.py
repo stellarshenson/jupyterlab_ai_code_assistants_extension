@@ -47,25 +47,19 @@ from pathlib import Path
 
 import zstandard
 
+from ..core import state
 from ..core.registry import Capabilities, ProviderDescriptor
 from ..core.store import (
+    NODE_COMMS,
     FileMemo,
     SessionNotFound,
     SessionStore,
     cmdline_args,
     dispose_path,
     is_safe_segment,
-    mtime_ms,
     process_cmdline,
     process_comm,
 )
-
-
-# What Node reports as its main thread's ``comm`` across the releases the
-# harness supports (Node 22 to 26). The argv check is the real discriminator;
-# this set only keeps the cheap pre-filter from failing closed on a version
-# skew (docs/defects.md DEF-24, the same finding on the Gemini provider).
-_NODE_COMMS = frozenset({"node", "MainThread", "node-MainThread"})
 
 # A refused deletion is otherwise invisible: the count simply comes back short
 # and the server log is empty, which is where an admin looks first.
@@ -112,36 +106,47 @@ def dsh_home() -> Path:
     return Path(override) if override else Path.home() / DSH_DIRNAME
 
 
-def _decode(raw: bytes, compressed: bool) -> str:
-    """The log's text; the compressed form is a concatenation of frames."""
-    if compressed:
-        reader = zstandard.ZstdDecompressor().stream_reader(
-            raw, read_across_frames=True
-        )
-        raw = reader.read()
-    return raw.decode("utf-8", "replace")
-
-
 def read_log(path: Path) -> str | None:
     """A log's text, or None when it cannot be read or decoded.
 
-    A torn final frame - the harness crashed mid-append - contributes the
-    blocks it holds whole and nothing after them, which is the harness's own
-    recovery rule; the harness rewrites the tail on its next write-open. Only
-    a frame that is corrupt in what it does hold fails the decode.
+    The compressed form is a concatenation of frames. A torn final frame - the
+    harness crashed mid-append - contributes the blocks it holds whole and
+    nothing after them, which is the harness's own recovery rule; the harness
+    rewrites the tail on its next write-open. Only a frame that is corrupt in
+    what it does hold fails the decode.
     """
     try:
-        return _decode(path.read_bytes(), path.suffix == ".zstd")
+        raw = path.read_bytes()
+        if path.suffix == ".zstd":
+            raw = zstandard.ZstdDecompressor().stream_reader(
+                raw, read_across_frames=True
+            ).read()
     except (OSError, zstandard.ZstdError):
         return None
+    return raw.decode("utf-8", "replace")
 
 
-def _parse_log(path: Path, _st: os.stat_result) -> dict | None:
+def _title_event(line: str) -> dict | None:
+    """A ``session/title`` record with its ``data`` dict, or None."""
+    if not line.startswith(_TITLE_PREFIX):
+        return None
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get("data"), dict):
+        return None
+    return record
+
+
+def _parse_log(path: Path, st: os.stat_result) -> dict | None:
     """Header and display metadata of one log, or None when it is not one.
 
     Only the header and the ``session/title`` events are parsed; message
     events are counted by prefix (see ``_MESSAGE_PREFIXES``). The newest title
-    wins, since the harness re-titles a conversation as it grows.
+    wins, since the harness re-titles a conversation as it grows. The mtime is
+    recorded from the stat the memo already took: the memo re-parses on any
+    change to it, so the stored value is always the file's current one.
     """
     text = read_log(path)
     if text is None:
@@ -168,21 +173,18 @@ def _parse_log(path: Path, _st: os.stat_result) -> dict | None:
     for line in lines[1:]:
         if line.startswith(_MESSAGE_PREFIXES):
             count += 1
-        elif line.startswith(_TITLE_PREFIX):
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            data = record.get("data") if isinstance(record, dict) else None
-            candidate = data.get("title") if isinstance(data, dict) else None
-            if isinstance(candidate, str) and candidate.strip():
-                title = candidate.strip()
+            continue
+        record = _title_event(line)
+        candidate = record["data"].get("title") if record else None
+        if isinstance(candidate, str) and candidate.strip():
+            title = candidate.strip()
     return {
         "session_id": session_id,
         "cwd": cwd,
         "subagent": header.get("origin") == "subagent",
         "title": title,
         "message_count": count,
+        "mtime_ms": int(st.st_mtime * 1000),
     }
 
 
@@ -203,7 +205,7 @@ def log_file(session_dir: Path) -> Path | None:
     return best[1] if best else None
 
 
-def stamp_fork(text: str, new_id: str, name: str) -> str | None:
+def stamp_fork(text: str, new_id: str, name: str) -> str:
     """Rewrite a log's text as a fork: the header under ``new_id``, the newest
     title event carrying ``name``.
 
@@ -211,31 +213,20 @@ def stamp_fork(text: str, new_id: str, name: str) -> str | None:
     being branched and is copied through byte for byte. A log that carries no
     title event keeps its lines as they are and the fork is listed under the
     project's name, since the harness records a title only as an event and
-    this store writes no events of its own. None when the first line is not a
-    header, which means the file is not a conversation.
+    this store writes no events of its own. ``text`` is a listed log, so its
+    first line is a header.
     """
     lines = text.split("\n")
-    try:
-        header = json.loads(lines[0])
-    except ValueError:
-        return None
-    if not isinstance(header, dict) or header.get("type") != "session":
-        return None
+    header = json.loads(lines[0])
     header["id"] = new_id
     lines[0] = json.dumps(header, separators=(",", ":"), ensure_ascii=False)
     for index in range(len(lines) - 1, 0, -1):
-        if not lines[index].startswith(_TITLE_PREFIX):
+        record = _title_event(lines[index])
+        if record is None:
             continue
-        try:
-            record = json.loads(lines[index])
-        except ValueError:
-            continue
-        if isinstance(record, dict) and isinstance(record.get("data"), dict):
-            record["data"]["title"] = name
-            lines[index] = json.dumps(
-                record, separators=(",", ":"), ensure_ascii=False
-            )
-            break
+        record["data"]["title"] = name
+        lines[index] = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+        break
     return "\n".join(lines)
 
 
@@ -323,12 +314,16 @@ class DeepSeekStore(SessionStore):
         return out
 
     def _current(
-        self, encoded_path: str, sessions: dict[str, tuple[Path, dict]]
+        self, pinned: str | None, sessions: dict[str, tuple[Path, dict]]
     ) -> tuple[Path, dict] | None:
-        current = self.pick_current(
-            encoded_path, {sid: mtime_ms(log) for sid, (log, _) in sessions.items()}
+        """The core's pin-or-newest rule over the logs' mtimes."""
+        current = state.pick_current(
+            pinned, {sid: meta["mtime_ms"] for sid, (_, meta) in sessions.items()}
         )
         return sessions[current] if current else None
+
+    def _pin(self, encoded_path: str) -> str | None:
+        return state.read_pin(self.provider_id, encoded_path)
 
     def _find_log(self, session_id: str) -> Path | None:
         """The log of one conversation, searched across every project.
@@ -354,13 +349,15 @@ class DeepSeekStore(SessionStore):
         conversation the user may want to resume. An absent root yields an
         empty listing.
         """
+        # Read once for the whole listing, not once per project.
+        pins = state.load_state(self.provider_id)["pins"]
         rows: list[dict] = []
         for project_dir in self._project_dirs():
             sessions = self._sessions(project_dir)
-            current = self._current(project_dir.name, sessions)
+            current = self._current(pins.get(project_dir.name), sessions)
             if current is None:
                 continue
-            log, meta = current
+            _, meta = current
             project_path = meta["cwd"]
             if meta["title"]:
                 name, name_source = meta["title"], "session"
@@ -376,8 +373,7 @@ class DeepSeekStore(SessionStore):
                 "name": name,
                 "name_source": name_source,
                 "message_count": meta["message_count"],
-                "file_mtime": mtime_ms(log),
-                "git_branch": None,
+                "file_mtime": meta["mtime_ms"],
                 "extra_sessions": max(len(sessions) - 1, 0),
             })
         rows.sort(key=lambda row: row["file_mtime"], reverse=True)
@@ -395,19 +391,17 @@ class DeepSeekStore(SessionStore):
         if project_dir is None:
             return None
         sessions = self._sessions(project_dir)
-        current = self._current(encoded_path, sessions)
+        current = self._current(self._pin(encoded_path), sessions)
         if current is None:
             return None
         current_id = current[1]["session_id"]
         branches = [
             {
                 "session_id": session_id,
-                "file_mtime": mtime_ms(log),
-                # The uuid's first eight characters: what is left of the id
-                # once the constant ``session-`` prefix is dropped.
-                "label": meta["title"] or session_id[8:16],
+                "file_mtime": meta["mtime_ms"],
+                "label": meta["title"] or self.short_id(session_id),
             }
-            for session_id, (log, meta) in sessions.items()
+            for session_id, (_, meta) in sessions.items()
             if session_id != current_id
         ]
         branches.sort(key=lambda branch: branch["file_mtime"], reverse=True)
@@ -417,7 +411,7 @@ class DeepSeekStore(SessionStore):
         project_dir = self._project_dir(encoded_path)
         if project_dir is None:
             return None
-        current = self._current(encoded_path, self._sessions(project_dir))
+        current = self._current(self._pin(encoded_path), self._sessions(project_dir))
         return current[1]["session_id"] if current else None
 
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
@@ -486,7 +480,7 @@ class DeepSeekStore(SessionStore):
         if project_dir is None:
             return None
         sessions = self._sessions(project_dir)
-        current = self._current(encoded_path, sessions)
+        current = self._current(self._pin(encoded_path), sessions)
         keep = current[1]["session_id"] if current else None
         removed: list[str] = []
         for session_id in session_ids:
@@ -531,10 +525,8 @@ class DeepSeekStore(SessionStore):
         if isinstance(name, str) and name.strip():
             fork_name = name.strip()
         else:
-            fork_name = f"Fork of {meta['title'] or session_id[8:16]}"
+            fork_name = f"Fork of {meta['title'] or self.short_id(session_id)}"
         content = stamp_fork(text, new_id, fork_name)
-        if content is None:
-            return None
         dst_dir = project_dir / new_id
         try:
             dst_dir.mkdir()
@@ -585,7 +577,7 @@ class DeepSeekStore(SessionStore):
         or the ``bin.js`` behind it by its full package path - never a bare
         ``bin.js``, which any package on the machine may carry.
         """
-        if process_comm(pid) not in _NODE_COMMS:
+        if process_comm(pid) not in NODE_COMMS:
             return False
         cmdline = process_cmdline(pid)
         if cmdline is None:
@@ -612,6 +604,8 @@ DESCRIPTOR = ProviderDescriptor(
     # No standalone extension preceded this provider, so there is no state to
     # carry over.
     legacy=None,
+    # Every id is ``session-<uuid4>``; the short id is the uuid's head.
+    session_id_prefix="session-",
 )
 
 STORE = DeepSeekStore()

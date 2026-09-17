@@ -24,8 +24,9 @@ export namespace ManageSessionsPopup {
     branches: IBranch[];
     /** The project's current conversation id, pinned at the top. */
     current: string;
-    /** Display name of the row this popup was opened from. */
-    projectName: string;
+    /** Display name of the current row: the project's name and the short id
+     * of `current`, derived by the panel with the same rule as `branchName`. */
+    currentName: string;
     /** Whether deletions move to trash - the popup says which it means. */
     deleteToTrash: boolean;
     /** Display name for one branch, `<label> (<short id>)` by default. */
@@ -232,10 +233,7 @@ export function showManageSessionsPopup(
     // same structure the branch rows below use.
     const currentText = document.createElement('span');
     currentText.className = 'jp-AiAssistantsPanel-branchLabelText';
-    currentText.textContent = `${options.projectName} (${options.current.slice(
-      0,
-      8
-    )})`;
+    currentText.textContent = options.currentName;
     currentLabel.appendChild(currentText);
     currentRow.appendChild(currentLabel);
     const badge = document.createElement('span');
@@ -327,20 +325,9 @@ export function showManageSessionsPopup(
       row.appendChild(openButton(b.session_id));
       row.appendChild(copyButton(b.session_id, trans));
 
+      // A row click always switches, whatever is selected: the checkbox cell
+      // is the one select target, so a click has one meaning (DEF-PANE-209).
       const activate = (): void => {
-        // Selection mode: while anything is ticked, row clicks toggle
-        // selection - no accidental switch mid-selection.
-        if (selected.size > 0) {
-          if (selected.has(b.session_id)) {
-            selected.delete(b.session_id);
-          } else {
-            selected.add(b.session_id);
-          }
-          check.checked = selected.has(b.session_id);
-          disarm();
-          updateControls();
-          return;
-        }
         dialog.dispose();
         options.onSwitch(b.session_id);
       };

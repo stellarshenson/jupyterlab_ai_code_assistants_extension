@@ -60,6 +60,7 @@ const { readdirSync } = require('fs');
       colourSource: d.colourSource,
       launchModes: (d.launchModes ?? []).map(x => x.id),
       legacyPluginId: d.legacyPluginId ?? null,
+      sessionIdPrefix: d.sessionIdPrefix ?? '',
       label: d.label
     });
   }
@@ -277,6 +278,11 @@ def test_descriptor_fields_agree_across_runtimes():
         assert t["legacyPluginId"] == (
             d.legacy.plugin_id if d.legacy is not None else None
         ), pid
+        # Both runtimes slice a short id past this prefix. The server's
+        # fallback branch label IS that short id, and the panel drops its
+        # `(<short id>)` suffix only when the two agree - a drift shows the
+        # constant prefix, or the id twice, on every untitled branch.
+        assert t["sessionIdPrefix"] == d.session_id_prefix, pid
 
 
 def test_the_colour_vocabulary_is_the_same_list_in_both_runtimes():

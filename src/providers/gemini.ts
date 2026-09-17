@@ -48,6 +48,7 @@ export const descriptor: IProviderDescriptor = {
   // and the launch resumes that id like any other conversation.
   forkStrategy: 'server-copy',
   colourSource: 'none',
+  terminalScope: 'conversation',
   // The fork's name is written into the copy by the server; the CLI has no
   // naming flag to take it.
   promptsForBranchName: true,

@@ -43,6 +43,7 @@ export const descriptor: IProviderDescriptor = {
   forkStrategy: 'native-command',
   // No `/color` equivalent, and nothing in the thread store records one.
   colourSource: 'none',
+  terminalScope: 'conversation',
   // Forks are unnamed - Codex has no naming flag and no writable title field,
   // so the panel never asks for a name it could not stamp anywhere.
   promptsForBranchName: false,

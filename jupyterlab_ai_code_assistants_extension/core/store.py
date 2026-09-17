@@ -133,6 +133,15 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+#: What Node reports as its main thread's ``comm``, across the releases the
+#: Node-based assistants support. Node 24 and earlier write ``MainThread``;
+#: Node 26 writes ``node-MainThread``; a build that names the process itself
+#: writes ``node``. A store's argv check is the real discriminator - this set
+#: only keeps the cheap pre-filter from failing closed on a version skew
+#: (docs/defects.md DEF-24).
+NODE_COMMS = frozenset({"node", "MainThread", "node-MainThread"})
+
+
 def process_comm(pid: int) -> str | None:
     """``/proc/<pid>/comm`` of a process, or None when it cannot be read."""
     if sys.platform != "linux":
@@ -332,6 +341,20 @@ class SessionStore(ABC):
     #: can reach its own favourites, pins and colours in the core stores.
     provider_id: str = ""
 
+    #: Also bound from the descriptor: the constant every conversation id of
+    #: the assistant carries, or empty for bare uuids.
+    session_id_prefix: str = ""
+
+    def short_id(self, session_id: str) -> str:
+        """The distinguishing part of a conversation id: its first eight
+        characters past ``session_id_prefix``. The same rule as the
+        frontend's ``shortSessionId``, and it must stay so - a branch label
+        that falls back to the short id is shown without a ``(<short id>)``
+        suffix only when the two agree."""
+        prefix = self.session_id_prefix
+        start = len(prefix) if prefix and session_id.startswith(prefix) else 0
+        return session_id[start:start + 8]
+
     # -- listing ---------------------------------------------------------
 
     @abstractmethod
@@ -366,30 +389,6 @@ class SessionStore(ABC):
         markers), so a 2s fork watcher never pays for them. None on an invalid
         ``encoded_path`` or when no current conversation resolves.
         """
-
-    def pick_current(
-        self, encoded_path: str, activity: dict[str, int]
-    ) -> str | None:
-        """The project's current conversation among ``activity`` (conversation
-        id to ms-epoch of last activity): the pin when it still resolves,
-        otherwise the most recently active.
-
-        The pin is the core's, written on a switch or a fork. Honouring it over
-        recency is what stops continued work in another conversation dragging
-        the row back to it; a dangling pin is ignored and recency resumes. A
-        store whose assistant keeps its own notion of "current" resolves that
-        instead and never calls this.
-        """
-        if not activity:
-            return None
-        # Imported here: ``core.state`` builds on this module's JSON helpers,
-        # so a module-level import would be a cycle.
-        from .state import read_pin
-
-        pinned = read_pin(self.provider_id, encoded_path)
-        if pinned in activity:
-            return pinned
-        return max(activity, key=activity.__getitem__)
 
     @abstractmethod
     def resolve_current(self, encoded_path: str) -> str | None:

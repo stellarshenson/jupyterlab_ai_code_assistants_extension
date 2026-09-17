@@ -21,7 +21,7 @@ from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 
 from . import colour_store, migrate, registry, state
-from .store import SessionNotFound, load_jsonc
+from .store import SessionNotFound, git_branch, load_jsonc
 
 
 URL_PREFIX = "jupyterlab-ai-code-assistants-extension"
@@ -364,6 +364,24 @@ class StatusHandler(APIHandler):
         }))
 
 
+def _list_with_git_branches(store, root_dir: str) -> list[dict]:
+    """``store.list_sessions`` with the git branch filled in for every row the
+    store left it off. A store whose assistant records the branch in its own
+    history emits the key itself; every other row costs one ``git`` call per
+    distinct project, here in the executor with the listing, never on the
+    event loop."""
+    rows = store.list_sessions(root_dir)
+    cache: dict[str, str | None] = {}
+    for row in rows:
+        if "git_branch" in row:
+            continue
+        project_path = row["project_path"]
+        if project_path not in cache:
+            cache[project_path] = git_branch(project_path)
+        row["git_branch"] = cache[project_path]
+    return rows
+
+
 class SessionsHandler(_ProviderHandler):
     """List a provider's projects, or dispose of one project's history.
 
@@ -385,7 +403,7 @@ class SessionsHandler(_ProviderHandler):
             return
         root_dir = os.path.expanduser(self.settings.get("server_root_dir") or "~")
         rows = await asyncio.get_running_loop().run_in_executor(
-            None, provider.store.list_sessions, str(root_dir)
+            None, _list_with_git_branches, provider.store, str(root_dir)
         )
         favourites = set(state.load_favourites(provider.id))
         # Read once for the whole listing, not once per row.
@@ -867,9 +885,12 @@ class _LaunchBase(_ProviderHandler):
 
         Shared rather than copied per route, so the two cannot drift. The argv
         route runs the launch route's validator and accepts its full body, so
-        it settles the pin the same way; its only client today, the Launcher
-        tile, reaches neither branch - it resumes with a session id or starts
-        new without an encoded path (docs/design-launcher.md).
+        it settles the pin the same way. The Launcher tile reaches neither
+        branch - it resumes with a session id or starts new without an encoded
+        path (docs/design-launcher.md); a project-scoped ``+`` on a running
+        terminal (``TerminalManager.launch``) POSTs the new-conversation shape
+        to the argv route to reach the clear branch without spawning
+        (DEF-FRONT-222).
         """
         if not (isinstance(request.encoded_path, str) and request.encoded_path):
             return

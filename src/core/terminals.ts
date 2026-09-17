@@ -191,6 +191,21 @@ export class TerminalManager {
     mode: string | undefined,
     wanted: string
   ): Promise<void> {
+    // A project-scoped assistant has no per-conversation terminal to find:
+    // `launch` answers with the project's running one or starts it.
+    if (this._descriptor.terminalScope === 'project') {
+      await this.launch(
+        {
+          project_path: session.project_path,
+          encoded_path: session.encoded_path,
+          session_id: wanted,
+          mode
+        },
+        wanted
+      );
+      return;
+    }
+
     // 1. Microcache - the most recent terminal of this project, reused only
     // when it carries the wanted conversation.
     const cached = this._byProject.get(session.project_path);
@@ -231,8 +246,31 @@ export class TerminalManager {
    * Launch a terminal for one request and focus it. The returned widget is
    * tagged with `tagSessionId` in the microcache, so a later click on the row
    * that conversation now belongs to reuses this very terminal.
+   *
+   * For a project-scoped assistant the project's running terminal is the
+   * answer instead, whatever the request asked for: every caller - row click,
+   * `+`, fork, Launcher tile - lands here, so this one gate is what keeps a
+   * second server off the project.
    */
   async launch(request: ILaunchRequest, tagSessionId?: string): Promise<any> {
+    if (this._descriptor.terminalScope === 'project') {
+      const running = await this._projectTerminal(request.project_path);
+      if (running) {
+        // A new conversation still settles the project's pin (DEF-9): the
+        // argv route runs the launch's validation and pin bookkeeping without
+        // spawning, and the argv it answers with is not needed here.
+        if (request.session_id === undefined && request.encoded_path) {
+          await requestProvider(
+            this._descriptor.id,
+            'launch-argv',
+            this._serverSettings,
+            { method: 'POST', body: JSON.stringify(request) }
+          );
+        }
+        this.focus(running);
+        return running;
+      }
+    }
     const spinner = showLaunchSpinner(
       `Opening ${this._descriptor.label}`,
       this._trans
@@ -289,10 +327,21 @@ export class TerminalManager {
    * too, not only launches that carry an argv id. An id is globally unique to
    * one conversation, so a terminal holding it IS the one to focus, whatever
    * cwd it reports - a process that changed directory, or whose project dir
-   * was recreated, must still be reused rather than duplicated. */
+   * was recreated, must still be reused rather than duplicated.
+   *
+   * For a project-scoped assistant the id is not what a terminal holds; the
+   * project's running terminal (see `_projectTerminal`) is the answer, so the
+   * caller passes the project path. */
   async findForSession(
-    wantedSessionId: string | undefined
+    wantedSessionId: string | undefined,
+    projectPath?: string
   ): Promise<{ widget: any; runningId: string | null } | null> {
+    if (this._descriptor.terminalScope === 'project') {
+      const widget = projectPath
+        ? await this._projectTerminal(projectPath)
+        : null;
+      return widget ? { widget, runningId: null } : null;
+    }
     if (!this._tracker || !wantedSessionId) {
       return null;
     }
@@ -300,6 +349,52 @@ export class TerminalManager {
       const info = await this.probe(widget);
       if (info && info.session_id && info.session_id === wantedSessionId) {
         return { widget, runningId: info.session_id };
+      }
+    }
+    return null;
+  }
+
+  /** The one terminal serving a project, for a project-scoped assistant, or
+   * null. The project's microcache entry whatever conversation it was tagged
+   * with, else the first live terminal the server confirms is running this
+   * assistant with its working directory inside the project - the same
+   * cwd-to-project rule the colour pass applies. The server's `running`
+   * answer is what keeps a plain shell opened at the project from matching.
+   *
+   * The cached terminal is asked too, so a server the user stopped in it does
+   * not hold every later open on a dead shell. Only a terminal the server has
+   * once confirmed is evicted on a `running: false` answer: a fresh launch
+   * answers that until its process is up, and evicting it then would start
+   * the second server this method exists to prevent. */
+  private async _projectTerminal(projectPath: string): Promise<any> {
+    const cached = this._byProject.get(projectPath);
+    if (cached && !cached.widget.isDisposed) {
+      const info = await this.probe(cached.widget);
+      if (info?.running) {
+        cached.confirmed = true;
+      }
+      if (info?.running !== false || !cached.confirmed) {
+        return cached.widget;
+      }
+      this._byProject.delete(projectPath);
+    }
+    if (!this._tracker) {
+      return null;
+    }
+    for (const widget of this._liveTerminals()) {
+      const info = await this.probe(widget);
+      if (
+        info?.running &&
+        sessionForCwds(info.cwds ?? [], this._sessions)?.project_path ===
+          projectPath
+      ) {
+        this._byProject.set(projectPath, {
+          widget,
+          sessionId: undefined,
+          confirmed: true
+        });
+        this._wireDisposal(projectPath, widget);
+        return widget;
       }
     }
     return null;
@@ -852,10 +947,11 @@ export class TerminalManager {
   // terminal is not painted, because painting is what destroys the pick.
   private readonly _pendingChoices: Map<string, string | null> = new Map();
   // Most recent terminal per project, tagged with the conversation it runs so
-  // reuse can tell a project's branches apart.
+  // reuse can tell a project's branches apart. `confirmed` records that the
+  // server once answered `running: true` for it (project scope only).
   private readonly _byProject: Map<
     string,
-    { widget: any; sessionId?: string }
+    { widget: any; sessionId?: string; confirmed?: boolean }
   > = new Map();
   // In-flight launches keyed per CONVERSATION, so two branches of one project
   // open independently and concurrently.

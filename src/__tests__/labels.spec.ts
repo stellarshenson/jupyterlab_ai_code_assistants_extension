@@ -7,12 +7,12 @@
  * that filed the defect, while 60 Latin ones are half that.
  */
 
-import { shortSessionId } from '../core/labels';
 import {
   MENU_TITLE_COLUMNS,
   branchMenuLabel,
+  shortSessionId,
   truncateToColumns
-} from '../providers/kimi';
+} from '../core/labels';
 
 describe('truncateToColumns', () => {
   it('leaves a short label alone, with no ellipsis', () => {

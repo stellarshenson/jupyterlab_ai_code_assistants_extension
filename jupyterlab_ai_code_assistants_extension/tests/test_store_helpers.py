@@ -1,42 +1,12 @@
-"""The store mechanics every provider shares: the per-file parse memo and the
-pin-or-newest rule. Provider-neutral, so they are tested on a bare store."""
+"""The store mechanics every provider shares: the per-file parse memo, the
+mtime reading and the pin-or-newest rule. Provider-neutral, so they are tested
+on their own."""
 from __future__ import annotations
 
 import os
 
-from jupyterlab_ai_code_assistants_extension.core import state
-from jupyterlab_ai_code_assistants_extension.core.store import (
-    FileMemo,
-    SessionStore,
-    mtime_ms,
-)
-
-
-class _BareStore(SessionStore):
-    """The abstract surface stubbed out, so ``pick_current`` runs on its own."""
-
-    provider_id = "testbed"
-
-    def list_sessions(self, root_dir=None):
-        return []
-
-    def list_branches(self, encoded_path, include_extras=False):
-        return None
-
-    def resolve_current(self, encoded_path):
-        return None
-
-    def switch(self, encoded_path, session_id):
-        return None
-
-    def remove(self, encoded_path, to_trash=False):
-        return None
-
-    def delete_branches(self, encoded_path, session_ids, to_trash=False):
-        return None
-
-    def launch_argv(self, cli_path, **kwargs):
-        return [cli_path]
+from jupyterlab_ai_code_assistants_extension.core.state import pick_current
+from jupyterlab_ai_code_assistants_extension.core.store import FileMemo, mtime_ms
 
 
 def test_file_memo_reparses_only_when_the_file_moved(tmp_path):
@@ -88,10 +58,8 @@ def test_mtime_ms_reads_zero_for_a_missing_file(tmp_path):
 
 
 def test_pick_current_honours_a_pin_that_resolves_and_falls_back_to_recency():
-    store = _BareStore()
-    assert store.pick_current("enc", {}) is None
-    assert store.pick_current("enc", {"old": 1, "new": 2}) == "new"
-    state.write_pin("testbed", "enc", "old")
-    assert store.pick_current("enc", {"old": 1, "new": 2}) == "old"
+    assert pick_current(None, {}) is None
+    assert pick_current(None, {"old": 1, "new": 2}) == "new"
+    assert pick_current("old", {"old": 1, "new": 2}) == "old"
     # A dangling pin is ignored rather than resolved to nothing.
-    assert store.pick_current("enc", {"other": 1, "new": 2}) == "new"
+    assert pick_current("gone", {"other": 1, "new": 2}) == "new"

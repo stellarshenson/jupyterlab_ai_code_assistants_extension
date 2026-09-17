@@ -30,6 +30,7 @@ import shutil
 import uuid
 from pathlib import Path
 
+from ..core.state import load_state, pick_current, read_pin
 from ..core.registry import Capabilities, LegacySource, ProviderDescriptor
 from ..core.store import (
     FileMemo,
@@ -37,7 +38,6 @@ from ..core.store import (
     cmdline_args,
     dispose_path,
     flag_value,
-    git_branch,
     is_safe_segment,
     iso_ms,
     load_json,
@@ -211,7 +211,7 @@ def _message_count(session_dir: Path) -> int:
 #: from exec gives ``python`` -> ``kimi`` -> ``MainThread`` -> ``kimi-code``,
 #: and it stays at the last one. Matching only ``kimi`` therefore identified a
 #: Kimi terminal for the first few milliseconds of its life and never again
-#: (DEF-50). Same failure and same remedy as Gemini's ``_NODE_COMMS``: a
+#: (DEF-50). Same failure and same remedy as the core's ``NODE_COMMS``: a
 #: candidate set, so the cheap pre-filter cannot fail closed on a rename.
 _KIMI_COMMS = frozenset({"kimi", "kimi-code"})
 
@@ -305,13 +305,16 @@ class KimiStore(SessionStore):
             mtime_ms(session_dir / STATE_FILENAME),
         )
 
+    def _pin(self, encoded_path: str) -> str | None:
+        return read_pin(self.provider_id, encoded_path)
+
     def _pick_current(
-        self, encoded_path: str, sessions: list[tuple[Path, dict]]
+        self, pinned: str | None, sessions: list[tuple[Path, dict]]
     ) -> tuple[Path, dict] | None:
         """The project's current conversation - the core's pin-or-newest rule
         over :meth:`_activity`."""
-        current = self.pick_current(
-            encoded_path,
+        current = pick_current(
+            pinned,
             {
                 session_dir.name: self._activity(session_dir, state)
                 for session_dir, state in sessions
@@ -336,8 +339,8 @@ class KimiStore(SessionStore):
         if not workspaces:
             return []
 
-        # One subprocess per unique project root, shared by every row of it.
-        git_cache: dict[str, str | None] = {}
+        # Read once for the whole listing, not once per project.
+        pins = load_state(self.provider_id)["pins"]
         rows: list[dict] = []
         for wd_id in sorted(workspaces):
             project_path = workspaces[wd_id]
@@ -345,7 +348,7 @@ class KimiStore(SessionStore):
             if not wd_dir.is_dir():
                 continue
             sessions = self._session_dirs(wd_dir)
-            current = self._pick_current(wd_id, sessions)
+            current = self._pick_current(pins.get(wd_id), sessions)
             if current is None:
                 continue
             session_dir, state = current
@@ -362,9 +365,6 @@ class KimiStore(SessionStore):
                 name = os.path.basename(project_path) or wd_id
                 name_source = "basename"
 
-            if project_path not in git_cache:
-                git_cache[project_path] = git_branch(project_path)
-
             rows.append({
                 "project_path": project_path,
                 "encoded_path": wd_id,
@@ -373,7 +373,6 @@ class KimiStore(SessionStore):
                 "name_source": name_source,
                 "message_count": _message_count(session_dir),
                 "file_mtime": self._activity(session_dir, state),
-                "git_branch": git_cache[project_path],
                 "extra_sessions": max(len(sessions) - 1, 0),
             })
 
@@ -392,7 +391,7 @@ class KimiStore(SessionStore):
         if wd_dir is None:
             return None
         sessions = self._session_dirs(wd_dir)
-        current = self._pick_current(encoded_path, sessions)
+        current = self._pick_current(self._pin(encoded_path), sessions)
         if current is None:
             return None
         current_sid = current[0].name
@@ -402,13 +401,10 @@ class KimiStore(SessionStore):
             if session_dir.name == current_sid:
                 continue
             title = state.get("title")
-            # Fallback label is the first 8 chars of the uuid part - the
-            # "session_" prefix is shared by every directory and carries no
-            # information at all.
             label = (
                 title.strip()
                 if isinstance(title, str) and title.strip()
-                else session_dir.name[8:16]
+                else self.short_id(session_dir.name)
             )
             branches.append({
                 "session_id": session_dir.name,
@@ -426,7 +422,7 @@ class KimiStore(SessionStore):
         wd_dir = self._wd_dir(encoded_path)
         if wd_dir is None:
             return None
-        current = self._pick_current(encoded_path, self._session_dirs(wd_dir))
+        current = self._pick_current(self._pin(encoded_path), self._session_dirs(wd_dir))
         return current[0].name if current else None
 
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
@@ -500,7 +496,7 @@ class KimiStore(SessionStore):
         wd_dir = self._wd_dir(encoded_path)
         if wd_dir is None:
             return None
-        current = self._pick_current(encoded_path, self._session_dirs(wd_dir))
+        current = self._pick_current(self._pin(encoded_path), self._session_dirs(wd_dir))
         keep = current[0].name if current else None
         removed: list[str] = []
         for sid in session_ids:
@@ -719,6 +715,8 @@ DESCRIPTOR = ProviderDescriptor(
         # onto them would let whichever extension migrated last decide for all.
         settings_map={YOLO_MODE: f"providers.kimi.{YOLO_MODE}"},
     ),
+    # Every id is ``session_<uuid>``; the short id is the uuid's head.
+    session_id_prefix="session_",
 )
 
 STORE = KimiStore()

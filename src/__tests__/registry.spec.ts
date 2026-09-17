@@ -29,6 +29,7 @@ function stub(id: string): IProviderModule {
       cliBinary: id,
       forkStrategy: 'server-copy',
       colourSource: 'none',
+      terminalScope: 'conversation',
       promptsForBranchName: false,
       mintsNewSessionId: false,
       launchModes: [],

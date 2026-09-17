@@ -35,6 +35,11 @@ jest.mock('@jupyter/web-components', () => ({
 // No route in this spec is allowed to reach the server. The panel's colour
 // store loads through the same module, which is why the counter is cleared
 // before each act rather than asserted from construction.
+// The Manage Sessions popup is a separate module with its own DOM; the panel
+// test asserts what the panel HANDS it, not what it draws.
+jest.mock('../core/popup', () => ({
+  showManageSessionsPopup: jest.fn()
+}));
 jest.mock('../core/request', () => ({
   requestProvider: jest.fn(() => Promise.resolve({})),
   // Shape-based rather than `instanceof`, so a test can hand the panel the
@@ -49,6 +54,7 @@ import { Notification } from '@jupyterlab/apputils';
 import { TAB_COLOUR_IDS, fnv1aColour } from '../core/colour';
 import { addIcon, branchIcon, cleanupIcon, shieldIcon } from '../core/icons';
 import { AssistantSessionsPanel, commandId } from '../core/panel';
+import { showManageSessionsPopup } from '../core/popup';
 import { requestProvider } from '../core/request';
 import { IProviderDescriptor, ISession } from '../core/types';
 
@@ -64,6 +70,7 @@ const DESCRIPTOR: IProviderDescriptor = {
   cliBinary: 'testbed',
   forkStrategy: 'native-flag',
   colourSource: 'derived',
+  terminalScope: 'conversation',
   promptsForBranchName: true,
   mintsNewSessionId: true,
   launchModes: [
@@ -193,6 +200,25 @@ describe('DEF-51 - the destructive dialogs open with Cancel under the keyboard',
     // The DELETE is the only request this path makes; not making it is the
     // whole point of the fix.
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('says a deletion cannot be undone only when it is permanent', async () => {
+    // Default: trash is on, and a trashed conversation is recoverable.
+    let done = (panel as any)._removeProject(session()) as Promise<void>;
+    await openButtons();
+    let body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
+    expect(body).toContain('moved to trash');
+    expect(body).not.toContain('cannot be undone');
+    pressEnter();
+    await done;
+
+    (panel as any)._deleteToTrash = false;
+    done = (panel as any)._removeProject(session()) as Promise<void>;
+    await openButtons();
+    body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
+    expect(body).toContain('deleted permanently. This cannot be undone.');
+    pressEnter();
+    await done;
   });
 
   it('Remove from Testbed: Enter on the Remove button still removes', async () => {
@@ -858,5 +884,82 @@ describe('DEF-PANE-181 - a successful switch says so', () => {
     await (panel as any)._switchBranch(session(), 'sid-other');
     expect(success).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the Manage Sessions popup is handed the current row name', () => {
+  it('slices the short id past the provider prefix, as the branch rows do', () => {
+    const prefixed: IProviderDescriptor = {
+      ...DESCRIPTOR,
+      iconName: 'testbed-prefixed-panel-spec',
+      sessionIdPrefix: 'session_'
+    };
+    const p = makePanel(prefixed);
+    try {
+      (p as any)._activeSession = session({
+        name: 'proj',
+        session_id: 'session_9f8e7d6c-1111-2222-3333-444455556666'
+      });
+      (p as any)._openManagePopup();
+      const calls = (showManageSessionsPopup as jest.Mock).mock.calls;
+      const [options] = calls[calls.length - 1];
+      // A front-slice would read `proj (session_)` on every conversation.
+      expect(options.currentName).toEqual('proj (9f8e7d6c)');
+    } finally {
+      p.dispose();
+    }
+  });
+});
+
+describe('DEF-PANE-211 - per-conversation open surfaces on a project-scoped assistant', () => {
+  const projectScoped: IProviderDescriptor = {
+    ...DESCRIPTOR,
+    iconName: 'testbed-project-scope-panel-spec',
+    terminalScope: 'project'
+  };
+
+  function submenuLabels(p: AssistantSessionsPanel): string[] {
+    (p as any)._rebuildContextMenu(true);
+    const menu = (p as any)._contextMenu;
+    return Array.from({ length: menu.items.length }, (_, i) => menu.items.at(i))
+      .filter((item: any) => item.type === 'submenu')
+      .map((item: any) => item.submenu.title.label);
+  }
+
+  it('offers no Open Branched Conversation submenu - one terminal serves every conversation', () => {
+    const p = makePanel(projectScoped);
+    try {
+      expect(submenuLabels(p)).not.toContain('Open Branched Conversation');
+      expect(submenuLabels(p)).toContain('Switch and Manage Sessions');
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it('keeps the submenu for a conversation-scoped assistant', () => {
+    expect(submenuLabels(panel)).toContain('Open Branched Conversation');
+  });
+
+  it("titles the popup Open button with the provider's own verb, not a terminal of its own", () => {
+    const p = new AssistantSessionsPanel({
+      app: {
+        serviceManager: { serverSettings: {} },
+        commands: { execute: jest.fn() }
+      } as any,
+      descriptor: projectScoped,
+      hooks: { resumeLabel: () => 'Open Web UI' },
+      rootDir: '/home/user'
+    });
+    try {
+      const s = session();
+      expect((p as any)._openBranchTitle(s, s.session_id)).toEqual(
+        'Open Web UI'
+      );
+      expect((panel as any)._openBranchTitle(s, s.session_id)).toContain(
+        'in its own terminal'
+      );
+    } finally {
+      p.dispose();
+    }
   });
 });

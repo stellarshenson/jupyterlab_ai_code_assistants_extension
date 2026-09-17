@@ -98,12 +98,33 @@ function stripComments(source: string): string {
     );
 }
 
+/** Whether `line` carries a name as a WORD of its own - a bare token, a
+ * quoted string, or a camelCase segment (`isClaude`, `geminiSvgStr`). A name
+ * that merely occurs inside a longer word is not one: `dsh` sits inside
+ * `buildShell`, and a three-letter binary name would otherwise flag any core
+ * identifier that happens to spell it. */
+function namesAnAssistant(line: string, pattern: RegExp): boolean {
+  const every = new RegExp(pattern.source, 'gi');
+  let match: RegExpExecArray | null;
+  while ((match = every.exec(line)) !== null) {
+    const before = line[match.index - 1] ?? '';
+    const after = line[match.index + match[0].length] ?? '';
+    const startsWord =
+      !/[A-Za-z0-9_]/.test(before) || /[A-Z]/.test(match[0][0]);
+    const endsWord = !/[a-z0-9]/.test(after);
+    if (startsWord && endsWord) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Lines of `source` that name an assistant, as `[line number, text]`. */
 function offenders(source: string, pattern: RegExp): [number, string][] {
   return stripComments(source)
     .split('\n')
     .map((line, index) => [index + 1, line] as [number, string])
-    .filter(([, line]) => pattern.test(line));
+    .filter(([, line]) => namesAnAssistant(line, pattern));
 }
 
 function coreFiles(): string[] {
@@ -193,6 +214,26 @@ describe('the name list the scan runs on', () => {
     expect(offenders(line, withNimbus)).toHaveLength(1);
     // Same line, roster as it stands today - unseen, which is the defect.
     expect(offenders(line, ASSISTANT_NAMES)).toEqual([]);
+  });
+});
+
+describe('the word boundary the scan applies', () => {
+  it('flags a name as a token, a string and a camelCase segment', () => {
+    expect(
+      offenders("if (provider.id === 'claude') {", ASSISTANT_NAMES)
+    ).toHaveLength(1);
+    expect(offenders('const isClaude = true;', ASSISTANT_NAMES)).toHaveLength(
+      1
+    );
+    expect(offenders('const claudeSvgStr = x;', ASSISTANT_NAMES)).toHaveLength(
+      1
+    );
+  });
+
+  it('passes a name that only occurs inside a longer word', () => {
+    // `dsh` inside `buildShell`: the binary name of one assistant is three
+    // letters, and the core is allowed to build shells.
+    expect(offenders('this._buildShell();', ASSISTANT_NAMES)).toEqual([]);
   });
 });
 

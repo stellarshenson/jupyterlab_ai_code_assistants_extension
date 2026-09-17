@@ -791,3 +791,72 @@ describe('DEF-138 - a refused listing names the missing binary', () => {
     expect(banner()).toContain('Could not reach the server');
   });
 });
+
+describe('DEF-PANE-183 - the status dot follows the name in the DOM', () => {
+  it('reads the project before its status sentence, and still leads visually', () => {
+    const live: IProviderDescriptor = {
+      ...DESCRIPTOR,
+      iconName: 'testbed-live-panel-spec',
+      hasLiveProcess: true
+    };
+    const livePanel = makePanel(live);
+    try {
+      render(livePanel, [session({ name: 'alpha', live: true })]);
+      const row = livePanel.node.querySelector<HTMLElement>(
+        '.jp-AiAssistantsPanel-row'
+      )!;
+      const order = Array.from(row.children).map(el => el.className);
+      const dot = order.findIndex(c => c === 'jp-AiAssistantsPanel-dot');
+      const name = order.findIndex(c => c === 'jp-AiAssistantsPanel-name');
+      // The DOM order is the accessible order: the name comes first, the
+      // dot's sentence after it.
+      expect(dot).toBeGreaterThan(name);
+      expect(
+        row
+          .querySelector('.jp-AiAssistantsPanel-dot')!
+          .getAttribute('aria-label')
+      ).toContain('active');
+    } finally {
+      livePanel.dispose();
+    }
+  });
+});
+
+describe('DEF-PANE-181 - a successful switch says so', () => {
+  it('announces the conversation the project now sits on', async () => {
+    const success = jest
+      .spyOn(Notification, 'success')
+      .mockReturnValue('' as any);
+    const target = session({ name: 'proj' });
+    (panel as any)._lastBranches = [
+      { session_id: 'sid-other', file_mtime: 1, label: 'Second thoughts' }
+    ];
+    request.mockImplementation((_id: string, route: string) =>
+      Promise.resolve(
+        route === 'switch'
+          ? { requested: 'sid-other', current: 'sid-other' }
+          : { sessions: [] }
+      )
+    );
+    await (panel as any)._switchBranch(target, 'sid-other');
+    expect(success).toHaveBeenCalledTimes(1);
+    expect(success.mock.calls[0][0]).toBe('proj: switched to Second thoughts');
+  });
+
+  it('stays quiet when the store could not make it current', async () => {
+    const success = jest
+      .spyOn(Notification, 'success')
+      .mockReturnValue('' as any);
+    const warn = jest.spyOn(Notification, 'warning').mockReturnValue('' as any);
+    request.mockImplementation((_id: string, route: string) =>
+      Promise.resolve(
+        route === 'switch'
+          ? { requested: 'sid-other', current: 'sid-proj' }
+          : { sessions: [] }
+      )
+    );
+    await (panel as any)._switchBranch(session(), 'sid-other');
+    expect(success).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+});

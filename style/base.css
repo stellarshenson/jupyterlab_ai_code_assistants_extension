@@ -350,6 +350,9 @@
   width: 8px;
   height: 8px;
   display: inline-block;
+  /* Leads the row visually while following the name in the DOM, so
+     assistive technology reads the project before its status. */
+  order: -1;
 }
 
 .jp-AiAssistantsPanel-dot {
@@ -504,6 +507,8 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotGlyph {
 .jp-aiAssistants-spinner,
 .jp-AiAssistantsPanel-spinner {
   flex: 0 0 auto;
+  /* Stands in the dot's column, so it takes the dot's place in the order. */
+  order: -1;
   width: 12px;
   height: 12px;
   border-radius: 50%;

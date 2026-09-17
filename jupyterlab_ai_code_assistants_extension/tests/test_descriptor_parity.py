@@ -33,11 +33,10 @@ SRC = REPO / "src"
 LIB = REPO / "lib"
 LIB_PROVIDERS = LIB / "providers"
 LIB_COLOUR = LIB / "core" / "colour.js"
-#: tsc's incremental record. Counted alongside ``lib/`` as a build marker
-#: because a compile can legitimately refresh it while emitting no ``.js`` at
-#: all. It is NOT a general answer - measured, a compile whose sources are
-#: semantically unchanged writes neither this file nor any output - see
-#: ``_require_fresh_lib``.
+#: tsc's incremental record. Named in the failure message as the remedy for
+#: a touched-but-identical source, never read as a build marker: tsc refreshes
+#: it on a ``--noEmit`` check that emitted nothing, so counting it certified
+#: a stale ``lib/`` (DEF-GUARD-160).
 BUILD_INFO = REPO / "tsconfig.tsbuildinfo"
 
 # What refreshes ``lib/``. Named in the failure message below because the test
@@ -145,23 +144,21 @@ def _require_fresh_lib() -> None:
 
     ONE FALSE POSITIVE IS KNOWN AND UNAVOIDABLE HERE, so the message names its
     remedy. ``tsconfig.json`` sets ``incremental: true``: a compile whose
-    sources are semantically unchanged emits nothing AND does not refresh
-    ``tsconfig.tsbuildinfo``, so touching a file without changing its content -
-    exactly what restoring from a scratch copy after a mutation check does -
-    leaves this red with no ordinary rebuild able to clear it (DEF-75).
-    Deleting the buildinfo forces a full emit and clears it. mtime cannot
-    distinguish "edited and not rebuilt" from "touched and identical", and the
-    conservative direction is the right one: the failure this guard exists to
-    prevent is a SILENT green, and a red that needs one documented command is
-    a far cheaper mistake than certifying today's Python against yesterday's
-    TypeScript.
+    sources are semantically unchanged emits nothing, so touching a file
+    without changing its content - exactly what restoring from a scratch copy
+    after a mutation check does - leaves this red with no ordinary rebuild
+    able to clear it (DEF-75). Deleting the buildinfo forces a full emit and
+    clears it. The buildinfo itself is never counted as a build marker: tsc
+    refreshes it on a ``--noEmit`` check too, and counting it let four parity
+    assertions pass over a lib/ that was never re-emitted (DEF-GUARD-160).
+    mtime cannot distinguish "edited and not rebuilt" from "touched and
+    identical", and the conservative direction is the right one: the failure
+    this guard exists to prevent is a SILENT green, and a red that needs one
+    documented command is a far cheaper mistake than certifying today's
+    Python against yesterday's TypeScript.
     """
     src_mtime, src_path = _newest(SRC, ".ts", frozenset({"__tests__"}))
     lib_mtime, lib_path = _newest(LIB, ".js")
-    if BUILD_INFO.is_file():
-        built = BUILD_INFO.stat().st_mtime
-        if built > lib_mtime:
-            lib_mtime, lib_path = built, BUILD_INFO
     if src_path is None or lib_path is None or src_mtime <= lib_mtime:
         return
     pytest.fail(

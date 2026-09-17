@@ -7,10 +7,10 @@
  * that filed the defect, while 60 Latin ones are half that.
  */
 
+import { shortSessionId } from '../core/labels';
 import {
   MENU_TITLE_COLUMNS,
   branchMenuLabel,
-  shortSessionId,
   truncateToColumns
 } from '../providers/kimi';
 
@@ -58,15 +58,21 @@ describe('truncateToColumns', () => {
 
 describe('shortSessionId', () => {
   it('slices past the prefix every conversation shares', () => {
-    // The core front-slice would render the constant `session_` for every
+    // A front-slice would render the constant `session_` for every
     // conversation of a project - the exact thing the short id exists to tell
     // apart.
     expect(
-      shortSessionId('session_9f8e7d6c-1111-2222-3333-444455556666')
+      shortSessionId('session_9f8e7d6c-1111-2222-3333-444455556666', 'session_')
+    ).toEqual('9f8e7d6c');
+    expect(
+      shortSessionId('session-9f8e7d6c-1111-2222-3333-444455556666', 'session-')
     ).toEqual('9f8e7d6c');
   });
 
-  it('front-slices an id that carries no prefix', () => {
+  it('front-slices an id that carries no prefix, or when none is declared', () => {
+    expect(
+      shortSessionId('9f8e7d6c-1111-2222-3333-444455556666', 'session_')
+    ).toEqual('9f8e7d6c');
     expect(shortSessionId('9f8e7d6c-1111-2222-3333-444455556666')).toEqual(
       '9f8e7d6c'
     );

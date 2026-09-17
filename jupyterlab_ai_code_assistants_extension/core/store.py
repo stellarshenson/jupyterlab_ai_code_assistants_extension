@@ -29,7 +29,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 
 # JupyterLab writes user settings as JSON with comments - the raw editor seeds
@@ -192,6 +192,23 @@ def git_branch(project_path: str) -> str | None:
     return branch or None
 
 
+def iso_ms(value: Any) -> int | None:
+    """An ISO-8601 ``...Z`` timestamp as ms-epoch, or None when it is not one.
+
+    Every assistant stamps its records this way, so the conversion lives here
+    once. A value outside the platform's epoch range reads as absent rather
+    than raising through a listing (DEF-PANE-196).
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return int(
+            datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000
+        )
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
 def now_iso_z() -> str:
     """Current UTC time in the ``...Z`` format the assistants stamp records with."""
     return (
@@ -199,6 +216,60 @@ def now_iso_z() -> str:
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z")
     )
+
+
+def mtime_ms(path: Path) -> int:
+    """A file's mtime as ms-epoch, or 0 when it cannot be read.
+
+    The activity clock of every store whose assistant appends to a file on
+    each turn: a file that vanished under the listing reads as never active,
+    which sorts it last rather than failing the row.
+    """
+    try:
+        return int(path.stat().st_mtime * 1000)
+    except OSError:
+        return 0
+
+
+T = TypeVar("T")
+
+
+class FileMemo:
+    """A parsed view of one file, re-read only when its mtime or size changed.
+
+    Every store parses the same files on every 30s sessions poll, and most
+    have not moved between polls. The memo keys on ``(st_mtime_ns, st_size)``
+    so a rewrite in place is seen even when the size did not change.
+
+    Cleared wholesale at ``max_entries`` rather than evicted one by one: the
+    map is a memo, so losing it costs one re-read per file in use and nothing
+    else, and a bound keeps a store with thousands of dead conversations from
+    holding a parsed record for each.
+    """
+
+    def __init__(self, max_entries: int = 1024) -> None:
+        self._max_entries = max_entries
+        self._entries: dict[str, tuple[int, int, Any]] = {}
+
+    def get(
+        self, path: Path, parse: Callable[[Path, os.stat_result], T]
+    ) -> T | None:
+        """``parse(path, stat)`` for this file, memoised. None when it cannot
+        be stat-ed - a vanished file also drops its stale entry."""
+        key = str(path)
+        try:
+            st = path.stat()
+        except OSError:
+            self._entries.pop(key, None)
+            return None
+        cached = self._entries.get(key)
+        if cached is not None and cached[:2] == (st.st_mtime_ns, st.st_size):
+            return cached[2]
+        value = parse(path, st)
+        if len(self._entries) >= self._max_entries:
+            self._entries.clear()
+        self._entries[key] = (st.st_mtime_ns, st.st_size, value)
+        return value
 
 
 def is_safe_segment(name: Any) -> bool:
@@ -295,6 +366,30 @@ class SessionStore(ABC):
         markers), so a 2s fork watcher never pays for them. None on an invalid
         ``encoded_path`` or when no current conversation resolves.
         """
+
+    def pick_current(
+        self, encoded_path: str, activity: dict[str, int]
+    ) -> str | None:
+        """The project's current conversation among ``activity`` (conversation
+        id to ms-epoch of last activity): the pin when it still resolves,
+        otherwise the most recently active.
+
+        The pin is the core's, written on a switch or a fork. Honouring it over
+        recency is what stops continued work in another conversation dragging
+        the row back to it; a dangling pin is ignored and recency resumes. A
+        store whose assistant keeps its own notion of "current" resolves that
+        instead and never calls this.
+        """
+        if not activity:
+            return None
+        # Imported here: ``core.state`` builds on this module's JSON helpers,
+        # so a module-level import would be a cycle.
+        from .state import read_pin
+
+        pinned = read_pin(self.provider_id, encoded_path)
+        if pinned in activity:
+            return pinned
+        return max(activity, key=activity.__getitem__)
 
     @abstractmethod
     def resolve_current(self, encoded_path: str) -> str | None:

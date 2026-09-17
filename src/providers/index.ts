@@ -13,9 +13,16 @@ import { IProviderModule } from '../core/types';
 
 import * as claude from './claude';
 import * as codex from './codex';
+import * as deepseek from './deepseek';
 import * as kimi from './kimi';
 import * as gemini from './gemini';
 
-export const PROVIDERS: IProviderModule[] = [claude, codex, kimi, gemini];
+export const PROVIDERS: IProviderModule[] = [
+  claude,
+  codex,
+  deepseek,
+  kimi,
+  gemini
+];
 
 export default PROVIDERS;

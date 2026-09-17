@@ -74,6 +74,12 @@ export interface IProviderDescriptor {
    * `forkStrategy` - an assistant can accept an id for a new session and still
    * have no fork verb at all. */
   mintsNewSessionId: boolean;
+  /** A constant prefix every conversation id of this assistant carries, e.g.
+   * `session_`. The short id shown beside a branch is sliced past it, since a
+   * front-slice of such an id would render the same eight characters for
+   * every conversation of a project - the exact thing the short id exists to
+   * tell apart. Absent for an assistant whose ids are bare uuids. */
+  sessionIdPrefix?: string;
   launchModes: ILaunchMode[];
   /** Sessions can be held under remote control - renders the indicator dot. */
   hasRemoteControl: boolean;

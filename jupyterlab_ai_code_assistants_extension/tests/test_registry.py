@@ -22,7 +22,7 @@ from jupyterlab_ai_code_assistants_extension.core.store import SessionStore
 # Every provider module shipped today. Listed here so a provider added without
 # its module reaching discovery - a barrel line missed, a rename - fails a test
 # rather than silently costing the user a panel.
-EXPECTED_IDS = {"claude", "codex", "gemini", "kimi"}
+EXPECTED_IDS = {"claude", "codex", "deepseek", "gemini", "kimi"}
 
 # The same vocabulary the frontend descriptor's ``forkStrategy`` uses - the two
 # registries describe one assistant, so a strategy named differently on each

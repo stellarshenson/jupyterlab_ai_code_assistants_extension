@@ -4,8 +4,9 @@ Two invariants hold for every test in this package:
 
 * no test reads or writes a real assistant store - each one gets a scratch
   tree, pointed at through the same environment overrides the UI suite uses
-  (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``KIMI_CODE_HOME``, and ``HOME`` for
-  Gemini, which resolves its root from the home directory like the CLI does)
+  (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``KIMI_CODE_HOME``, ``DSH_HOME``, and
+  ``HOME`` for Gemini, which resolves its root from the home directory like
+  the CLI does)
 * no test spawns an assistant CLI - the one listing path that would
   (``claude agents --json``, on every sessions poll) is stubbed out, so a
   wedged or absent binary cannot slow or fail the suite
@@ -18,6 +19,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+import zstandard
 
 from jupyterlab_ai_code_assistants_extension.core import registry, state
 from jupyterlab_ai_code_assistants_extension.providers import (
@@ -31,6 +33,9 @@ from jupyterlab_ai_code_assistants_extension.providers import (
 PROJECT_PATH = "/home/lab/projects/demo"
 # Claude's own encoding of it - "/", "_" and "." all become "-".
 CLAUDE_ENCODED = "-home-lab-projects-demo"
+# The DeepSeek Harness's project key for it - separators become "-", the
+# leading one is dropped, the whole is wrapped in "--".
+DEEPSEEK_ENCODED = "--home-lab-projects-demo--"
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +52,7 @@ def scratch_stores(tmp_path, monkeypatch):
     monkeypatch.setenv(claude_provider.CONFIG_DIR_ENV, str(scratch / "claude"))
     monkeypatch.setenv("CODEX_HOME", str(scratch / "codex"))
     monkeypatch.setenv("KIMI_CODE_HOME", str(scratch / "kimi"))
+    monkeypatch.setenv("DSH_HOME", str(scratch / "dsh"))
     # The background-agent roster is the only listing path that shells out.
     monkeypatch.setattr(claude_provider, "bg_agents", lambda binary=None: {})
     monkeypatch.setattr(claude_provider, "_bg_agents_refresh", lambda binary=None: {})
@@ -220,6 +226,57 @@ def write_gemini_tree(root: Path, short_id: str, chats: list[dict]) -> Path:
         name = f"session-2026-08-01T10-00-{entry['id'][:8]}.jsonl"
         (chats_dir / name).write_text("\n".join(lines) + "\n", encoding="utf-8")
     return chats_dir
+
+
+def write_deepseek_tree(
+    root: Path, sessions: list[dict], compressed: bool = True, version: int = 3
+) -> Path:
+    """A ``$DSH_HOME/sessions``-shaped tree: one ``--<key>--`` project
+    directory holding one log per conversation, in the harness's own frame
+    layout - the header line alone in the first Zstandard frame, the events in
+    a second - or as plain lines for a ``compression: 'none'`` root.
+
+    Each entry is ``{"id", "cwd"?, "title"?, "messages"?, "origin"?}``.
+    """
+    project_dir = root / "sessions" / DEEPSEEK_ENCODED
+    project_dir.mkdir(parents=True, exist_ok=True)
+    compressor = zstandard.ZstdCompressor(write_checksum=True)
+    for entry in sessions:
+        header = {
+            "type": "session",
+            "version": version,
+            "id": entry["id"],
+            "createdAt": 1789384398650,
+            "cwd": entry.get("cwd", PROJECT_PATH),
+            "isSeeded": False,
+            "delegationDepth": 0,
+        }
+        if entry.get("origin"):
+            header["origin"] = entry["origin"]
+        events = []
+        for i in range(entry.get("messages", 0)):
+            kind = "user/message" if i % 2 == 0 else "assistant/message"
+            events.append({"type": kind, "seq": i, "time": 1789384398660 + i, "data": {}})
+        # Tool events sit between the messages and must not count as one.
+        events.append({"type": "tool/call", "seq": 90, "time": 1789384398750, "data": {}})
+        if entry.get("title"):
+            events.append({
+                "type": "session/title",
+                "seq": 91,
+                "time": 1789384398760,
+                "data": {"title": entry["title"], "messageSeqs": [0], "source": {"kind": "llm"}},
+            })
+        dump = lambda record: json.dumps(record, separators=(",", ":"))  # noqa: E731
+        head = dump(header) + "\n"
+        body = "".join(dump(event) + "\n" for event in events)
+        session_dir = project_dir / entry["id"]
+        session_dir.mkdir(parents=True, exist_ok=True)
+        if compressed:
+            raw = compressor.compress(head.encode()) + compressor.compress(body.encode())
+            (session_dir / f"session.v{version}.jsonl.zstd").write_bytes(raw)
+        else:
+            (session_dir / f"session.v{version}.jsonl").write_text(head + body, encoding="utf-8")
+    return project_dir
 
 
 def new_uuid() -> str:

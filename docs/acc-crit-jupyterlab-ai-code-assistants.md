@@ -458,8 +458,8 @@ Three tiers - pytest for the server core and each provider module, Jest for fron
   - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
   - log: 2026-08-27T22:03:54Z @kj evidence count corrected: launcher-tiles.spec.ts now carries eight tests (ACC-LNCH-163 added), Galata 41/41 at v1.1.11
 - [x] `ACC-TEST-161` **Launcher tile command Jest** - Jest covers the tile command paths: new, resume, terminal reuse, no root, non-default drive, basic terminal absent, and add/dispose on toggle
-  - evidence: src/**tests**/launcher.spec.ts 14 cases plus index.spec.ts tile cases; Jest 149/149 at v1.1.8
-  - test: src/**tests**/launcher.spec.ts
+  - evidence: src/__tests__/launcher.spec.ts 14 cases plus index.spec.ts tile cases; Jest 149/149 at v1.1.8
+  - test: src/__tests__/launcher.spec.ts
   - test-tags: unit
   - log: 2026-08-27T16:49:34Z @kj added
   - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
@@ -600,7 +600,7 @@ Launcher tiles that open an assistant in the file browser's current folder
   - log: 2026-08-27T16:55:48Z @kj added
   - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
 - [x] `ACC-LNCH-163` **Joint section icon** - the AI Assistants section header shows the extension's own joint icon (a robot head, vendor-neutral) regardless of which assistant's tile is first; every tile keeps its own provider icon
-  - evidence: src/**tests**/launcher-icon.spec.ts 10 cases (mutation: severing the launcherSection branch reddens the 4 section-preset cases), Jest 159/159; ui-tests/tests/launcher-tiles.spec.ts ACC-LNCH-163 case with screenshot launcher-section-joint-icon.png, launcher spec 8/8 at v1.1.9
+  - evidence: src/__tests__/launcher-icon.spec.ts 10 cases (mutation: severing the launcherSection branch reddens the 4 section-preset cases), Jest 159/159; ui-tests/tests/launcher-tiles.spec.ts ACC-LNCH-163 case with screenshot launcher-section-joint-icon.png, launcher spec 8/8 at v1.1.9
   - related: ACC-LNCH-162 - the design note carries the header icon mechanism
   - test: open the Launcher with two assistants docked, assert the section header svg matches no tile svg and the launcherTileIcon view renders assistantsIcon under the launcherSection preset
   - test-tags: unit, e2e

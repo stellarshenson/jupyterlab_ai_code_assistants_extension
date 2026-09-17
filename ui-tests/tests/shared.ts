@@ -1,15 +1,16 @@
 /**
  * Shared fixtures for the Galata suite.
  *
- * The provider split mirrors `jupyter_server_test_config.py`: three assistants
+ * The provider split mirrors `jupyter_server_test_config.py`: four assistants
  * have a stub binary on PATH, one deliberately has none. Specs assert against
  * these constants AND cross-check them against the server's own status
  * roster, so a change to the server config that the specs did not follow
  * fails loudly instead of quietly weakening an assertion.
  */
 
-/** Providers whose stub binary is on PATH, so a panel is expected. */
-export const AVAILABLE = ['claude', 'codex', 'kimi'];
+/** Providers whose stub binary is on PATH, so a panel is expected. In the
+ * server's roster order, which is alphabetical by id. */
+export const AVAILABLE = ['claude', 'codex', 'deepseek', 'kimi'];
 
 /** Providers with no binary on PATH, so no panel is expected. */
 export const ABSENT = ['gemini'];

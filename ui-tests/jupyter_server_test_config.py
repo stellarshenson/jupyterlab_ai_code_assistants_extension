@@ -25,6 +25,7 @@ same value for a hand-launched server.
 """
 import json
 import os
+import re
 import stat
 import sys
 import time
@@ -36,11 +37,12 @@ HERE = Path(__file__).parent.resolve()
 PORT = os.environ.get("JLAB_TEST_PORT") or "8888"
 SCRATCH = Path(os.environ.get("JLAB_TEST_SCRATCH") or (HERE / ".scratch" / PORT))
 
-# Providers whose binary is stubbed onto PATH, and so appear in the shell. The
+# Binaries stubbed onto PATH, so their providers appear in the shell: the
+# claude, codex, kimi and deepseek (``dsh``) assistants; gemini has none. The
 # specs assert against the same split (`tests/shared.ts`), and cross-check it
 # against the server's own status roster so config and specs cannot drift
 # apart silently.
-STUBBED = ("claude", "codex", "kimi")
+STUBBED = ("claude", "codex", "kimi", "dsh")
 
 # The ONE background agent the stubbed roster answers with, and the
 # conversation it owns (DEF-88). Without it the roster was empty, so the "bg"
@@ -90,6 +92,7 @@ os.environ["JUPYTER_RUNTIME_DIR"] = str(SCRATCH / "runtime")
 os.environ["CLAUDE_CONFIG_DIR"] = str(_home / ".claude")
 os.environ["CODEX_HOME"] = str(_home / ".codex")
 os.environ["KIMI_CODE_HOME"] = str(_home / ".kimi-code")
+os.environ["DSH_HOME"] = str(_home / ".dsh")
 # Favourites and pins this extension writes itself.
 os.environ["JUPYTERLAB_AI_CODE_ASSISTANTS_STATE_DIR"] = str(SCRATCH / "state")
 # The directory Jupyter serves, so seeded projects sit inside the served root
@@ -204,6 +207,41 @@ for _i, _wide_id in enumerate(("wide-0", _BG_SESSION_ID)):
     _jsonl = _wdir / f"{_wide_id}.jsonl"
     _jsonl.write_text(json.dumps({"cwd": str(_wide_cwd)}) + "\n", encoding="utf-8")
     os.utime(_jsonl, (_now - 600 + _i, _now - 600 + _i))
+
+# One DeepSeek project with a titled conversation, so its panel has a row to
+# open. The harness keys the project directory by the cwd with its separators
+# collapsed to "-" (an ASCII path under the scratch root never reaches the
+# escape branch of that rule), and the log is the raw-text form of its
+# session file - the same lines a ``compression: 'none'`` root holds.
+_dsh_cwd = _root / "harness"
+_dsh_cwd.mkdir(parents=True, exist_ok=True)
+_dsh_key = "--" + re.sub(r"[/\\:]+", "-", str(_dsh_cwd)).lstrip("-") + "--"
+_dsh_session = Path(os.environ["DSH_HOME"]) / "sessions" / _dsh_key / "session-1a2b3c4d-0000-4000-8000-000000000001"
+_dsh_session.mkdir(parents=True, exist_ok=True)
+(_dsh_session / "session.v3.jsonl").write_text(
+    "".join(
+        json.dumps(r, separators=(",", ":")) + "\n"
+        for r in (
+            {
+                "type": "session",
+                "version": 3,
+                "id": "session-1a2b3c4d-0000-4000-8000-000000000001",
+                "createdAt": int(_now * 1000),
+                "cwd": str(_dsh_cwd),
+                "isSeeded": False,
+                "delegationDepth": 0,
+            },
+            {"type": "user/message", "seq": 0, "time": int(_now * 1000), "data": {}},
+            {
+                "type": "session/title",
+                "seq": 1,
+                "time": int(_now * 1000),
+                "data": {"title": "Harness demo", "messageSeqs": [0], "source": {"kind": "llm"}},
+            },
+        )
+    ),
+    encoding="utf-8",
+)
 
 from jupyterlab.galata import configure_jupyter_server  # noqa: E402
 

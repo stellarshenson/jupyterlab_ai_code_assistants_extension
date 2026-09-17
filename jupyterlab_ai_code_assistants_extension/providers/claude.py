@@ -30,17 +30,18 @@ import shutil
 import subprocess
 import time
 import uuid
-from datetime import datetime
 from pathlib import Path
 
 from ..core import state
 from ..core.registry import Capabilities, LegacySource, ProviderDescriptor
 from ..core.store import (
+    FileMemo,
     SessionStore,
     cmdline_args,
     dispose_path,
     flag_value,
     is_safe_segment,
+    iso_ms,
     load_json,
     pid_alive,
 )
@@ -140,16 +141,19 @@ def claude_dir() -> Path:
 # --------------------------------------------------------------- transcripts
 
 
-# One entry per transcript: ``path -> (mtime, size, records)``. A transcript is
-# append-only, so an unchanged (mtime, size) pair means an unchanged tail - and
-# the panel asks for the same handful of files every 30s, for the row title,
-# the row colour and every branch label. Cleared wholesale rather than evicted:
-# the map is a memo, and rebuilding it costs one tail read per file in use.
-_tail_cache: dict[str, tuple[float, int, dict]] = {}
-_TAIL_CACHE_MAX = 1024
+# One memo entry per transcript. A transcript is append-only, so an unchanged
+# (mtime, size) pair means an unchanged tail - and the panel asks for the same
+# handful of files every 30s, for the row title, the row colour and every
+# branch label.
+_tail_memo = FileMemo()
 
 
 def _tail_records(path: Path) -> dict:
+    """Memoised :func:`_read_tail` of one transcript; empty when unreadable."""
+    return _tail_memo.get(path, _read_tail) or {}
+
+
+def _read_tail(path: Path, stat: os.stat_result) -> dict:
     """``{"cwd", "custom_title", "agent_colour", "last_timestamp"}`` from a tail.
 
     One pass over the last ``_TAIL_BYTES`` for all four, because all four are
@@ -169,16 +173,6 @@ def _tail_records(path: Path) -> dict:
       ``_activity_ms`` reports rather than the file mtime, since the mtime is
       not only the assistant's to write
     """
-    key = str(path)
-    try:
-        stat = path.stat()
-    except OSError:
-        _tail_cache.pop(key, None)
-        return {}
-    cached = _tail_cache.get(key)
-    if cached is not None and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
-        return cached[2]
-
     try:
         with path.open("rb") as fh:
             if stat.st_size > _TAIL_BYTES:
@@ -215,9 +209,6 @@ def _tail_records(path: Path) -> dict:
         if isinstance(stamp, str) and stamp:
             records["last_timestamp"] = stamp
 
-    if len(_tail_cache) >= _TAIL_CACHE_MAX:
-        _tail_cache.clear()
-    _tail_cache[key] = (stat.st_mtime, stat.st_size, records)
     return records
 
 
@@ -233,18 +224,6 @@ def _mtime(path: Path) -> float:
         return path.stat().st_mtime
     except OSError:
         return 0.0
-
-
-def _iso_ms(value: object) -> int | None:
-    """An ISO-8601 transcript timestamp as epoch ms, or None if it is not one."""
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return int(
-            datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000
-        )
-    except (ValueError, OSError, OverflowError):
-        return None
 
 
 def _activity_ms(path: Path) -> int:
@@ -271,7 +250,7 @@ def _activity_ms(path: Path) -> int:
     as long as the file exists (DEF-PANE-189).
     """
     now = time.time()
-    from_record = _iso_ms(_tail_records(path).get("last_timestamp"))
+    from_record = iso_ms(_tail_records(path).get("last_timestamp"))
     if from_record is not None and from_record <= now * 1000:
         return from_record
     raw = _mtime(path)

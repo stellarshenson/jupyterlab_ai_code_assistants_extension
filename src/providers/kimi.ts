@@ -83,18 +83,6 @@ export function truncateToColumns(text: string, maxColumns: number): string {
   return text;
 }
 
-/** The distinguishing part of a kimi session id.
- *
- * Kimi ids are `session_<uuid>`, so the core's front-slice would render the
- * constant `session_` for every conversation of a project - the exact thing
- * the short id exists to tell apart. Slice past the prefix instead.
- */
-export function shortSessionId(sessionId: string): string {
-  return sessionId.startsWith('session_')
-    ? sessionId.slice(8, 16)
-    : sessionId.slice(0, 8);
-}
-
 /** Menu-item label for one branch: the conversation title trimmed to the
  * column budget, followed by the short session id. Only the TITLE is trimmed -
  * branches of one project share a path, so the id is what tells them apart and
@@ -129,6 +117,8 @@ export const descriptor: IProviderDescriptor = {
   // only ever resumes - so a new conversation cannot be launched under an id
   // we chose, and is identified from the store on the next poll instead.
   mintsNewSessionId: false,
+  // Kimi ids are `session_<uuid>`; the short id is the uuid's head.
+  sessionIdPrefix: 'session_',
   launchModes: [
     {
       id: 'yoloMode',
@@ -150,9 +140,7 @@ export const descriptor: IProviderDescriptor = {
 
 export const hooks: IProviderHooks = {
   /** Lumino sets no `max-width` on `.lm-Menu-itemLabel`, so an uncapped
-   * auto-generated title stretches the submenu across the window. The core's
-   * `shortId` argument is a front-slice, which is the constant `session_` for
-   * every kimi id, so the id is re-derived here. */
-  branchLabel: (branch: IBranch, _shortId: string): string =>
-    branchMenuLabel(branch.label, shortSessionId(branch.session_id))
+   * auto-generated title stretches the submenu across the window. */
+  branchLabel: (branch: IBranch, shortId: string): string =>
+    branchMenuLabel(branch.label, shortId)
 };

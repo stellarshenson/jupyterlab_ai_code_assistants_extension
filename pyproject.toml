@@ -24,6 +24,11 @@ classifiers = [
 ]
 dependencies = [
     "jupyter_server>=2.13.0,<3",
+    # The DeepSeek Harness stores every conversation log as concatenated
+    # Zstandard frames (its default; a raw-text root is opt-in), so listing
+    # its sessions means decoding them here. 0.13 is the first release whose
+    # stream reader crosses frame boundaries.
+    "zstandard>=0.13",
     # Spawns the terminal a Launcher tile launches into (ACC-LNCH-154). The
     # coupling is the command id string basic-terminal:launch, not a token, so
     # there is no npm dependency to match this one (ACC-LNCH-159).

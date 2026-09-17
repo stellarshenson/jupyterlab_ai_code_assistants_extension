@@ -57,6 +57,12 @@
       "description": "When enabled, newly spawned and resumed sessions are launched with `--dangerously-bypass-approvals-and-sandbox`. Bypasses every Codex approval prompt and sandbox - only enable in environments you trust.",
       "default": false
     },
+    "providers.deepseek.enabled": {
+      "type": "boolean",
+      "title": "DeepSeek: enabled",
+      "description": "Show the DeepSeek Sessions panel. A panel appears only when this is on AND the `dsh` binary is on PATH.",
+      "default": true
+    },
     "providers.gemini.enabled": {
       "type": "boolean",
       "title": "Gemini: enabled",

@@ -50,8 +50,8 @@ from pathlib import Path
 from typing import Any
 
 from ..core.registry import Capabilities, ProviderDescriptor
-from ..core.state import read_pin
 from ..core.store import (
+    FileMemo,
     SessionNotFound,
     SessionStore,
     cmdline_args,
@@ -60,6 +60,7 @@ from ..core.store import (
     git_branch,
     is_safe_segment,
     load_json,
+    mtime_ms,
     now_iso_z,
     process_cmdline,
     process_comm,
@@ -110,12 +111,9 @@ _META_MARKERS = ('"$set"', '"sessionId"')
 # ``$set`` records as the conversation grows.
 _META_KEYS = ("sessionId", "summary", "kind")
 
-# Per-file metadata cache: path -> (st_mtime_ns, st_size, parsed). A chat file
-# is re-read only when its mtime or size changed, so the 30s sessions poll stops
-# re-scanning transcripts that did not move. Cleared wholesale rather than
-# evicted: the map is a memo, and rebuilding it costs one read per file in use.
-_meta_cache: dict[str, tuple[int, int, dict | None]] = {}
-_META_CACHE_MAX = 1024
+# Per-file metadata memo, so the 30s sessions poll re-reads only the chat
+# files that moved.
+_meta_memo = FileMemo()
 
 # Bound on the first-prompt preview, which is a tooltip line rather than a
 # document - an unbounded first turn would carry a whole pasted file into every
@@ -307,25 +305,17 @@ def _parse_chat(raw: bytes) -> dict | None:
     }
 
 
-def read_chat_meta(path: Path) -> dict | None:
-    """Cached :func:`_parse_chat` of one chat file."""
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    key = str(path)
-    cached = _meta_cache.get(key)
-    if cached is not None and cached[:2] == (st.st_mtime_ns, st.st_size):
-        return cached[2]
+def _parse_chat_file(path: Path, _st: os.stat_result) -> dict | None:
     try:
         raw = path.read_bytes()
     except OSError:
         return None
-    meta = _parse_chat(raw)
-    if len(_meta_cache) >= _META_CACHE_MAX:
-        _meta_cache.clear()
-    _meta_cache[key] = (st.st_mtime_ns, st.st_size, meta)
-    return meta
+    return _parse_chat(raw)
+
+
+def read_chat_meta(path: Path) -> dict | None:
+    """Memoised :func:`_parse_chat` of one chat file."""
+    return _meta_memo.get(path, _parse_chat_file)
 
 
 def parse_resume_id(cmdline: bytes) -> str | None:
@@ -493,37 +483,23 @@ class GeminiStore(SessionStore):
             out.append((child, meta))
         return out
 
-    def _activity(self, path: Path) -> int:
-        """ms-epoch of a conversation's last activity.
-
-        The file's mtime, not the recorded ``lastUpdated``: the CLI appends to
-        the file on every turn but re-stamps the field only with the metadata
-        updates, and a fork's own copy carries the parent's field until its
-        first turn.
-        """
-        try:
-            return int(path.stat().st_mtime * 1000)
-        except OSError:
-            return 0
-
     def _pick_current(
         self, encoded_path: str, chats: list[tuple[Path, dict]]
     ) -> tuple[Path, dict] | None:
-        """The project's current conversation: the pin when it still resolves,
-        otherwise the most recently active.
+        """The project's current conversation - the core's pin-or-newest rule.
 
-        The pin is the core's, written on a switch or a fork. Honouring it over
-        recency is what stops continued work in another conversation dragging
-        the row back to it; a dangling pin is ignored and recency resumes.
+        Activity is the file's mtime, not the recorded ``lastUpdated``: the
+        CLI appends to the file on every turn but re-stamps the field only
+        with the metadata updates, and a fork's own copy carries the parent's
+        field until its first turn.
         """
-        if not chats:
-            return None
-        pinned = read_pin(self.provider_id, encoded_path)
-        if pinned:
-            for path, meta in chats:
-                if meta["session_id"] == pinned:
-                    return path, meta
-        return max(chats, key=lambda item: self._activity(item[0]))
+        current = self.pick_current(
+            encoded_path, {meta["session_id"]: mtime_ms(path) for path, meta in chats}
+        )
+        for item in chats:
+            if item[1]["session_id"] == current:
+                return item
+        return None
 
     def _find_chat(self, chats_dir: Path, session_id: str) -> Path | None:
         """The file holding one conversation, or None."""
@@ -607,7 +583,7 @@ class GeminiStore(SessionStore):
                 "name": name,
                 "name_source": name_source,
                 "message_count": meta["message_count"],
-                "file_mtime": self._activity(path),
+                "file_mtime": mtime_ms(path),
                 "git_branch": git_cache[project_path],
                 "extra_sessions": max(len(chats) - 1, 0),
             })
@@ -641,7 +617,7 @@ class GeminiStore(SessionStore):
             # filename, which is what a user reading either surface sees.
             branches.append({
                 "session_id": session_id,
-                "file_mtime": self._activity(path),
+                "file_mtime": mtime_ms(path),
                 "label": meta.get("summary")
                 or meta.get("first_prompt")
                 or session_id[:8],

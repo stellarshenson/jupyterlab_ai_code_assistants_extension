@@ -28,20 +28,20 @@ import os
 import re
 import shutil
 import uuid
-from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from ..core.registry import Capabilities, LegacySource, ProviderDescriptor
-from ..core.state import read_pin
 from ..core.store import (
+    FileMemo,
     SessionStore,
     cmdline_args,
     dispose_path,
     flag_value,
     git_branch,
     is_safe_segment,
+    iso_ms,
     load_json,
+    mtime_ms,
     now_iso_z,
     process_comm,
 )
@@ -67,13 +67,9 @@ _BARE_UUID_RE = re.compile(r"[0-9a-f-]{36}")
 # Byte pattern identifying a message event in a wire log. Counted as a
 # substring, not parsed - counting must stay cheap on multi-MB transcripts.
 _MESSAGE_PATTERN = b'"type":"context.append_message"'
-# Per-wire-file message-count cache: path -> (st_mtime_ns, st_size, count). A
-# wire log is re-read only when its mtime or size changed, so the 30s sessions
-# poll stops re-scanning transcripts that did not move. Cleared wholesale rather
-# than evicted: the map is a memo, and rebuilding it costs one read per file in
-# use.
-_message_count_cache: dict[str, tuple[int, int, int]] = {}
-_MESSAGE_COUNT_CACHE_MAX = 1024
+# Per-wire-file message-count memo, so the 30s sessions poll re-reads only
+# the transcripts that moved.
+_message_count_memo = FileMemo()
 
 # The colour vocabulary of ``jupyterlab_colourful_tab_extension``, in its own
 # order. Kimi has no ``/color``, so a conversation's default tint is a hash onto
@@ -103,17 +99,6 @@ def _load_state(session_dir: Path) -> dict | None:
     skips that conversation rather than failing the whole listing."""
     data = load_json(session_dir / STATE_FILENAME)
     return data if isinstance(data, dict) else None
-
-
-def _parse_iso_ms(value: Any) -> int:
-    """Parse an ISO-8601 ``...Z`` timestamp to ms-epoch; 0 when malformed."""
-    if not isinstance(value, str) or not value:
-        return 0
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return 0
-    return int(parsed.timestamp() * 1000)
 
 
 def load_workspaces(root: Path) -> dict[str, str]:
@@ -197,40 +182,28 @@ def derived_colour(session_id: str) -> str:
     return _TAB_COLOUR_IDS[hash_ % len(_TAB_COLOUR_IDS)]
 
 
-def _message_count(session_dir: Path) -> int:
-    """Message events across every agent wire log of a conversation.
-
-    Read in binary so a corrupt byte never aborts the count, and memoised per
-    file by (mtime, size) so the poll re-reads only logs that actually moved.
-    """
+def _wire_message_count(wire: Path, _st: os.stat_result) -> int:
+    """Message events in one wire log. Read in binary so a corrupt byte never
+    aborts the count."""
     count = 0
+    try:
+        with wire.open("rb") as fh:
+            for line in fh:
+                if _MESSAGE_PATTERN in line:
+                    count += 1
+    except OSError:
+        return 0
+    return count
+
+
+def _message_count(session_dir: Path) -> int:
+    """Message events across every agent wire log of a conversation, memoised
+    per file so the poll re-reads only logs that actually moved."""
     try:
         wires = list((session_dir / "agents").glob("*/wire.jsonl"))
     except OSError:
         return 0
-    for wire in wires:
-        try:
-            st = wire.stat()
-        except OSError:
-            continue
-        key = str(wire)
-        cached = _message_count_cache.get(key)
-        if cached is not None and cached[:2] == (st.st_mtime_ns, st.st_size):
-            count += cached[2]
-            continue
-        file_count = 0
-        try:
-            with wire.open("rb") as fh:
-                for line in fh:
-                    if _MESSAGE_PATTERN in line:
-                        file_count += 1
-        except OSError:
-            continue
-        if len(_message_count_cache) >= _MESSAGE_COUNT_CACHE_MAX:
-            _message_count_cache.clear()
-        _message_count_cache[key] = (st.st_mtime_ns, st.st_size, file_count)
-        count += file_count
-    return count
+    return sum(_message_count_memo.get(wire, _wire_message_count) or 0 for wire in wires)
 
 
 #: What the Kimi CLI reports as its ``comm`` once it has settled. The launched
@@ -327,30 +300,27 @@ class KimiStore(SessionStore):
         Both are needed - Kimi rewrites the file more often than it re-stamps
         the field, and a copied conversation carries the source's field.
         """
-        try:
-            mtime_ms = int((session_dir / STATE_FILENAME).stat().st_mtime * 1000)
-        except OSError:
-            mtime_ms = 0
-        return max(_parse_iso_ms(state.get("updatedAt")), mtime_ms)
+        return max(
+            iso_ms(state.get("updatedAt")) or 0,
+            mtime_ms(session_dir / STATE_FILENAME),
+        )
 
     def _pick_current(
         self, encoded_path: str, sessions: list[tuple[Path, dict]]
     ) -> tuple[Path, dict] | None:
-        """The project's current conversation: the pin when it still resolves,
-        otherwise the most recently active.
-
-        The pin is the core's, written on a switch or a fork. Honouring it over
-        recency is what stops continued work in another conversation dragging
-        the row back to it; a dangling pin is ignored and recency resumes.
-        """
-        if not sessions:
-            return None
-        pinned = read_pin(self.provider_id, encoded_path)
-        if pinned:
-            for session_dir, state in sessions:
-                if session_dir.name == pinned:
-                    return session_dir, state
-        return max(sessions, key=lambda item: self._activity(*item))
+        """The project's current conversation - the core's pin-or-newest rule
+        over :meth:`_activity`."""
+        current = self.pick_current(
+            encoded_path,
+            {
+                session_dir.name: self._activity(session_dir, state)
+                for session_dir, state in sessions
+            },
+        )
+        for item in sessions:
+            if item[0].name == current:
+                return item
+        return None
 
     # -- listing ---------------------------------------------------------
 

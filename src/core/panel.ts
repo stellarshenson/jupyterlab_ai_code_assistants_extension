@@ -24,6 +24,7 @@ import { Message } from '@lumino/messaging';
 import { Menu, Widget } from '@lumino/widgets';
 
 import { ColourStore } from './colour';
+import { shortSessionId } from './labels';
 import {
   addIcon,
   branchIcon,
@@ -1436,6 +1437,19 @@ export class AssistantSessionsPanel extends Widget {
           'That conversation could not be made the current one.',
           { autoClose: 4000 }
         );
+      } else {
+        // The re-render is the only other signal, and it can read as the
+        // opposite of success: the row now reports the conversation's true
+        // last activity, so switching to an old one dims the row and drops
+        // it out of Recent (DEF-PANE-181).
+        const target = this._lastBranches.find(b => b.session_id === sessionId);
+        const label =
+          target?.label ??
+          shortSessionId(sessionId, this._descriptor.sessionIdPrefix);
+        Notification.success(
+          `${this._lookupName(session)}: switched to ${label}`,
+          { autoClose: 3000 }
+        );
       }
     } catch (err) {
       Notification.error(
@@ -1777,17 +1791,6 @@ export class AssistantSessionsPanel extends Widget {
       }
     }
 
-    const removing = this._removingPaths.has(session.encoded_path);
-    if (removing) {
-      row.classList.add('jp-mod-busy');
-      const spinner = document.createElement('span');
-      spinner.className = 'jp-AiAssistantsPanel-spinner';
-      spinner.title = this._trans.__('Removing...');
-      row.appendChild(spinner);
-    } else {
-      row.appendChild(this._renderIndicator(session));
-    }
-
     const name = document.createElement('span');
     name.className = 'jp-AiAssistantsPanel-name';
     // The text ellipsises in a span of its own so the badges after it survive
@@ -1824,6 +1827,21 @@ export class AssistantSessionsPanel extends Widget {
       name.appendChild(bg);
     }
     row.appendChild(name);
+
+    // The status dot (or the removal spinner in its place) leads the row
+    // visually - CSS `order` puts it first - but follows the name in the DOM,
+    // so a screen reader announces the project before its status sentence
+    // rather than the same preamble ahead of every active row (DEF-PANE-183).
+    const removing = this._removingPaths.has(session.encoded_path);
+    if (removing) {
+      row.classList.add('jp-mod-busy');
+      const spinner = document.createElement('span');
+      spinner.className = 'jp-AiAssistantsPanel-spinner';
+      spinner.title = this._trans.__('Removing...');
+      row.appendChild(spinner);
+    } else {
+      row.appendChild(this._renderIndicator(session));
+    }
 
     // No star in the Favorites section - every row there is one by definition.
     // The star sits before the time so the fixed-width time column stays the
@@ -2075,7 +2093,10 @@ export class AssistantSessionsPanel extends Widget {
    * share a project path, so the name and id are all that tell them apart. The
    * suffix is dropped when the label already IS the short id. */
   private _branchDisplayName(b: IBranch): string {
-    const shortId = b.session_id.slice(0, 8);
+    const shortId = shortSessionId(
+      b.session_id,
+      this._descriptor.sessionIdPrefix
+    );
     if (this._hooks.branchLabel) {
       return this._hooks.branchLabel(b, shortId);
     }

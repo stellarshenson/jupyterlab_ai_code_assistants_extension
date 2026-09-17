@@ -8,7 +8,7 @@
 [![Brought To You By KOLOMOLO](https://img.shields.io/badge/Brought%20To%20You%20By-KOLOMOLO-00ffff?style=flat)](https://kolomolo.com)
 [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-blue?style=flat)](https://www.paypal.com/donate/?hosted_button_id=B4KPBJDLLXTSA)
 
-A full launcher and manager for every AI code assistant in JupyterLab - Claude Code, Codex, Kimi and Gemini. Start, resume, fork, switch, and clean up CLI sessions from a side panel per assistant - one click lands you in the right terminal with the assistant already running, no duplicate tabs, no UUID hunting. One install replaces the separate `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension` packages and migrates their settings and favourites automatically.
+A full launcher and manager for every AI code assistant in JupyterLab - Claude Code, Codex, Kimi, Gemini and DeepSeek. Start, resume, fork, switch, and clean up CLI sessions from a side panel per assistant - one click lands you in the right terminal with the assistant already running, no duplicate tabs, no UUID hunting. One install replaces the separate `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension` packages and migrates their settings and favourites automatically.
 
 ![Claude Code Sessions panel](.resources/screenshot.png)
 
@@ -25,7 +25,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 
 ## Features
 
-- **One install, every assistant** - Claude Code, Codex, Kimi and Gemini from a single package, each with its own right-side panel wearing its official mark
+- **One install, every assistant** - Claude Code, Codex, Kimi, Gemini and DeepSeek from a single package, each with its own right-side panel wearing its official mark
 - **Provider registry** - assistant-specific behaviour lives in one module per assistant behind capability flags; no core file names an assistant, and adding one touches no core file
 - **Joint settings page** - one settings section covering all assistants, with a per-assistant toggle (all on by default); toggling takes effect live, no JupyterLab reload
 - **Three-section side panel** - Favorites, Recent, and All projects, each scrolling independently
@@ -33,9 +33,9 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 - **Launcher tiles** - every enabled assistant has a tile in an "AI Assistants" section of the JupyterLab Launcher (after Other, under the extension's own robot-head icon); a click opens the assistant in the file browser's current folder, resuming the folder's conversation when one exists and starting a new one otherwise, through the companion `jupyterlab_basic_terminal_extension` (installed automatically). Disable an assistant and its tile goes; disable them all and the section goes with them
 - **Your terminal's `claude -c` follows the panel** (Claude) - switching to a conversation makes plain `claude -c` in that project resume that same conversation, including one that has been compacted, which Claude Code otherwise refuses to continue. Launching repairs a compacted conversation the same way, but only switching moves what `claude -c` picks
 - **Conversation switcher** - a right-click "Switch and Manage Sessions" submenu lists a project's other conversations by name and short id with last-activity time; "Manage Sessions..." opens a searchable popup over the full list with multi-select delete and per-row open and copy-id buttons
-- **Branch session** - fork the current conversation into a new named session via the right-click menu; each assistant forks its own way (Claude's native `--fork-session`, Codex's `codex fork`, server-side copies for Kimi and Gemini) behind the same menu item
+- **Branch session** - fork the current conversation into a new named session via the right-click menu; each assistant forks its own way (Claude's native `--fork-session`, Codex's `codex fork`, server-side copies for Kimi, Gemini and DeepSeek) behind the same menu item
 - **Launch modes under each assistant's own name** - Claude's skip-permissions, Codex's approval bypass, Kimi's `--yolo`, Gemini's YOLO; unsafe variants carry a shield glyph in the launch menus
-- **Coloured terminal tabs** - each session's colour tints its terminal tab via the companion `jupyterlab_colourful_tab_extension` (installed automatically). Claude's own `/color` supplies its default, Kimi derives a stable colour from the conversation id; Codex and Gemini have no colour of their own until you set one, and a branched session inherits its parent's colour, which it keeps even if the parent's colour later changes or is reset. Tinting needs the companion release that reports the colours you pick and lets another extension own a tab - against an older one this extension tints no tabs at all and says so once, and the companion's own right-click colours keep working as they always did
+- **Coloured terminal tabs** - each session's colour tints its terminal tab via the companion `jupyterlab_colourful_tab_extension` (installed automatically). Claude's own `/color` supplies its default, Kimi derives a stable colour from the conversation id; Codex, Gemini and DeepSeek have no colour of their own until you set one, and a branched session inherits its parent's colour, which it keeps even if the parent's colour later changes or is reset. Tinting needs the companion release that reports the colours you pick and lets another extension own a tab - against an older one this extension tints no tabs at all and says so once, and the companion's own right-click colours keep working as they always did
 - **Your own tab colour wins** - set a colour on a terminal tab and the extension remembers it for that conversation, overriding whatever the assistant chose. `Reset Tab Colour (n)` in the session's right-click menu hands back every colour you set by hand on that project's conversations, and appears once there is one to hand back. Clearing the colour on the tab itself releases it too, for the conversation that terminal is running; `Reset Tab Colour` is the way back for a conversation with no tab open. A Codex or Kimi conversation that has never been resumed cannot be tracked yet, so a colour set on its tab is not kept
 - **Favorites** - star projects you keep coming back to via the right-click menu; favourites from the standalone extensions are migrated on first run
 - **Remove and clean up** - drop a project's history or a project's extra parallel sessions from the right-click menu, confirmation dialog first; removed files honour JupyterLab's "move files to trash" setting
@@ -44,13 +44,14 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 - **Search** - fuzzy filter per panel, toggled by the funnel button
 - **Presentation modes** - label rows by session name or by path relative to the JupyterLab root
 - **Conflict-safe upgrade** - if a retired standalone extension is still installed, its panel wins and this extension stands down for that assistant instead of showing a duplicate
+- **DeepSeek in the browser** - the DeepSeek Harness has no terminal chat; its panel lists the projects under `~/.dsh/sessions` (or `$DSH_HOME`) and `Open Web UI` starts `dsh --profile web --no-open --port 0` in the project's terminal, which prints the URL to open. The conversation is then chosen in the harness's own browser UI; branching and deleting work from the panel as for every other assistant. The URL is on the machine running JupyterLab, so a remote server needs a port forward to reach it
 - **Auto-disabled when absent** - an assistant whose CLI is not on `PATH` does not show a panel
 
 ## Requirements
 
 - JupyterLab >= 4.0.0
 - Python >= 3.10
-- At least one assistant CLI on `PATH`: `claude`, `codex`, `kimi`, or `gemini`
+- At least one assistant CLI on `PATH`: `claude`, `codex`, `kimi`, `gemini`, or `dsh` (the DeepSeek Harness)
 
 ## Install
 
@@ -59,6 +60,8 @@ Developers must install via the project `Makefile` (which orchestrates clean, bu
 ```bash
 make install
 ```
+
+The companion packages are version floors, so `make install` here pulls their published releases and replaces a locally built `jupyterlab_colourful_tab_extension` or `jupyterlab_basic_terminal_extension`. When verifying a change that spans this extension and a companion, install the companion last.
 
 End-users can install the published package from PyPI:
 

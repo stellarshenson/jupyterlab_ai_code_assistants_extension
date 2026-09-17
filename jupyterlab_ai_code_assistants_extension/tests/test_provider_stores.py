@@ -13,15 +13,18 @@ import time
 from datetime import datetime, timezone
 
 import pytest
+import zstandard
 
 from jupyterlab_ai_code_assistants_extension.core import state
 from jupyterlab_ai_code_assistants_extension.core import store as store_module
 from jupyterlab_ai_code_assistants_extension.core.store import SessionNotFound
 from jupyterlab_ai_code_assistants_extension.providers import codex as codex_provider
+from jupyterlab_ai_code_assistants_extension.providers import deepseek as deepseek_provider
 from jupyterlab_ai_code_assistants_extension.providers import gemini as gemini_provider
 from jupyterlab_ai_code_assistants_extension.providers import claude as claude_provider
 from jupyterlab_ai_code_assistants_extension.providers.claude import ClaudeStore
 from jupyterlab_ai_code_assistants_extension.providers.codex import CodexStore
+from jupyterlab_ai_code_assistants_extension.providers.deepseek import DeepSeekStore
 from jupyterlab_ai_code_assistants_extension.providers.gemini import (
     GeminiStore,
     parse_resume_id as gemini_resume_id,
@@ -35,10 +38,12 @@ from jupyterlab_ai_code_assistants_extension.providers.kimi import (
 
 from .conftest import (
     CLAUDE_ENCODED,
+    DEEPSEEK_ENCODED,
     PROJECT_PATH,
     new_uuid,
     write_claude_tree,
     write_codex_db,
+    write_deepseek_tree,
     write_gemini_tree,
     write_kimi_tree,
 )
@@ -1589,3 +1594,204 @@ def test_claude_a_pin_outranks_a_cwd_that_does_not_encode_to_its_directory(claud
         max(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime).stem
         == foreign
     )
+
+
+# ----------------------------------------------------------------- deepseek
+
+
+def _dsh_id() -> str:
+    return f"session-{new_uuid()}"
+
+
+@pytest.fixture
+def deepseek(scratch_stores):
+    store = DeepSeekStore()
+    store.provider_id = "deepseek"
+    return store, scratch_stores / "dsh"
+
+
+@pytest.mark.parametrize("compressed", [True, False])
+def test_deepseek_lists_a_project_from_its_log_headers(deepseek, compressed):
+    """The project key is lossy, so the row's path comes from the header, and
+    only message events count - the tool events between them do not."""
+    store, root = deepseek
+    newer, older = _dsh_id(), _dsh_id()
+    project = write_deepseek_tree(
+        root,
+        [{"id": newer, "title": "Port the panel", "messages": 5}, {"id": older}],
+        compressed=compressed,
+    )
+    touch(next((project / newer).iterdir()), 0)
+    touch(next((project / older).iterdir()), -600)
+    rows = store.list_sessions()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["encoded_path"] == DEEPSEEK_ENCODED
+    assert row["project_path"] == PROJECT_PATH
+    assert row["session_id"] == newer
+    assert (row["name"], row["name_source"]) == ("Port the panel", "session")
+    assert row["message_count"] == 5
+    assert row["extra_sessions"] == 1
+    branches = store.list_branches(DEEPSEEK_ENCODED)
+    assert branches["current"] == newer
+    assert [b["session_id"] for b in branches["branches"]] == [older]
+    # No title: the label is the uuid's head, past the constant prefix.
+    assert branches["branches"][0]["label"] == older[8:16]
+
+
+def test_deepseek_reads_the_highest_generation_only(deepseek):
+    store, root = deepseek
+    session = _dsh_id()
+    write_deepseek_tree(root, [{"id": session, "title": "old", "messages": 1}], version=2)
+    write_deepseek_tree(root, [{"id": session, "title": "new", "messages": 3}], version=3)
+    (row,) = store.list_sessions()
+    assert (row["name"], row["message_count"]) == ("new", 3)
+
+
+def test_deepseek_hides_subagents_and_conversations_without_a_project(deepseek):
+    store, root = deepseek
+    write_deepseek_tree(root, [{"id": _dsh_id(), "origin": "subagent"}])
+    orphan = root / "sessions" / "_no-cwd" / _dsh_id()
+    orphan.mkdir(parents=True)
+    (orphan / "session.v3.jsonl").write_text(
+        '{"type":"session","version":3,"id":"x","createdAt":1,"isSeeded":false,"delegationDepth":0}\n'
+    )
+    assert store.list_sessions() == []
+    assert store.list_branches(DEEPSEEK_ENCODED) is None
+
+
+def test_deepseek_a_torn_log_lists_with_the_records_it_holds_whole(deepseek):
+    """The harness's own recovery rule: a torn final frame contributes its
+    complete blocks. Cut inside the checksum the events all survive; cut
+    inside the block they are gone and the header frame alone lists."""
+    store, root = deepseek
+    session = _dsh_id()
+    project = write_deepseek_tree(root, [{"id": session, "title": "T", "messages": 4}])
+    log = next((project / session).iterdir())
+    intact = log.read_bytes()
+    log.write_bytes(intact[:-2])
+    (row,) = store.list_sessions()
+    assert (row["session_id"], row["name"], row["message_count"]) == (session, "T", 4)
+    log.write_bytes(intact[:-40])
+    (row,) = store.list_sessions()
+    assert (row["session_id"], row["name_source"], row["message_count"]) == (
+        session, "basename", 0
+    )
+    # A raw log torn mid-record drops that record and nothing else.
+    raw = project / session / "session.v3.jsonl"
+    log.unlink()
+    raw.write_text(
+        deepseek_provider._decode(intact, True) + '{"type":"user/message","seq":9',
+        encoding="utf-8",
+    )
+    assert store.list_sessions()[0]["message_count"] == 4
+
+
+def test_deepseek_pin_outlives_recency(deepseek):
+    store, root = deepseek
+    pinned, busier = _dsh_id(), _dsh_id()
+    project = write_deepseek_tree(root, [{"id": pinned}, {"id": busier}])
+    touch(next((project / pinned).iterdir()), -600)
+    touch(next((project / busier).iterdir()), 0)
+    assert store.resolve_current(DEEPSEEK_ENCODED) == busier
+    assert store.switch(DEEPSEEK_ENCODED, pinned) == {"requested": pinned}
+    state.write_pin("deepseek", DEEPSEEK_ENCODED, pinned)
+    touch(next((project / busier).iterdir()), 30)
+    assert store.resolve_current(DEEPSEEK_ENCODED) == pinned
+    assert store.switch(DEEPSEEK_ENCODED, _dsh_id()) == {"error": "branch_not_found"}
+    assert store.switch(DEEPSEEK_ENCODED, "../etc") is None
+    assert store.switch("no-such-key", pinned) is None
+
+
+def test_deepseek_fork_copies_the_log_in_the_harness_layout(deepseek):
+    """The copy carries the new id in its header and the name in its newest
+    title event, as the harness's own two-frame file: header alone first."""
+    store, root = deepseek
+    parent = _dsh_id()
+    project = write_deepseek_tree(
+        root, [{"id": parent, "title": "Parent", "messages": 2}]
+    )
+    new_id = store.fork(DEEPSEEK_ENCODED, parent, "Branch")
+    assert new_id and new_id != parent and deepseek_provider.SESSION_ID_RE.fullmatch(new_id)
+    copy = project / new_id / "session.v3.jsonl.zstd"
+    lines = deepseek_provider.read_log(copy).rstrip("\n").split("\n")
+    header = json.loads(lines[0])
+    assert header["id"] == new_id and header["cwd"] == PROJECT_PATH
+    titles = [json.loads(line) for line in lines if line.startswith('{"type":"session/title"')]
+    assert [t["data"]["title"] for t in titles] == ["Branch"]
+    assert sum(line.startswith('{"type":"user/message"') for line in lines) == 1
+    # First frame decodes to the header line and nothing else.
+    first = zstandard.ZstdDecompressor().decompressobj().decompress(copy.read_bytes())
+    assert first == (lines[0] + "\n").encode()
+    # The parent is untouched and both now list, the copy as current.
+    parent_lines = deepseek_provider.read_log(next((project / parent).iterdir()))
+    assert json.loads(parent_lines.split("\n")[0])["id"] == parent
+    (row,) = store.list_sessions()
+    assert (row["session_id"], row["name"], row["extra_sessions"]) == (new_id, "Branch", 1)
+    # A fork of a fork defaults its name to the parent's.
+    grandchild = store.fork(DEEPSEEK_ENCODED, new_id)
+    assert store.list_branches(DEEPSEEK_ENCODED)["current"] == grandchild
+    assert next(
+        b["label"] for b in store.list_branches(DEEPSEEK_ENCODED)["branches"]
+        if b["session_id"] == new_id
+    ) == "Branch"
+    assert store.list_sessions()[0]["name"] == "Fork of Branch"
+    assert store.fork(DEEPSEEK_ENCODED, _dsh_id()) is None
+
+
+def test_deepseek_fork_of_an_untitled_conversation_writes_no_event(deepseek):
+    """The harness records a title only as an event and this store writes no
+    events of its own, so an untitled parent yields an untitled copy."""
+    store, root = deepseek
+    parent = _dsh_id()
+    project = write_deepseek_tree(root, [{"id": parent, "messages": 2}], compressed=False)
+    new_id = store.fork(DEEPSEEK_ENCODED, parent, "Branch")
+    text = (project / new_id / "session.v3.jsonl").read_text(encoding="utf-8")
+    assert "session/title" not in text
+    assert json.loads(text.split("\n")[0])["id"] == new_id
+    assert store.list_sessions()[0]["name_source"] == "basename"
+
+
+def test_deepseek_delete_keeps_the_current_and_remove_answers_every_id(deepseek):
+    store, root = deepseek
+    keep, drop = _dsh_id(), _dsh_id()
+    project = write_deepseek_tree(root, [{"id": keep}, {"id": drop}])
+    touch(next((project / keep).iterdir()), 0)
+    touch(next((project / drop).iterdir()), -600)
+    assert store.delete_branches(DEEPSEEK_ENCODED, [keep, drop, _dsh_id()]) == [drop]
+    assert not (project / drop).exists()
+    assert store.delete_branches(DEEPSEEK_ENCODED, ["../x"]) is None
+    assert store.remove(DEEPSEEK_ENCODED) == [keep]
+    assert not project.exists()
+    assert store.remove(DEEPSEEK_ENCODED) is None
+
+
+def test_deepseek_launch_argv_serves_the_web_ui(deepseek):
+    """Every launch of a project is the same web server; only a resume of a
+    conversation that is gone is refused."""
+    store, root = deepseek
+    session = _dsh_id()
+    write_deepseek_tree(root, [{"id": session}])
+    web = ["/bin/dsh", "--profile", "web", "--no-open", "--port", "0"]
+    assert store.launch_argv("/bin/dsh") == web
+    assert store.launch_argv("/bin/dsh", session_id=session) == web
+    with pytest.raises(SessionNotFound):
+        store.launch_argv("/bin/dsh", session_id=_dsh_id())
+    # Nothing on the command line names a conversation, so none is read back.
+    assert store.parse_session_id(cmdline("dsh", "--profile", "web")) is None
+
+
+def test_deepseek_owns_pid_needs_the_harness_in_the_argv(deepseek, monkeypatch):
+    store, _root = deepseek
+    cmdlines = {
+        1: cmdline("node", "/opt/node_modules/.bin/dsh", "--profile", "web"),
+        2: cmdline("node", "/opt/node_modules/@deepseek-ai/dsh/lib/bin.js"),
+        3: cmdline("node", "/srv/my-dsh-app/bin.js"),
+        4: cmdline("node", "/srv/app/node_modules/.bin/vite", "dev"),
+    }
+    monkeypatch.setattr(deepseek_provider, "process_comm", lambda pid: "node")
+    monkeypatch.setattr(deepseek_provider, "process_cmdline", lambda pid: cmdlines.get(pid))
+    assert [pid for pid in cmdlines if store.owns_pid(pid)] == [1, 2]
+    monkeypatch.setattr(deepseek_provider, "process_comm", lambda pid: "bash")
+    assert not store.owns_pid(1)
+

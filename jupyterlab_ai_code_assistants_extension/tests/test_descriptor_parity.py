@@ -298,9 +298,9 @@ def test_the_derived_colour_agrees_across_runtimes():
     """One tint per conversation, whichever runtime resolved it.
 
     The frontend derives a colour when it has a session id in hand and the
-    server derives one while building a row, so the two implementations answer
-    the same question about the same id at different moments. Nothing but this
-    test binds them.
+    server derives one for the terminal probe (a row carries no colour), so
+    the two implementations answer the same question about the same id at
+    different moments. Nothing but this test binds them.
     """
     corpus = _colour_corpus()
     ts = _ts_colours(corpus)["colours"]

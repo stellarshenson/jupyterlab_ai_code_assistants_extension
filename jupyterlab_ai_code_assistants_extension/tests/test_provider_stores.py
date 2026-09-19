@@ -1115,13 +1115,58 @@ def test_gemini_claims_only_a_node_process_that_is_actually_gemini(
     assert store.owns_pid(44) is False
 
 
-def test_a_native_binary_store_claims_a_pid_by_comm_alone(claude, monkeypatch):
-    """The default identity is the comm, which is exact for a native binary."""
+def test_claude_claims_its_native_binary_by_comm_alone(claude, monkeypatch):
+    """The native installer's binary has its own comm, so the comm is exact."""
     store, _root = claude
-    monkeypatch.setattr(store_module, "process_comm", lambda pid: "claude")
+    monkeypatch.setattr(claude_provider, "process_comm", lambda pid: "claude")
+    monkeypatch.setattr(claude_provider, "process_cmdline", lambda pid: None)
+    assert store.owns_pid(1) is True
+    monkeypatch.setattr(claude_provider, "process_comm", lambda pid: "bash")
+    assert store.owns_pid(1) is False
+
+
+def test_a_native_binary_store_claims_a_pid_by_comm_alone(codex, monkeypatch):
+    """The base rule is the comm, exact for a native binary; Codex inherits it."""
+    store, _root = codex
+    monkeypatch.setattr(store_module, "process_comm", lambda pid: "codex")
     assert store.owns_pid(1) is True
     monkeypatch.setattr(store_module, "process_comm", lambda pid: "bash")
     assert store.owns_pid(1) is False
+
+
+@pytest.mark.parametrize("node_comm", ["MainThread", "node-MainThread", "node"])
+def test_claude_claims_the_npm_distribution_from_the_argv(
+    claude, monkeypatch, node_comm
+):
+    """An npm-installed Claude Code is a node process, so the argv decides.
+
+    The comm is the runtime's, whatever this Node spells it, so without the
+    argv check the terminal is never recognised: every row click after a
+    reload opens a second ``claude --resume`` on the same conversation.
+    """
+    store, _root = claude
+    monkeypatch.setattr(claude_provider, "process_comm", lambda pid: node_comm)
+    cmdlines = {
+        # The bin symlink as invoked - the shape `claude` on PATH gives.
+        11: cmdline("node", "/home/lab/.local/bin/claude", "--resume", "abc"),
+        # The package's entry point when node is called directly.
+        22: cmdline(
+            "node",
+            "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+        ),
+        33: None,
+        # The folder the user works in is not the CLI.
+        44: cmdline("node", "/home/lab/projects/my-claude-app/server.js"),
+        55: cmdline("node", "/home/lab/claude/node_modules/.bin/vite", "dev"),
+    }
+    monkeypatch.setattr(
+        claude_provider, "process_cmdline", lambda pid: cmdlines.get(pid)
+    )
+    assert store.owns_pid(11) is True
+    assert store.owns_pid(22) is True
+    assert store.owns_pid(33) is False
+    assert store.owns_pid(44) is False
+    assert store.owns_pid(55) is False
 
 
 # ------------------------------------------------ `claude -c` continuability

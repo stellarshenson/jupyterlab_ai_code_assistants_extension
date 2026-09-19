@@ -35,6 +35,7 @@ from pathlib import Path
 from ..core import state
 from ..core.registry import Capabilities, LegacySource, ProviderDescriptor
 from ..core.store import (
+    NODE_COMMS,
     FileMemo,
     SessionStore,
     cmdline_args,
@@ -44,6 +45,8 @@ from ..core.store import (
     iso_ms,
     load_json,
     pid_alive,
+    process_cmdline,
+    process_comm,
 )
 
 
@@ -1373,6 +1376,35 @@ class ClaudeStore(SessionStore):
         return argv
 
     # -- terminal identity ----------------------------------------------
+
+    def owns_pid(self, pid: int) -> bool:
+        """Whether the process at ``pid`` is Claude Code, whichever distribution.
+
+        The native installer ships a binary whose comm is ``claude``, so the
+        base rule's comm match is exact for it and is checked first. The npm
+        distribution (``@anthropic-ai/claude-code``) runs ``cli.js`` under
+        node, whose comm is the runtime's, never ``claude`` - a comm match
+        alone would leave such a terminal unrecognised forever: no reuse after
+        a reload, no tab tint. For a node comm the argv decides, and the match
+        is an argv ELEMENT whose last path segment is ``claude`` - the bin
+        symlink as invoked - or that ends with the package's ``cli.js`` when
+        node is called directly. A script started inside a folder named
+        ``claude`` is not claimed, because the folder is only a prefix of the
+        script's path; a bare argument that is such a folder's path would be.
+        """
+        comm = process_comm(pid)
+        if comm == self.comm_name:
+            return True
+        if comm not in NODE_COMMS:
+            return False
+        cmdline = process_cmdline(pid)
+        if cmdline is None:
+            return False
+        return any(
+            arg.rsplit("/", 1)[-1] == CLI_BINARY
+            or arg.endswith("@anthropic-ai/claude-code/cli.js")
+            for arg in cmdline_args(cmdline)
+        )
 
     def parse_session_id(self, cmdline: bytes) -> str | None:
         """The conversation a Claude cmdline is running, from its flags.

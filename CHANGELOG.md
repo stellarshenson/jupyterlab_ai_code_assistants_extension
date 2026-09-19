@@ -4,6 +4,19 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.27] - 2026-09-19
+
+### Changed
+
+- The package description on npm and PyPI now says what the extension does: a launcher and manager for Claude Code, Codex, Kimi, Gemini and DeepSeek sessions, rather than a note about the three extensions it replaced
+- The README names JupyterLab 4.6.0 as the required floor, which is the version the extension is built and tested against
+- `CONTRIBUTING.md` and `RELEASE.md` describe the Makefile lifecycle - `make install`, `make test`, `make publish` - instead of the raw `pip` and `jlpm` commands this project does not use
+- The coloured-tabs setting no longer says the companion extension may be absent; `jupyterlab_colourful_tab_extension` installs with this one
+
+### Fixed
+
+- A Claude Code installed from npm was never recognised as the assistant running in a terminal, because that distribution runs `cli.js` under `node` instead of as a `claude` binary. Its terminal was not reused after a page reload and its tab was left untinted; the terminal is now claimed from the command line as well as from the process name
+
 ## [1.2.25] - 2026-09-17
 
 ### Added

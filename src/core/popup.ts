@@ -372,7 +372,7 @@ export function showManageSessionsPopup(
 
   // Busy-lock the whole body during the async delete, so a slow backend cannot
   // be double-clicked into deleting the same set twice and a mid-flight
-  // selection cannot be silently discarded. The Dialog's Cancel button sits
+  // selection cannot be silently discarded. The Dialog's Close button sits
   // outside the body and stays usable.
   const setDeleting = (on: boolean): void => {
     deleting = on;

@@ -119,6 +119,17 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - test-tags: MANUAL
   - log: 2026-09-17T19:42:48Z @kj added
   - log: 2026-09-17T19:42:48Z @kj closed
+- [x] `DEF-SERV-234` **Four docstrings and comments state what the code does not do** - MINOR; store.py project_session_ids said the core used it to drop colour entries (the core's only caller is the launch pre-flight; the stores' own delete_project answers the ids the core drops); store.py fork said None becomes 400 fork_unsupported (routes.py answers fork_failed, fork_unsupported comes from the descriptor); popup.ts named a Cancel button the dialog does not have (its one button is Close); test_descriptor_parity.py said the server derives a colour while building a row (it derives one for the terminal probe; a row carries no colour)
+  - evidence: four sentences corrected in store.py, popup.ts and test_descriptor_parity.py, no code change; pytest and jest unchanged; round-4 slop-hunter and architect, adjudicated change 3
+  - repro: grep project_session_ids routes.py; read routes.py fork handler; grep okButton src/core/popup.ts
+  - log: 2026-09-18T21:14:32Z @kj added
+  - log: 2026-09-18T21:14:32Z @kj closed
+- [x] `DEF-SERV-252` **Two round-4 docstrings named things the code does not have** - MINOR; store.py project_session_ids named a store method delete_project that exists nowhere (the store-side callers are inside remove() in claude.py and gemini.py); ClaudeStore.owns_pid's docstring said a folder named claude never claims the scripts started inside it, while the element-basename match does claim a bare argument that is such a folder's path
+  - evidence: store.py names remove; claude.py docstring states the prefix-only exclusion and the bare-folder-argument case; no code change; round-5 slop-hunter and bug-hunter
+  - related: DEF-SERV-234, DEF-PROV-232 - the round-4 closures that wrote both sentences
+  - repro: grep -rn delete_project jupyterlab_ai_code_assistants_extension src; read claude.py owns_pid docstring against its any() predicate
+  - log: 2026-09-18T21:27:13Z @kj added
+  - log: 2026-09-18T21:27:13Z @kj closed
 
 ## Providers `PROV`
 
@@ -203,6 +214,43 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - root-cause: 2026-09-17T18:47:18Z @kj key-presence contract met by a store that emits an empty value; architect lens, round 1
   - log: 2026-09-17T18:47:18Z @kj added
   - log: 2026-09-17T18:47:28Z @kj closed
+- [x] `DEF-PROV-232` **npm-installed Claude Code never recognised in a terminal** - MAJOR; ClaudeStore inherited the base comm-only owns_pid (comm == claude); the npm distribution @anthropic-ai/claude-code runs cli.js under node, whose comm is node, MainThread or node-MainThread, so its terminal is never claimed: every row click after a reload opens a second claude --resume on the same conversation, the tab is never tinted and a picked colour is dropped; the native installer's binary (comm claude) was unaffected
+  - evidence: ClaudeStore.owns_pid: comm match first, else a NODE_COMMS comm with an argv element whose basename is claude or that ends with @anthropic-ai/claude-code/cli.js; test_claude_claims_the_npm_distribution_from_the_argv over the three node comms reddens (3 failed) when the argv branch is severed; round-4 bug-hunter, adjudicated change 1
+  - repro: with claude from npm: run claude in a JupyterLab terminal, reload the page, click the project row - a second terminal opens; cat /proc/<pid>/comm prints node-MainThread
+  - test-tags: UNIT
+  - root-cause: 2026-09-18T21:14:31Z @kj the base owns_pid is a comm match, exact for a native binary only; every other interpreter-hosted store overrides it with an argv check and Claude did not
+  - log: 2026-09-18T21:14:31Z @kj added
+  - log: 2026-09-18T21:14:31Z @kj closed
+- [x] `DEF-PROV-242` **Kimi index rewrite uses a fixed tmp name and no re-stat** - MINOR; kimi.py:624-644 _prune_index rewrites session_index.jsonl through session_index.jsonl.tmp and os.replace with no re-stat of the source, unlike claude.py:749-753; a Kimi conversation started inside that rewrite loses its index line, and two servers on one home collide on the tmp name
+  - evidence: wontfix: MINOR logged not fixed - needs a concurrent Kimi start inside one file rewrite, not reachable by a primary-path click sequence; round-4 bug-hunter
+  - repro: start a Kimi conversation while a prune rewrite is in flight
+  - log: 2026-09-18T21:14:33Z @kj added
+  - log: 2026-09-18T21:14:33Z @kj closed
+- [x] `DEF-PROV-244` **Derived tab colour hashed in both runtimes** - MINOR; src/core/colour.ts:24-53 and kimi.py:78,165-183 each implement FNV-1a over the session id and test_descriptor_parity binds them; the kimi row emits no colour, so one implementation could serve both through the wire
+  - evidence: wontfix: MINOR logged not fixed - both copies agree and a user sees no wrong tint; removal is a cross-runtime refactor with a wire change; design note; round-4 architect
+  - repro: read colour.ts and kimi.derived_colour
+  - log: 2026-09-18T21:14:33Z @kj added
+  - log: 2026-09-18T21:14:33Z @kj closed
+- [x] `DEF-PROV-245` **Codex reads CODEX_HOME from an inline literal** - MINOR; codex.py:105 os.environ.get("CODEX_HOME") while every sibling store names its config-root variable as a module constant; the string exists unbound in two files
+  - evidence: wontfix: MINOR logged not fixed - correct today, naming only; round-4 slop-hunter
+  - repro: grep CODEX_HOME jupyterlab_ai_code_assistants_extension
+  - log: 2026-09-18T21:14:33Z @kj added
+  - log: 2026-09-18T21:14:33Z @kj closed
+- [x] `DEF-PROV-246` **switch() body repeated in three stores** - MINOR; gemini, kimi and deepseek each carry the same 23-line switch() (validate, touch mtime, answer requested) and _pin is one line in four stores; a sixth provider copies the block
+  - evidence: wontfix: MINOR logged not fixed - the behaviour is a locked decision and the collapse is a new base-class hook; design note; round-4 architect
+  - repro: diff switch() across gemini.py, kimi.py, deepseek.py
+  - log: 2026-09-18T21:14:34Z @kj added
+  - log: 2026-09-18T21:14:34Z @kj closed
+- [x] `DEF-PROV-255` **ClaudeStore.owns_pid is the third copy of the node argv skeleton** - MINOR; claude.py, gemini.py and deepseek.py each carry the same ten-line comm-in-NODE_COMMS, read cmdline, any(predicate) body with only the predicate differing; a fourth node-based provider copies it again; the alternative is a node_argv_matches(pid, predicate) helper in core/store.py
+  - evidence: wontfix: MINOR logged not fixed - same class as DEF-PROV-244 and DEF-PROV-246; a helper is a new mechanism for a MINOR; round-5 slop-hunter
+  - repro: diff owns_pid across claude.py, gemini.py, deepseek.py
+  - log: 2026-09-18T21:27:14Z @kj added
+  - log: 2026-09-18T21:27:14Z @kj closed
+- [x] `DEF-PROV-256` **Claude argv match claims a bare folder argument named claude** - MINOR; the element-basename rule in ClaudeStore.owns_pid (the same rule GeminiStore uses) claims a node process whose argv carries a value whose last path segment is claude, such as node build.js --out /home/x/claude or --provider claude; that terminal then reads as a running Claude for the project's row and is tinted
+  - evidence: wontfix: MINOR logged not fixed - the input is a user's own node process started with such an argument, outside the bar; narrowing to node's script element is a behaviour change not taken; docstring corrected under DEF-SERV-252; round-5 bug-hunter
+  - repro: process_comm node, cmdline node agent.js --provider claude: owns_pid True
+  - log: 2026-09-18T21:27:14Z @kj added
+  - log: 2026-09-18T21:27:14Z @kj closed
 
 ## Frontend / server contract `FRONT`
 
@@ -247,6 +295,11 @@ Route shapes, payloads and timeouts where the panel and the server must agree
   - test-tags: MANUAL
   - log: 2026-09-17T19:13:26Z @kj added
   - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-FRONT-243` **Codex fork discovery pins the first new thread in the project** - MINOR; panel.ts:1394-1425 watches the project for three minutes after a Codex fork and pins the first unknown thread id it sees, so a thread started by hand inside that window is pinned as the fork; the CLI exposes nothing to match on before the first turn
+  - evidence: wontfix: MINOR logged not fixed - no matching key exists before the first turn; reviewer's own remedy is DEFER; round-4 bug-hunter
+  - repro: fork a Codex conversation, start another codex by hand in the same project within 3 minutes
+  - log: 2026-09-18T21:14:33Z @kj added
+  - log: 2026-09-18T21:14:33Z @kj closed
 
 ## Packaging `PACK`
 
@@ -279,6 +332,21 @@ Package manifest, shared-package and template leftovers that decide whether the 
   - root-cause: 2026-09-04T23:56:35Z @kj The server half was added to a repository that had never had one, so it followed no local precedent
   - log: 2026-09-04T23:56:35Z @kj added
   - log: 2026-09-17T17:25:02Z @kj closed
+- [x] `DEF-PACK-235` **Three shipped texts describe a product this is not** - MINOR; README.md advertised JupyterLab >= 4.0.0 while package.json pins @jupyterlab/launcher ^4.6.0 for categoryRank (docs/design-launcher.md records the 4.6.0 floor); the colouredTabs setting description said that without jupyterlab_colourful_tab_extension there is no tint either way, while pyproject.toml records that the whole extension fails to load without it (DEF-PACK-4 made it a dependency); package.json's description - copied by hatch into the PyPI summary - was the original task brief naming right toolbar panels
+  - evidence: README floor 4.6.0; generate-schema.mjs text 'installed with this extension as a dependency' and schema/plugin.json regenerated; package.json description is README's first sentence; round-4 devops, ux-designer and slop-hunter, adjudicated change 3
+  - repro: read README.md:52, schema/plugin.json colouredTabs description, package.json:4 at 1.2.25
+  - log: 2026-09-18T21:14:32Z @kj added
+  - log: 2026-09-18T21:14:32Z @kj closed
+- [x] `DEF-PACK-250` **Wheel and npm tarball ship the test suites** - MINOR; the wheel lists jupyterlab_ai_code_assistants_extension/tests/ and package.json files glob src/**/*.{ts,tsx} matches src/__tests__; download size only; two exclude lines remove them
+  - evidence: wontfix: MINOR logged not fixed - artefact size only; round-4 devops
+  - repro: unzip -l dist/*.whl | grep tests; npm pack --dry-run
+  - log: 2026-09-18T21:14:34Z @kj added
+  - log: 2026-09-18T21:14:34Z @kj closed
+- [x] `DEF-PACK-254` **JupyterLab floor 4.6.0 stated only in README and the launcher pin** - MINOR; pyproject.toml's dev extra says jupyterlab>=4 and the copier workflows install jupyterlab>=4.0.0,<5, so a 4.0-4.5 host installs the wheel and loses only the Launcher categoryRank with a console warning; the one-literal remedy is jupyterlab>=4.6.0 at pyproject.toml:55
+  - evidence: wontfix: MINOR logged not fixed - not a false statement, package.json's launcher pin is the source the README states; round-5 architect
+  - repro: grep -n 'jupyterlab>=' pyproject.toml .github/workflows/*.yml
+  - log: 2026-09-18T21:27:13Z @kj added
+  - log: 2026-09-18T21:27:13Z @kj closed
 
 ## Retirement and migration `RETI`
 
@@ -772,6 +840,36 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: MANUAL
   - log: 2026-09-17T19:13:26Z @kj added
   - log: 2026-09-17T19:13:45Z @kj closed
+- [x] `DEF-PANE-236` **Manage Sessions popup buttons below AA on the dark theme** - MINOR; the popup's small-text buttons measure 3.2-3.5:1 on the stock dark theme (--md-red-700 on #212121); base.css:956 paints the armed delete label in --jp-layout-color1, which is white only in light; remedy is color: white at base.css:956 plus a dark-theme outline override
+  - evidence: wontfix: MINOR logged not fixed - text legible, the destructive step stays behind the two-click arm, and contrast fixes here needed two ledger corrections before (DEF-PANE-185, DEF-PANE-213); round-4 ux-designer
+  - repro: dark theme, open Manage Sessions, measure the armed Delete label against its background
+  - log: 2026-09-18T21:14:32Z @kj added
+  - log: 2026-09-18T21:14:32Z @kj closed
+- [x] `DEF-PANE-237` **Popup time column narrower than the panel's** - MINOR; base.css:828 keeps .jp-AiAssistantsPanel-branchTime at 4em while the panel twin at :969 was widened to 4.5em for the same _formatTime output; rows idle 10-11 months overflow to a ragged right edge
+  - evidence: wontfix: MINOR logged not fixed - cosmetic on rows idle 10-11 months only; one-value remedy recorded; round-4 ux-designer
+  - repro: a conversation idle 11 months in Manage Sessions
+  - log: 2026-09-18T21:14:32Z @kj added
+  - log: 2026-09-18T21:14:32Z @kj closed
+- [x] `DEF-PANE-238` **Pinned current row in the popup shows no last-activity time** - MINOR; popup.ts renders the current row without a time span because IOptions carries no mtime for it, so the current conversation cannot be compared by recency with the others
+  - evidence: wontfix: MINOR logged not fixed - needs a new option field on the popup for a MINOR; round-4 ux-designer
+  - repro: open Manage Sessions, compare the current row with any other
+  - log: 2026-09-18T21:14:32Z @kj added
+  - log: 2026-09-18T21:14:32Z @kj closed
+- [x] `DEF-PANE-239` **Error toasts close in 4 s while carrying the cause** - MINOR; nine Notification.error calls in panel.ts pass autoClose 4000, so a refused launch's cause is gone before it can be read; panel.ts:637-641 records why launch errors cannot use the inline strip; remedy is dropping autoClose from the error calls
+  - evidence: wontfix: MINOR logged not fixed - failure path, not the primary path; remedy recorded; round-4 ux-designer, research request declined by the adjudicator
+  - repro: make a launch fail (CLI absent) and read the toast
+  - log: 2026-09-18T21:14:32Z @kj added
+  - log: 2026-09-18T21:14:33Z @kj closed
+- [x] `DEF-PANE-240` **Popup switch control has no verb in its accessible name** - MINOR; popup.ts:340 puts role=button on the label span whose accessible name is the conversation title, so a screen reader hears the title without the action; remedy is one aria-label
+  - evidence: wontfix: MINOR logged not fixed - assistive-technology path is outside the bar's primary path; round-4 ux-designer
+  - repro: screen reader over a Manage Sessions row
+  - log: 2026-09-18T21:14:33Z @kj added
+  - log: 2026-09-18T21:14:33Z @kj closed
+- [x] `DEF-PANE-241` **Popup delete chain carries a catch no input reaches** - MINOR; popup.ts:456 .catch after onDelete, which panel.ts:1480-1509 resolves to null on failure, and onRefetch is inside its own try/catch; seven lines of unreachable guard
+  - evidence: wontfix: MINOR logged not fixed - unreachable code, no user effect; round-4 slop-hunter
+  - repro: read popup.ts:440-460 against panel.ts onDelete
+  - log: 2026-09-18T21:14:33Z @kj added
+  - log: 2026-09-18T21:14:33Z @kj closed
 
 ## Colour store `COLO`
 
@@ -1235,3 +1333,50 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - root-cause: 2026-09-17T19:42:48Z @kj ui-tests/node_modules/@jupyterlab/galata/lib/galata.js mockRunners filters the terminals listing to the page-created map; this Galata version has no option to switch it off
   - log: 2026-09-17T19:42:48Z @kj added
   - log: 2026-09-17T19:42:48Z @kj closed
+- [x] `DEF-GUARD-233` **CONTRIBUTING.md and RELEASE.md instruct the build by hand** - MINOR; both files were unedited copier-template text: CONTRIBUTING.md told a contributor to pip install --editable, jupyter-builder develop, jlpm build and jlpm watch; RELEASE.md's manual release ran pip install build twine hatch, hatch version (claiming it creates a tag), python -m build, twine upload and npm publish - all against the Makefile-only lifecycle the README states
+  - evidence: CONTRIBUTING.md now names make install, make help, make clean, make mrproper and make test; RELEASE.md's manual section replaced by one paragraph on make publish; every named target exists in Makefile 1.40; round-4 devops and slop-hunter, adjudicated change 2
+  - repro: read CONTRIBUTING.md lines 13-31 and RELEASE.md lines 5-57 at 1.2.25
+  - log: 2026-09-18T21:14:32Z @kj added
+  - log: 2026-09-18T21:14:32Z @kj closed
+- [x] `DEF-GUARD-247` **Frontend specs are type-checked by nothing** - MINOR; tsconfig.test.json is referenced by no script, config or workflow, so spec type drift surfaces only at Jest runtime; options are wiring tsc -p tsconfig.test.json into lint:check or deleting the file
+  - evidence: wontfix: MINOR logged not fixed - gate gap, not a defect; adding a CI step is a new mechanism for a MINOR; round-4 devops
+  - repro: grep -rn tsconfig.test package.json jest.config.js .github
+  - log: 2026-09-18T21:14:34Z @kj added
+  - log: 2026-09-18T21:14:34Z @kj closed
+- [x] `DEF-GUARD-248` **Galata specs inline the terminal count beside its helper** - MINOR; resume.spec.ts:26-28,37-39 and claude-regression.spec.ts:195-197,225-227 recompute the terminal count inline while shared.ts exports terminalCount
+  - evidence: wontfix: MINOR logged not fixed - test code only; round-4 slop-hunter
+  - repro: grep -n 'api/terminals' ui-tests/tests/*.spec.ts
+  - log: 2026-09-18T21:14:34Z @kj added
+  - log: 2026-09-18T21:14:34Z @kj closed
+- [x] `DEF-GUARD-249` **One GitHub action reference floats on @main** - MINOR; .github/workflows/update-integration-tests.yml:17 uses update-snapshots-checkout@main while every other maintainer-tools action is pinned @v1; that workflow has write permissions
+  - evidence: wontfix: MINOR logged not fixed - copier template default, CI only, no product-path harm; round-4 devops
+  - repro: grep -n uses: .github/workflows/update-integration-tests.yml
+  - log: 2026-09-18T21:14:34Z @kj added
+  - log: 2026-09-18T21:14:34Z @kj closed
+- [x] `DEF-GUARD-251` **CONTRIBUTING.md claimed make install installs the test extra** - MINOR; the DEF-GUARD-233 rewrite replaced pip install -e .[test] with the sentence 'make install installs the test dependencies'; Makefile 1.40's install target runs only the wheel install and no target installs the test extra (pytest, pytest-asyncio, pytest-cov, pytest-jupyter[server]), so on a fresh interpreter make test fails at pytest
+  - evidence: CONTRIBUTING.md now states the Makefile does not install the test extra and gives the one-time pip install -e .[test] before make test; round-5 confirming panel, all five lenses
+  - related: DEF-GUARD-233 - the rewrite that introduced the claim
+  - repro: grep -n 'pytest\|\[test\]' Makefile; read CONTRIBUTING.md:48 at 1.2.26
+  - root-cause: 2026-09-18T21:27:13Z @kj the round-4 rewrite assumed the Makefile chain covered the test extra without reading install_dependencies
+  - log: 2026-09-18T21:27:13Z @kj added
+  - log: 2026-09-18T21:27:13Z @kj closed
+- [x] `DEF-GUARD-253` **Base SessionStore.owns_pid lost its only test** - MINOR; DEF-PROV-232 moved the comm-only test onto ClaudeStore's own override, so the base comm rule - which CodexStore inherits and which decides Codex row status and terminal reuse - had no test: a return False mutant in store.py passed the whole suite
+  - evidence: test_a_native_binary_store_claims_a_pid_by_comm_alone restored on the codex fixture patching store_module.process_comm; the return False mutant now fails it; round-5 slop-hunter and architect
+  - related: DEF-PROV-232 - the closure that relocated the test
+  - repro: replace the base owns_pid body with return False and run pytest at 1.2.26 before this fix: green
+  - log: 2026-09-18T21:27:13Z @kj added
+  - log: 2026-09-18T21:27:13Z @kj closed
+- [x] `DEF-GUARD-257` **CONTRIBUTING forbids pip by hand, then instructs it for the test extra** - MINOR; CONTRIBUTING.md:11 says do not run pip, jlpm build, jupyter-builder or npm by hand; CONTRIBUTING.md:48 says install the test extra once with pip install -e ".[test]"; both sentences true, both commands execute, the page contradicts itself; one-clause remedy: append 'except the one-time test extra under Server tests' to line 11; found by the round-6 bug-hunter, adjudicator refuted as immaterial (contributor prose, not the primary path)
+  - evidence: wontfix: MINOR logged not fixed; round-6 adjudicator refuted as immaterial and ruled a third prose edit on the page is the pattern the house rule stops; both instructions execute as written
+  - related: DEF-GUARD-251 - the round-5 sentence this contradicts, DEF-GUARD-233 - the round-4 ban it sits under
+  - repro: read CONTRIBUTING.md lines 11 and 48 together
+  - test-tags: MANUAL
+  - log: 2026-09-19T11:24:06Z @kj added
+  - log: 2026-09-19T11:24:06Z @kj closed
+- [x] `DEF-GUARD-258` **schema/plugin.json left unformatted by a reviewer's generator run** - MINOR; round-6 devops reviewer ran node scripts/generate-schema.mjs inside a read-only probe at 13:21 on 2026-09-19 against the no-writes instruction; the generator is deterministic so only the formatting changed (two enum arrays expanded); prettier:check then failed on the one file and build.yml lint:check would go red on the next push; found by the round-7 devops reviewer; the root-cause half of that finding (Makefile runs prettier before the build so every make install leaves it unformatted) is false: package.json generate:schema formats after generating
+  - evidence: node node_modules/prettier/bin/prettier.cjs --write schema/plugin.json; diff vs HEAD is the one colouredTabs sentence again; prettier --check on the whole tree clean; pytest 231 passed
+  - related: DEF-PACK-235 - the round-4 change that regenerated the file
+  - repro: node scripts/generate-schema.mjs without the prettier --write that package.json generate:schema appends, then node node_modules/prettier/bin/prettier.cjs --check schema/plugin.json
+  - test-tags: MANUAL
+  - log: 2026-09-19T11:32:48Z @kj added
+  - log: 2026-09-19T11:32:48Z @kj closed

@@ -49,7 +49,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 
 ## Requirements
 
-- JupyterLab >= 4.0.0
+- JupyterLab >= 4.6.0
 - Python >= 3.10
 - At least one assistant CLI on `PATH`: `claude`, `codex`, `kimi`, `gemini`, or `dsh` (the DeepSeek Harness)
 

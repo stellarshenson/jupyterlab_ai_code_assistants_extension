@@ -46,7 +46,7 @@ const SHARED = {
     type: 'boolean',
     title: 'Coloured terminal tabs',
     description:
-      "When enabled (default), a terminal running an assistant has its dock tab tinted with that conversation's colour. Turning it off clears the tint and stops it being applied. Requires `jupyterlab_colourful_tab_extension`; without it there is no tint either way.",
+      "When enabled (default), a terminal running an assistant has its dock tab tinted with that conversation's colour. Turning it off clears the tint and stops it being applied. Requires `jupyterlab_colourful_tab_extension`, installed with this extension as a dependency.",
     default: true
   },
   sidebar: {

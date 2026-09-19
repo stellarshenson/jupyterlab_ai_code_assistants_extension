@@ -6,58 +6,27 @@ Note: You will need Node.js to build the extension package.
 You may install it from [nodejs.org](https://nodejs.org/en/download). We
 recommend using the latest LTS version of Node.js.
 
-The `jlpm` command is JupyterLab's pinned version of
-[yarn](https://yarnpkg.com/) that is installed with JupyterLab. You may use
-`yarn` or `npm` in lieu of `jlpm` below.
+The project `Makefile` owns the build lifecycle: it cleans, builds the
+wheel and installs it, and bumps the patch version on every build. Do not run
+`pip`, `jlpm build`, `jupyter-builder` or `npm` by hand.
 
 ```bash
 # Clone the repo to your local environment
 # Change directory to the jupyterlab_ai_code_assistants_extension directory
 
-# Set up a virtual environment and install package in development mode
-python -m venv .venv
-source .venv/bin/activate
-pip install --editable ".[dev,test]"
+# Build and install the extension (run again after every change)
+make install
 
-# Link your development version of the extension with JupyterLab
-jupyter-builder develop . --overwrite
-# Server extension must be manually installed in develop mode
-jupyter server extension enable jupyterlab_ai_code_assistants_extension
-
-# Rebuild extension Typescript source after making changes
-# IMPORTANT: Unlike the steps above which are performed only once, do this step
-# every time you make a change.
-jlpm build
-```
-
-You can watch the source directory and run JupyterLab at the same time in different terminals to watch for changes in the extension's source and automatically rebuild the extension.
-
-```bash
-# Watch the source directory in one terminal, automatically rebuilding when needed
-jlpm watch
-# Run JupyterLab in another terminal
-jupyter lab
-```
-
-With the watch command running, every saved change will immediately be built locally and available in your running JupyterLab. Refresh JupyterLab to load the change in your browser (you may need to wait several seconds for the extension to be rebuilt).
-
-By default, the `jlpm build` command generates the source maps for this extension to make it easier to debug using the browser dev tools. To also generate source maps for the JupyterLab core extensions, you can run the following command:
-
-```bash
-jupyter lab build --minimize=False
+# List every target
+make help
 ```
 
 ## Development uninstall
 
 ```bash
-# Server extension must be manually disabled in develop mode
-jupyter server extension disable jupyterlab_ai_code_assistants_extension
-pip uninstall jupyterlab_ai_code_assistants_extension
+make clean      # remove build artefacts
+make mrproper   # remove build and venv artefacts
 ```
-
-In development mode, you will also need to remove the symlink created by `jupyter-builder develop`
-command. To find its location, you can run `jupyter labextension list` to figure out where the `labextensions`
-folder is located. Then you can remove the symlink named `jupyterlab_ai_code_assistants_extension` within that folder.
 
 ## Endpoint authentication
 
@@ -76,19 +45,13 @@ python .github/scripts/check_auth.py
 
 This extension is using [Pytest](https://docs.pytest.org/) for Python code testing.
 
-Install test dependencies (needed only once):
+The Makefile does not install the `test` extra (`pytest`, `pytest-asyncio`, `pytest-cov`, `pytest-jupyter[server]`); install it once on the interpreter with `pip install -e ".[test]"`. Then run:
 
 ```sh
-pip install -e ".[test]"
-# Each time you install the Python package, you need to restore the front-end extension link
-jupyter-builder develop . --overwrite
+make test
 ```
 
-To execute them, run:
-
-```sh
-pytest -vv -r ap --cov jupyterlab_ai_code_assistants_extension
-```
+or, for one runtime only, `pytest -vv -r ap --cov jupyterlab_ai_code_assistants_extension`.
 
 #### Frontend tests
 
@@ -97,7 +60,6 @@ This extension is using [Jest](https://jestjs.io/) for JavaScript code testing.
 To execute them, execute:
 
 ```sh
-jlpm
 jlpm test
 ```
 

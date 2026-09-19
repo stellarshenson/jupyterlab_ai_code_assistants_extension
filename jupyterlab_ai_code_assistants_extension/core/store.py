@@ -470,8 +470,9 @@ class SessionStore(ABC):
         route answers 400 ``fork_unsupported``. A
         ``native`` store mints the id the CLI will be handed at launch without
         touching disk; a ``server`` store copies the conversation on disk and
-        returns the copy's id. None means "cannot fork", which the core turns
-        into 400 ``fork_unsupported``.
+        returns the copy's id. None means the copy failed, which the core
+        turns into 400 ``fork_failed``; ``fork_unsupported`` is answered from
+        the descriptor before the store is asked.
         """
         return None
 
@@ -569,8 +570,9 @@ class SessionStore(ABC):
     def project_session_ids(self, encoded_path: str) -> list[str]:
         """Every conversation id in a project - current one included.
 
-        Used by the core to drop the colour entries of conversations it is
-        about to delete, so no orphan keys are left behind. Derived from
+        Used by the core's launch pre-flight to refuse a session id the
+        project no longer holds, and by a store's own ``remove`` to answer
+        the ids the core then drops from the colour store. Derived from
         ``list_branches`` by default.
         """
         listing = self.list_branches(encoded_path)

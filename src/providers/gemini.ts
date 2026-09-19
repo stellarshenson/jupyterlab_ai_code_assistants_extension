@@ -52,6 +52,8 @@ export const descriptor: IProviderDescriptor = {
   // The fork's name is written into the copy by the server; the CLI has no
   // naming flag to take it.
   promptsForBranchName: true,
+  // The name is `summary` in the chat file, which is what the CLI shows.
+  canRename: true,
   // `--session-id <uuid>` starts a conversation under an id we mint.
   mintsNewSessionId: true,
   launchModes: [

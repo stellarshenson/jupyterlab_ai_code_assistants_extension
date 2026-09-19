@@ -280,6 +280,17 @@ class FileMemo:
         self._entries[key] = (st.st_mtime_ns, st.st_size, value)
         return value
 
+    def drop(self, path: Path) -> None:
+        """Forget this file's memoised value.
+
+        The key is ``(mtime, size)``, so a rewrite that puts the mtime back is
+        invisible to it - and a name swapped for one of the same byte length
+        leaves the size alone too, after which this cache keeps serving the
+        OLD name. A store that rewrites in place and restores the mtime, which
+        every rename here does, drops the entry itself.
+        """
+        self._entries.pop(str(path), None)
+
 
 def is_safe_segment(name: Any) -> bool:
     """True when ``name`` may be joined onto a path as a single segment.
@@ -473,6 +484,22 @@ class SessionStore(ABC):
         returns the copy's id. None means the copy failed, which the core
         turns into 400 ``fork_failed``; ``fork_unsupported`` is answered from
         the descriptor before the store is asked.
+        """
+        return None
+
+    def rename(self, encoded_path: str, session_id: str, name: str) -> str | None:
+        """Name ``session_id`` ``name``, returning the name that was stored.
+
+        Unsupported by default, which the ``can_rename`` capability declares
+        and the route enforces before the store is asked - so reaching this
+        body at all means the descriptor promised a rename the store never
+        implemented. Each store writes the field its own assistant reads back,
+        never a name of the extension's own: a name the CLI does not show is
+        a name the two surfaces disagree about.
+
+        The answer is the STORED name rather than the requested one, because a
+        store may normalise what it writes. None means the write failed,
+        which the core turns into 400 ``rename_failed``.
         """
         return None
 

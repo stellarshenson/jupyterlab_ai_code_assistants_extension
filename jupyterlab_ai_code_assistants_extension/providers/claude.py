@@ -1309,6 +1309,65 @@ class ClaudeStore(SessionStore):
         if side_dir.is_dir():
             dispose_path(side_dir, to_trash)
 
+    def rename(self, encoded_path: str, session_id: str, name: str) -> str | None:
+        """Append the ``custom-title`` record the CLI's own ``/rename`` writes.
+
+        The transcript is append-only and the tail reader takes the LAST
+        ``custom-title`` it finds, so naming a conversation is one line at the
+        end: no rewrite of a file the CLI may be appending to at the same
+        moment, and no record shape the CLI does not already write itself.
+
+        The newline before the record is not decoration - a transcript whose
+        last write was cut short has no trailing newline, and appending
+        straight onto it would fuse this record into that one and lose both.
+
+        The mtime is put back afterwards, for the reason ``ensure_continuable``
+        carries it across: naming a conversation is not a turn in it, and an
+        append writes an mtime of "now", which SPENDS the thirty-day stamp
+        ``switch`` left - after which ``claude -c`` resumes whichever sibling
+        was written to next while the panel still shows this one.
+        """
+        if not is_safe_segment(session_id):
+            return None
+        project_dir = self._project_dir(encoded_path)
+        if project_dir is None:
+            return None
+        jsonl = project_dir / f"{session_id}.jsonl"
+        if not jsonl.is_file():
+            return None
+        try:
+            before = jsonl.stat()
+        except OSError as err:
+            _log.warning("claude could not rename %s: %s", jsonl.name, err)
+            return None
+        record = {
+            "type": "custom-title",
+            "customTitle": name,
+            "sessionId": session_id,
+        }
+        line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+        try:
+            with jsonl.open("r+b") as handle:
+                handle.seek(0, os.SEEK_END)
+                if handle.tell():
+                    handle.seek(-1, os.SEEK_END)
+                    needs_newline = handle.read(1) != b"\n"
+                    handle.seek(0, os.SEEK_END)
+                    if needs_newline:
+                        handle.write(b"\n")
+                handle.write(line.encode("utf-8") + b"\n")
+        except OSError as err:
+            _log.warning("claude could not rename %s: %s", jsonl.name, err)
+            return None
+        try:
+            os.utime(jsonl, (before.st_atime, before.st_mtime))
+        except OSError as err:
+            # Best-effort, exactly as ``switch`` treats its own stamp: the name
+            # is already on disk by now, and answering "rename failed" for a
+            # name that WAS written is a worse answer than a spent stamp.
+            _log.warning("claude could not restore %s mtime: %s", jsonl.name, err)
+        return name
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -1480,6 +1539,9 @@ DESCRIPTOR = ProviderDescriptor(
         # a colour the user sets on the tab overrides it and is remembered.
         colour_source="native",
         launch_modes=(MODE_SKIP_PERMISSIONS,),
+        # A name is a ``custom-title`` record appended to the transcript,
+        # which is what the CLI's own ``/rename`` writes.
+        can_rename=True,
     ),
     legacy=LegacySource(
         plugin_id="jupyterlab_claude_code_extension",

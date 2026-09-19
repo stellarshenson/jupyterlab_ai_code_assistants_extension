@@ -720,6 +720,13 @@ DESCRIPTOR = ProviderDescriptor(
         # is the only source of a tint.
         colour_source="none",
         launch_modes=(BYPASS_MODE,),
+        # No rename. A thread's name is a column of ``state_<N>.sqlite``,
+        # which this store opens READ-ONLY, and Codex exposes no ``rename``
+        # subcommand to shell to the way ``archive`` and ``delete`` are - its
+        # only write surface is the app-server method ``codex.thread.rename``,
+        # which this extension does not speak. The panel hides the action
+        # rather than offering one that cannot land.
+        can_rename=False,
     ),
     legacy=LegacySource(
         plugin_id="jupyterlab_codex_extension",

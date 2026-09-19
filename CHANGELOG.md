@@ -4,6 +4,22 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.30] - 2026-09-20
+
+### Added
+
+- Rename Session. A conversation is renamed from the row's context menu, and the name is written where the assistant itself reads it back: Claude gets the record its own `/rename` writes, Kimi a custom title in its session state, Gemini a summary on every record of the chat file, DeepSeek a rewritten title event. The panel shows the name the store actually kept, which a provider may have normalised
+- Codex declares no rename, so the menu item is absent for it rather than offering an action that would fail. Its names live in a database this extension opens read-only, and the CLI has no rename verb
+
+### Fixed
+
+- A rename counted as a turn. Claude's thirty-day switch stamp - the mark that decides what `claude -c` resumes - was spent by the write, and a week-idle Kimi, Gemini or DeepSeek row jumped to the top of Recent with a tooltip stating a time the assistant never spoke. Every store now restores the conversation's timestamp after writing the name
+- The route-gating test claimed to cover every provider route while checking seven of the ten registered; the list is now read off the route registration, so a route added to the server cannot skip the gate check
+
+### Changed
+
+- Every one of the 181 acceptance criteria now carries a test, and each test has been shown able to fail by severing the behaviour it guards. Three new guard modules cover what had none: the Python core is scanned for assistant names as the TypeScript core already was, the shipped settings schema is held against the provider registry, and the browser-test harness's own configuration is asserted rather than assumed
+
 ## [1.2.27] - 2026-09-19
 
 ### Changed

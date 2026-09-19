@@ -48,6 +48,7 @@ function descriptor(terminalScope: TerminalScope): IProviderDescriptor {
     colourSource: 'none',
     terminalScope,
     promptsForBranchName: true,
+    canRename: true,
     mintsNewSessionId: false,
     launchModes: [],
     hasRemoteControl: false,

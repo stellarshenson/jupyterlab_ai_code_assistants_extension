@@ -735,6 +735,70 @@ class BranchHandler(_ProviderHandler):
         self.finish(json.dumps({"session_id": new_id}))
 
 
+class RenameHandler(_ProviderHandler):
+    """Name a conversation, in the assistant's own store.
+
+    Served only for a provider whose descriptor says ``can_rename``. The rest
+    answer 400 ``rename_unsupported`` from the descriptor, before the store is
+    asked - the same shape as ``fork_unsupported``, and for the same reason: a
+    store that never implemented the verb would otherwise report a failure
+    where the truthful answer is that the assistant has no writable name.
+
+    The name is written where the ASSISTANT reads it, never into this
+    extension's own state: a name only the panel can see is a name the two
+    surfaces disagree about the moment the user opens the CLI.
+    """
+
+    #: Longest name accepted, in characters. This writes into another
+    #: program's data file, so the length of what lands there is bounded here
+    #: rather than left to whatever was pasted into the dialog. Display is a
+    #: separate concern - the menu truncates to its own budget (labels.ts).
+    MAX_NAME_CHARS = 200
+
+    @tornado.web.authenticated
+    async def post(self, provider_id: str) -> None:
+        provider = self.resolve(provider_id)
+        if provider is None:
+            return
+        body = self.parse_body()
+        if body is None:
+            return
+        encoded_path = body.get("encoded_path")
+        session_id = body.get("session_id")
+        name = body.get("name")
+        if not isinstance(encoded_path, str) or not isinstance(session_id, str):
+            self.bad_request()
+            return
+        if not isinstance(name, str):
+            self.bad_request("name_invalid")
+            return
+        name = name.strip()
+        if not name or len(name) > self.MAX_NAME_CHARS:
+            self.bad_request("name_invalid")
+            return
+        if not provider.descriptor.capabilities.can_rename:
+            self.bad_request("rename_unsupported")
+            return
+        loop = asyncio.get_running_loop()
+        # Both calls walk the project's conversation files, so both are off
+        # the IOLoop - the same measurement that moved the launch pre-flight
+        # there applies unchanged here.
+        known = await loop.run_in_executor(
+            None, provider.store.project_session_ids, encoded_path
+        )
+        if known and session_id not in known:
+            self.set_status(404)
+            self.finish(json.dumps({"error": "session_not_found"}))
+            return
+        stored = await loop.run_in_executor(
+            None, provider.store.rename, encoded_path, session_id, name
+        )
+        if not stored:
+            self.bad_request("rename_failed")
+            return
+        self.finish(json.dumps({"session_id": session_id, "name": stored}))
+
+
 @dataclasses.dataclass(frozen=True)
 class _LaunchRequest:
     """A validated launch body together with the argv it resolves to."""
@@ -1136,6 +1200,10 @@ def setup_route_handlers(web_app) -> None:
         (
             url_path_join(base_url, URL_PREFIX, "providers", provider, "branch"),
             BranchHandler,
+        ),
+        (
+            url_path_join(base_url, URL_PREFIX, "providers", provider, "rename"),
+            RenameHandler,
         ),
         (
             url_path_join(base_url, URL_PREFIX, "providers", provider, "launch"),

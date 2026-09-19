@@ -50,13 +50,13 @@ jest.mock('../core/request', () => ({
   withQuery: (path: string) => path
 }));
 
-import { Notification } from '@jupyterlab/apputils';
+import { Clipboard, Notification } from '@jupyterlab/apputils';
 import { TAB_COLOUR_IDS, fnv1aColour } from '../core/colour';
 import { addIcon, branchIcon, cleanupIcon, shieldIcon } from '../core/icons';
 import { AssistantSessionsPanel, commandId } from '../core/panel';
 import { showManageSessionsPopup } from '../core/popup';
 import { requestProvider } from '../core/request';
-import { IProviderDescriptor, ISession } from '../core/types';
+import { IBranch, IProviderDescriptor, ISession } from '../core/types';
 
 const request = requestProvider as jest.Mock;
 
@@ -72,6 +72,7 @@ const DESCRIPTOR: IProviderDescriptor = {
   colourSource: 'derived',
   terminalScope: 'conversation',
   promptsForBranchName: true,
+  canRename: true,
   mintsNewSessionId: true,
   launchModes: [
     {
@@ -961,5 +962,721 @@ describe('DEF-PANE-211 - per-conversation open surfaces on a project-scoped assi
     } finally {
       p.dispose();
     }
+  });
+});
+
+// ------------------------------------------------------- ACC-SESS-173..175
+
+describe('Rename Session', () => {
+  /** A provider whose names live somewhere this extension only reads - Codex's
+   * case, and the reason the capability exists at all. */
+  const NO_RENAME: IProviderDescriptor = {
+    ...DESCRIPTOR,
+    iconName: 'testbed-no-rename-panel-spec',
+    canRename: false
+  };
+
+  function menuLabels(p: AssistantSessionsPanel): string[] {
+    (p as any)._rebuildContextMenu(false);
+    const menu = (p as any)._contextMenu;
+    return Array.from({ length: menu.items.length }, (_, i) => menu.items.at(i))
+      .filter((item: any) => item.isVisible !== false)
+      .map((item: any) => String(item.label ?? ''));
+  }
+
+  /** Answer the rename dialog with `value`, or dismiss it. Returns what the
+   * field was seeded with, which is half of what these tests are about. */
+  async function answer(value: string | null): Promise<string> {
+    await flush();
+    const dialog = document.querySelector('.jp-Dialog');
+    expect(dialog).not.toBeNull();
+    const input = dialog!.querySelector<HTMLInputElement>('input')!;
+    const seeded = input.value;
+    if (value !== null) {
+      input.value = value;
+    }
+    const buttons = Array.from(
+      dialog!.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+    );
+    // Cancel first, Ok second - `InputDialog.getText`'s own button order.
+    buttons[value === null ? 0 : buttons.length - 1].click();
+    await flush();
+    return seeded;
+  }
+
+  it('ACC-SESS-174 - offers the item only where the assistant keeps a writable name', () => {
+    expect(menuLabels(panel)).toContain('Rename Session...');
+    const p = makePanel(NO_RENAME);
+    try {
+      expect(menuLabels(p)).not.toContain('Rename Session...');
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it('ACC-SESS-173 - sends the trimmed name and reports the one the store kept', async () => {
+    request.mockImplementation(() =>
+      Promise.resolve({ session_id: 'sid-proj', name: 'Stored' })
+    );
+    const ok = jest.spyOn(Notification, 'success').mockReturnValue('' as any);
+    const row = session({ name: 'Old', name_source: 'session' });
+    (panel as any)._activeSession = row;
+
+    const renamed = (panel as any)._renameSession(row) as Promise<void>;
+    expect(await answer('  New  ')).toEqual('Old');
+    await renamed;
+
+    const call = request.mock.calls.find((c: any[]) => c[1] === 'rename');
+    expect(call).toBeDefined();
+    expect(JSON.parse(call[3].body)).toEqual({
+      encoded_path: row.encoded_path,
+      session_id: row.session_id,
+      name: 'New'
+    });
+    // The STORED name, never the typed one.
+    expect(String(ok.mock.calls[0][0])).toEqual('Renamed to Stored');
+  });
+
+  it('ACC-SESS-175 - an empty field renames nothing and says so', async () => {
+    const warn = jest.spyOn(Notification, 'warning').mockReturnValue('' as any);
+    const row = session({ name: 'Old', name_source: 'session' });
+
+    const renamed = (panel as any)._renameSession(row) as Promise<void>;
+    await answer('   ');
+    await renamed;
+
+    expect(request.mock.calls.some((c: any[]) => c[1] === 'rename')).toBe(
+      false
+    );
+    expect(String(warn.mock.calls[0][0])).toEqual(
+      'Enter a name - nothing was renamed.'
+    );
+  });
+
+  it('sends nothing at all when the dialog is dismissed', async () => {
+    const renamed = (panel as any)._renameSession(
+      session({ name: 'Old', name_source: 'session' })
+    ) as Promise<void>;
+    await answer(null);
+    await renamed;
+    expect(request.mock.calls.some((c: any[]) => c[1] === 'rename')).toBe(
+      false
+    );
+  });
+
+  it('seeds the field from the conversation, never from the folder it sits in', async () => {
+    // A row named after its directory has no conversation name yet, and
+    // seeding the directory would have Ok quietly name it after the folder.
+    const renamed = (panel as any)._renameSession(
+      session({ name: 'proj', name_source: 'basename' })
+    ) as Promise<void>;
+    expect(await answer(null)).toEqual('');
+    await renamed;
+  });
+
+  it('says what a refusal means instead of handing back the code', () => {
+    const notFound = { response: { status: 404 } };
+    expect(String((panel as any)._renameError(notFound))).toContain(
+      'no longer exists'
+    );
+    expect(
+      String((panel as any)._renameError(new Error('rename_failed')))
+    ).toEqual('Testbed would not store a name for this conversation.');
+    expect(String((panel as any)._renameError(new Error('boom')))).toContain(
+      'Rename failed'
+    );
+  });
+});
+
+describe('ACC-CLAU-95, ACC-CLAU-96, ACC-CODE-101 - what the row indicators mean', () => {
+  const REMOTE: IProviderDescriptor = {
+    ...DESCRIPTOR,
+    iconName: 'testbed-remote-panel-spec',
+    hasRemoteControl: true,
+    hasLiveProcess: true,
+    hasBgAgents: false
+  };
+  const LIVE_ONLY: IProviderDescriptor = {
+    ...DESCRIPTOR,
+    iconName: 'testbed-liveonly-panel-spec',
+    hasRemoteControl: false,
+    hasLiveProcess: true,
+    hasBgAgents: false
+  };
+  const NO_BG: IProviderDescriptor = {
+    ...DESCRIPTOR,
+    iconName: 'testbed-nobg-panel-spec',
+    hasBgAgents: false
+  };
+
+  /** The indicator's aria-label for the one rendered row, or null when the
+   * column holds only its placeholder. */
+  function indicator(
+    descriptor: IProviderDescriptor,
+    row: Partial<ISession>
+  ): string | null {
+    const p = makePanel(descriptor);
+    try {
+      render(p, [session({ name: 'alpha', ...row })]);
+      const dot = p.node.querySelector('.jp-AiAssistantsPanel-dot');
+      if (dot) {
+        return dot.getAttribute('aria-label');
+      }
+      expect(
+        p.node.querySelector('.jp-AiAssistantsPanel-dotPlaceholder')
+      ).not.toBeNull();
+      return null;
+    } finally {
+      p.dispose();
+    }
+  }
+
+  it('ACC-CLAU-95 - the dot marks remote control, and a running terminal alone does not', () => {
+    expect(indicator(REMOTE, { remote_control: true })).toBe(
+      'Remote control session is active'
+    );
+    // Same provider, same row, no remote control: a live process is a
+    // different sentence, and neither is "a terminal is open".
+    expect(indicator(REMOTE, { remote_control: false, live: true })).toBe(
+      'A Testbed session is active in this project'
+    );
+    expect(
+      indicator(REMOTE, { remote_control: false, live: false })
+    ).toBeNull();
+  });
+
+  it('ACC-CLAU-95 - remote control outranks a live process on the same row', () => {
+    expect(indicator(REMOTE, { remote_control: true, live: true })).toBe(
+      'Remote control session is active'
+    );
+  });
+
+  it('ACC-CLAU-95 - a provider without the capability never shows the remote sentence', () => {
+    expect(
+      indicator(LIVE_ONLY, { remote_control: true, live: false })
+    ).toBeNull();
+  });
+
+  it('ACC-CODE-101 - the dot marks a project with the assistant running right now', () => {
+    expect(indicator(LIVE_ONLY, { live: true })).toBe(
+      'A Testbed session is active in this project'
+    );
+    expect(indicator(LIVE_ONLY, { live: false })).toBeNull();
+  });
+
+  /** The `bg` chip's text for the one rendered row, or null when absent. */
+  function chip(
+    descriptor: IProviderDescriptor,
+    row: Partial<ISession>
+  ): string | null {
+    const p = makePanel(descriptor);
+    try {
+      render(p, [session({ name: 'alpha', ...row })]);
+      return (
+        p.node.querySelector('.jp-AiAssistantsPanel-bgBadge')?.textContent ??
+        null
+      );
+    } finally {
+      p.dispose();
+    }
+  }
+
+  it('ACC-CLAU-96 - a conversation held by a background agent is chipped bg', () => {
+    expect(chip(DESCRIPTOR, { bg_id: 'abcd1234' })).toBe('bg');
+    expect(chip(DESCRIPTOR, { bg_id: null })).toBeNull();
+  });
+
+  it('ACC-CLAU-96 - the chip is a capability, not an assistant', () => {
+    // Same row, a provider that declares no background agents.
+    expect(chip(NO_BG, { bg_id: 'abcd1234' })).toBeNull();
+  });
+});
+
+describe('ACC-SESS-55, ACC-SESS-60 - the switcher submenu and Copy Session ID', () => {
+  /** One branch row, with the fields the submenu label reads. */
+  function branch(over: Partial<IBranch> = {}): IBranch {
+    return {
+      session_id: 'sid-branch-one',
+      label: 'Refactor the loader',
+      file_mtime: Date.now() - 7_200_000,
+      ...over
+    };
+  }
+
+  /** The switcher submenu's item labels, excluding its separator and the
+   * always-present Manage Sessions entry. */
+  function switcherLabels(p: AssistantSessionsPanel): string[] {
+    const menu = (p as any)._switchSubmenu;
+    const manage = commandId('testbed', 'manage-sessions');
+    return Array.from({ length: menu.items.length }, (_, i) => menu.items.at(i))
+      .filter((item: any) => item.type === 'command' && item.command !== manage)
+      .map((item: any) => String(item.label ?? ''));
+  }
+
+  it('ACC-SESS-55 - each entry carries the short id and the last activity', () => {
+    const branches = [
+      branch({ session_id: 'sid-alpha', label: 'Alpha work' }),
+      branch({
+        session_id: 'sid-bravo',
+        label: 'Bravo work',
+        file_mtime: Date.now() - 86_400_000
+      })
+    ];
+    (panel as any)._fillBranchSubmenus(branches);
+
+    const labels = switcherLabels(panel);
+    expect(labels).toHaveLength(2);
+    // The name, the short id in brackets, and a relative time after a dash.
+    expect(labels[0]).toContain('Alpha work');
+    expect(labels[0]).toContain('sid-alph');
+    expect(labels[0]).toMatch(/ - .+$/);
+    expect(labels[1]).toContain('Bravo work');
+    // Two conversations of one project differ by id and by time, which is all
+    // the submenu has to tell them apart.
+    expect(labels[0]).not.toEqual(labels[1]);
+    // The count travels with the title, so Manage Sessions is not the only
+    // place the project's size is stated.
+    expect((panel as any)._switchSubmenu.title.label).toContain('(2)');
+  });
+
+  it('ACC-SESS-55 - picking one makes it the row current conversation', () => {
+    const rows = [session({ name: 'proj' })];
+    render(panel, rows);
+    (panel as any)._activeSession = rows[0];
+    (panel as any)._fillBranchSubmenus([branch({ session_id: 'sid-alpha' })]);
+
+    const switched = jest
+      .spyOn(panel as any, '_switchBranch')
+      .mockResolvedValue(undefined);
+    const item = (panel as any)._switchSubmenu.items.at(0);
+    (panel as any)._commands.execute(item.command, item.args);
+
+    expect(switched).toHaveBeenCalledWith(rows[0], 'sid-alpha');
+    switched.mockRestore();
+  });
+
+  it('ACC-SESS-60 - Copy Session ID copies the row current conversation id', () => {
+    const copied = jest
+      .spyOn(Clipboard, 'copyToSystem')
+      .mockImplementation(() => undefined);
+    try {
+      const rows = [session({ name: 'proj' })];
+      render(panel, rows);
+      (panel as any)._activeSession = rows[0];
+
+      (panel as any)._commands.execute(commandId('testbed', 'copy-session-id'));
+      expect(copied).toHaveBeenCalledWith(rows[0].session_id);
+
+      // No row under the pointer copies nothing, rather than an empty string.
+      copied.mockClear();
+      (panel as any)._activeSession = null;
+      (panel as any)._commands.execute(commandId('testbed', 'copy-session-id'));
+      expect(copied).not.toHaveBeenCalled();
+    } finally {
+      copied.mockRestore();
+    }
+  });
+});
+
+describe('ACC-SESS-67 - a conversation another panel deleted first', () => {
+  it('reports the failure and refreshes, so no phantom row is left', async () => {
+    const errored = jest
+      .spyOn(Notification, 'error')
+      .mockImplementation(() => '');
+    const refreshed = jest
+      .spyOn(panel as any, '_fetch')
+      .mockResolvedValue(undefined);
+    try {
+      const rows = [session({ name: 'proj' })];
+      render(panel, rows);
+      request.mockRejectedValueOnce(
+        Object.assign(new Error('remove_failed'), {
+          response: { status: 400 }
+        })
+      );
+
+      const count = await (panel as any)._deleteBranches(rows[0], ['sid-gone']);
+
+      // Null, not zero: nothing is known to have been deleted.
+      expect(count).toBeNull();
+      expect(errored).toHaveBeenCalledTimes(1);
+      expect(String(errored.mock.calls[0][0])).toContain('Delete failed');
+      // The list is re-read whatever happened, so the row the other panel
+      // removed cannot stay on screen.
+      expect(refreshed).toHaveBeenCalled();
+    } finally {
+      errored.mockRestore();
+      refreshed.mockRestore();
+    }
+  });
+
+  it('forgets the colour of only the conversations the server says went', async () => {
+    const refreshed = jest
+      .spyOn(panel as any, '_fetch')
+      .mockResolvedValue(undefined);
+    const forgotten = jest
+      .spyOn((panel as any)._colours, 'forget')
+      .mockResolvedValue(undefined);
+    try {
+      const rows = [session({ name: 'proj' })];
+      render(panel, rows);
+      // Two asked for, one already gone by the time the request landed.
+      request.mockResolvedValueOnce({
+        removed_count: 1,
+        removed_ids: ['sid-here']
+      });
+
+      const count = await (panel as any)._deleteBranches(rows[0], [
+        'sid-here',
+        'sid-gone'
+      ]);
+
+      expect(count).toBe(1);
+      // A conversation the server did not remove keeps its tint - dropping it
+      // would strip the colour of a conversation that is still there.
+      expect(forgotten).toHaveBeenCalledWith(['sid-here']);
+      expect(refreshed).toHaveBeenCalled();
+    } finally {
+      refreshed.mockRestore();
+      forgotten.mockRestore();
+    }
+  });
+});
+
+describe('ACC-SESS-61, ACC-SESS-62 - what the destructive confirmations state', () => {
+  // `Dialog.launch` attaches behind a launch-queue promise, so the dialog is
+  // in the document a microtask after the call, not on return from it.
+  const openButtons = async (): Promise<HTMLButtonElement[]> => {
+    await flush();
+    const dialog = document.querySelector('.jp-Dialog');
+    expect(dialog).not.toBeNull();
+    return Array.from(
+      dialog!.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+    );
+  };
+
+  const pressEnter = (): void => {
+    const dialog = document.querySelector('.jp-Dialog')!;
+    dialog.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+    );
+  };
+
+  it('ACC-SESS-61 - the removal confirmation names the project it drops', async () => {
+    const row = session({ name: 'ledger-tools' });
+    const done = (panel as any)._removeProject(row) as Promise<void>;
+    await openButtons();
+    const body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
+
+    // The name, not just the word "project": two rows differ only by it, and
+    // this dialog drops an entire history.
+    expect(body).toContain('ledger-tools');
+    expect(body).toContain('entire project history');
+    pressEnter();
+    await done;
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('ACC-SESS-62 - the cleanup confirmation states how many go and that one stays', async () => {
+    const row = session({ name: 'ledger-tools', extra_sessions: 3 });
+    const done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+    const body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
+
+    expect(body).toContain('3 parallel sessions');
+    expect(body).toContain('ledger-tools');
+    expect(body).toContain('current conversation is kept');
+    pressEnter();
+    await done;
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('ACC-SESS-62 - one parallel session is counted in the singular', async () => {
+    const row = session({ name: 'ledger-tools', extra_sessions: 1 });
+    const done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+    const body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
+
+    expect(body).toContain('1 parallel session from');
+    pressEnter();
+    await done;
+  });
+});
+
+describe('ACC-PANE-35..45 - what a row and a section show', () => {
+  const MINUTE = 60_000;
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+
+  const rowEls = (p: AssistantSessionsPanel): HTMLElement[] =>
+    Array.from(
+      p.node.querySelectorAll<HTMLElement>('.jp-AiAssistantsPanel-row')
+    );
+
+  const sectionLabels = (p: AssistantSessionsPanel): string[] =>
+    Array.from(
+      p.node.querySelectorAll<HTMLElement>('.jp-AiAssistantsPanel-sectionLabel')
+    ).map(el => el.textContent ?? '');
+
+  it('ACC-PANE-35 - Favorites, Recent and All each get their own scrolling list', () => {
+    // Recent earns a heading only above the limit, so the limit is lowered
+    // rather than eleven rows built.
+    panel.setRecentLimit(1);
+    render(panel, [
+      session({ name: 'alpha', favourite: true }),
+      session({ name: 'bravo' })
+    ]);
+
+    const labels = sectionLabels(panel);
+    expect(labels.some(l => l.startsWith('Favorites'))).toBe(true);
+    expect(labels.some(l => l.startsWith('Recent'))).toBe(true);
+    expect(labels.some(l => l.startsWith('All'))).toBe(true);
+    // One list per section, each its own scroll container.
+    expect(
+      panel.node.querySelectorAll('.jp-AiAssistantsPanel-list')
+    ).toHaveLength(3);
+    // The heading states its own size.
+    expect(labels.find(l => l.startsWith('Favorites'))).toContain('(1)');
+  });
+
+  it('ACC-PANE-37 - the activity column reads now, m, h and d ago', () => {
+    const now = Date.now();
+    render(panel, [
+      session({ name: 'a', file_mtime: now - 10_000 }),
+      session({ name: 'b', file_mtime: now - 5 * MINUTE }),
+      session({ name: 'c', file_mtime: now - 2 * HOUR }),
+      session({ name: 'd', file_mtime: now - 3 * DAY })
+    ]);
+
+    const times = rowEls(panel).map(
+      row =>
+        row.querySelector('.jp-AiAssistantsPanel-rowTime')?.textContent ?? ''
+    );
+    expect(times).toEqual(
+      expect.arrayContaining(['now', '5m ago', '2h ago', '3d ago'])
+    );
+    // One column, one element per row - what makes it align.
+    expect(times).toHaveLength(4);
+  });
+
+  it('ACC-PANE-38 - a row active this minute is marked, one idle over a week dims', () => {
+    const now = Date.now();
+    render(panel, [
+      session({ name: 'fresh', file_mtime: now - 10_000 }),
+      session({ name: 'middling', file_mtime: now - 2 * DAY }),
+      session({ name: 'old', file_mtime: now - 8 * DAY })
+    ]);
+
+    const mods = new Map(
+      rowEls(panel).map(row => [
+        row.querySelector('.jp-AiAssistantsPanel-nameText')?.textContent ?? '',
+        row.className
+      ])
+    );
+    expect(mods.get('fresh')).toContain('jp-mod-recentlyActive');
+    expect(mods.get('old')).toContain('jp-mod-stale');
+    // In between takes neither, or the emphasis says nothing.
+    expect(mods.get('middling')).not.toContain('jp-mod-recentlyActive');
+    expect(mods.get('middling')).not.toContain('jp-mod-stale');
+  });
+
+  it('ACC-PANE-39 - the favourite entry names the direction it will move the row', () => {
+    const plain = session({ name: 'alpha', favourite: false });
+    const starred = session({ name: 'bravo', favourite: true });
+    const cmds = (panel as any)._commands;
+    const id = commandId('testbed', 'toggle-favourite');
+
+    (panel as any)._activeSession = plain;
+    expect(cmds.label(id)).toEqual('Add to Favorites');
+    (panel as any)._activeSession = starred;
+    expect(cmds.label(id)).toEqual('Remove from Favorites');
+
+    const toggled = jest
+      .spyOn(panel as any, '_toggleFavourite')
+      .mockResolvedValue(undefined);
+    cmds.execute(id);
+    expect(toggled).toHaveBeenCalledWith(starred);
+    toggled.mockRestore();
+  });
+
+  it('ACC-PANE-40 - the filter narrows the rows and clearing it restores them', () => {
+    const rows = [
+      session({ name: 'ledger-tools' }),
+      session({ name: 'photo-pipeline' })
+    ];
+    render(panel, rows);
+    expect(rowEls(panel)).toHaveLength(2);
+
+    const shown = (): string[] =>
+      rowEls(panel).map(
+        row =>
+          row.querySelector('.jp-AiAssistantsPanel-nameText')?.textContent ?? ''
+      );
+
+    (panel as any)._filter = 'ledger';
+    (panel as any)._render();
+    expect(shown()).toEqual(['ledger-tools']);
+
+    // Fuzzy, not just a substring: the tolerance is 5 percent of the query, so
+    // a long enough query survives one typo. A short one does not, and that is
+    // deliberate - at four characters a one-edit window matches almost
+    // anything.
+    (panel as any)._filter = 'photo-pipelien';
+    (panel as any)._render();
+    expect(shown()).toEqual(['photo-pipeline']);
+
+    (panel as any)._filter = '';
+    (panel as any)._render();
+    expect(rowEls(panel)).toHaveLength(2);
+  });
+
+  it('ACC-PANE-41 - presentation mode labels by session name or by path under the root', () => {
+    const row = session({ name: 'ledger-tools' });
+    row.project_path = '/home/user/work/ledger-tools';
+
+    panel.setPresentationMode('name');
+    render(panel, [row]);
+    expect(
+      panel.node.querySelector('.jp-AiAssistantsPanel-nameText')?.textContent
+    ).toEqual('ledger-tools');
+
+    // The panel's root is /home/user, so the path shows relative to it.
+    panel.setPresentationMode('path');
+    render(panel, [row]);
+    expect(
+      panel.node.querySelector('.jp-AiAssistantsPanel-nameText')?.textContent
+    ).toEqual('work/ledger-tools');
+  });
+
+  it('ACC-PANE-42 - the row tooltip names path, activity, messages, conversations, branch and id', () => {
+    const row = session({
+      name: 'ledger-tools',
+      message_count: 12,
+      extra_sessions: 2,
+      git_branch: 'feature/rename',
+      file_mtime: Date.now() - 2 * HOUR
+    });
+    row.project_path = '/home/user/work/ledger-tools';
+
+    const tip = (panel as any)._buildRowTooltip(row) as string;
+    expect(tip).toContain('Path: work/ledger-tools');
+    expect(tip).toContain('Last activity:');
+    expect(tip).toContain('(2h ago)');
+    expect(tip).toContain('Messages: 12');
+    // The row's own conversation plus the extras.
+    expect(tip).toContain('Conversations: 3');
+    expect(tip).toContain('Branch: feature/rename');
+    expect(tip).toContain(`Session id: ${row.session_id}`);
+  });
+
+  it('ACC-PANE-43 - the refresh command reloads this panel and no other', async () => {
+    const other = makePanel({
+      ...DESCRIPTOR,
+      iconName: 'testbed-other-panel-spec'
+    });
+    try {
+      const mine = jest
+        .spyOn(panel as any, '_fetch')
+        .mockResolvedValue(undefined);
+      const theirs = jest
+        .spyOn(other as any, '_fetch')
+        .mockResolvedValue(undefined);
+
+      panel.refresh();
+      await flush();
+
+      expect(mine).toHaveBeenCalled();
+      expect(theirs).not.toHaveBeenCalled();
+      mine.mockRestore();
+      theirs.mockRestore();
+    } finally {
+      other.dispose();
+    }
+  });
+
+  it('ACC-PANE-45 - a provider with no sessions says so and names the way out', () => {
+    render(panel, []);
+    const messages = Array.from(
+      panel.node.querySelectorAll('.jp-AiAssistantsPanel-empty')
+    ).map(el => el.textContent ?? '');
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toEqual('No Testbed sessions found.');
+    expect(messages[1]).toContain('Use + to start a session');
+    // Not a blank panel: no rows, but the body is not empty either.
+    expect(rowEls(panel)).toHaveLength(0);
+  });
+});
+
+describe('ACC-PANE-46, ACC-PANE-48 - the header menu when unarmed, and a panel that cannot list', () => {
+  it('ACC-PANE-48 - the menu reads exactly New session and New session (mode), with no provider name', () => {
+    const menu = (panel as any)._newSessionMenu;
+    const labels = Array.from({ length: menu.items.length }, (_, i) =>
+      menu.items.at(i)
+    )
+      .filter((item: any) => item.isVisible !== false)
+      .map((item: any) => String(item.label ?? ''));
+
+    expect(labels).toEqual(['New session', 'New session (Skip Permissions)']);
+    // The panel already carries the assistant's name in its title; repeating
+    // it in every entry is what made the menu unreadable at sidebar width.
+    for (const label of labels) {
+      expect(label).not.toContain('Testbed');
+    }
+  });
+
+  it('ACC-PANE-49 - with the mode armed the second entry withdraws, leaving one choice', () => {
+    panel.setModes({ skip: true });
+    const menu = (panel as any)._newSessionMenu;
+    const visible = Array.from({ length: menu.items.length }, (_, i) =>
+      menu.items.at(i)
+    ).filter((item: any) => item.isVisible !== false);
+
+    // Both entries would build the same launch, so a two-entry menu would be
+    // one choice pretending to be two. The button launches instead, which
+    // ui-tests/tests/panel-regressions.spec.ts DEF-115 asserts on screen.
+    expect(visible).toHaveLength(1);
+    expect((panel as any)._visibleVariantCount()).toBe(0);
+    panel.setModes({ skip: false });
+  });
+
+  it('ACC-PANE-46 - an error in one panel leaves another panel listing', () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const other = makePanel({
+      ...DESCRIPTOR,
+      iconName: 'testbed-unaffected-panel-spec'
+    });
+    try {
+      render(other, [session({ name: 'still-here' })]);
+      (panel as any)._showError(new TypeError('Failed to fetch'));
+
+      // The failing panel says so, in its own body.
+      expect(
+        panel.node.querySelector('.jp-AiAssistantsPanel-error')?.textContent
+      ).toContain('Could not reach the server');
+      // The other panel is untouched: its rows and its error slot both.
+      expect(
+        other.node.querySelectorAll('.jp-AiAssistantsPanel-row')
+      ).toHaveLength(1);
+      const otherBanner = other.node.querySelector(
+        '.jp-AiAssistantsPanel-error'
+      ) as HTMLElement | null;
+      expect(otherBanner?.textContent ?? '').toEqual('');
+    } finally {
+      other.dispose();
+    }
+  });
+
+  it('ACC-PANE-46 - a failed listing does not stop the panel polling', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    (panel as any)._showError(new TypeError('Failed to fetch'));
+
+    // The next poll still runs and clears the banner once it answers.
+    request.mockResolvedValueOnce({ sessions: [] });
+    await (panel as any)._fetch();
+
+    expect(
+      panel.node.querySelector('.jp-AiAssistantsPanel-error')?.textContent ?? ''
+    ).toEqual('');
   });
 });

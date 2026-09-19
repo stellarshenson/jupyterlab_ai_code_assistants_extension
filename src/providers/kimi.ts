@@ -49,6 +49,8 @@ export const descriptor: IProviderDescriptor = {
   // The fork's name is written into the copy's `state.json` by the server; the
   // CLI has no naming flag to take it.
   promptsForBranchName: true,
+  // The name is `title` in the conversation's `state.json`.
+  canRename: true,
   // A bare `kimi` mints its own id and writes it on the first turn, and `-S`
   // only ever resumes - so a new conversation cannot be launched under an id
   // we chose, and is identified from the store on the next poll instead.

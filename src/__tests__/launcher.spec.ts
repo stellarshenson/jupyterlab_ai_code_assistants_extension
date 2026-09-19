@@ -79,6 +79,7 @@ const DESCRIPTOR: IProviderDescriptor = {
   colourSource: 'derived',
   terminalScope: 'conversation',
   promptsForBranchName: true,
+  canRename: true,
   mintsNewSessionId: true,
   launchModes: [
     {

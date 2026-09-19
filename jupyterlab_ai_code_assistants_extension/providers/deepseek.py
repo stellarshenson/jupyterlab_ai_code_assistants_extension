@@ -205,6 +205,26 @@ def log_file(session_dir: Path) -> Path | None:
     return best[1] if best else None
 
 
+def retitle(text: str, name: str) -> str | None:
+    """Rewrite the newest ``session/title`` event to carry ``name``.
+
+    None when the log holds no title event. The harness records a title only
+    as an event and this store writes no events of its own, so a log the
+    harness has not titled yet offers nothing to rewrite - and a title record
+    invented here would be one whose shape only THIS reader is known to
+    accept, leaving the panel showing a name the web UI never does.
+    """
+    lines = text.split("\n")
+    for index in range(len(lines) - 1, 0, -1):
+        record = _title_event(lines[index])
+        if record is None:
+            continue
+        record["data"]["title"] = name
+        lines[index] = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+        return "\n".join(lines)
+    return None
+
+
 def stamp_fork(text: str, new_id: str, name: str) -> str:
     """Rewrite a log's text as a fork: the header under ``new_id``, the newest
     title event carrying ``name``.
@@ -220,14 +240,8 @@ def stamp_fork(text: str, new_id: str, name: str) -> str:
     header = json.loads(lines[0])
     header["id"] = new_id
     lines[0] = json.dumps(header, separators=(",", ":"), ensure_ascii=False)
-    for index in range(len(lines) - 1, 0, -1):
-        record = _title_event(lines[index])
-        if record is None:
-            continue
-        record["data"]["title"] = name
-        lines[index] = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
-        break
-    return "\n".join(lines)
+    stamped = "\n".join(lines)
+    return retitle(stamped, name) or stamped
 
 
 def encode_log(text: str, compressed: bool) -> bytes:
@@ -538,6 +552,62 @@ class DeepSeekStore(SessionStore):
             return None
         return new_id
 
+    def rename(self, encoded_path: str, session_id: str, name: str) -> str | None:
+        """Rewrite the conversation's newest ``session/title`` event.
+
+        The title is where the harness's own web UI reads a conversation's
+        name, so it is the only place a rename can go. A conversation the
+        harness has not titled yet carries no such event and cannot be named
+        here - the store answers None and the route reports it, rather than
+        writing a record whose shape is a guess.
+
+        The harness re-titles a conversation as it grows and the newest title
+        wins, so this name holds until it does. That is the harness's
+        behaviour, not a gap here.
+
+        The log's mtime is put back, because a rename is not activity and that
+        mtime IS the row's last-activity time.
+        """
+        if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
+            return None
+        project_dir = self._project_dir(encoded_path)
+        if project_dir is None:
+            return None
+        found = self._sessions(project_dir).get(session_id)
+        if found is None:
+            return None
+        src, _meta = found
+        text = read_log(src)
+        if text is None:
+            return None
+        content = retitle(text, name)
+        if content is None:
+            return None
+        try:
+            before = src.stat()
+        except OSError as err:
+            _log.warning("deepseek could not rename %s: %s", session_id, err)
+            return None
+        tmp = src.with_name(f"{src.name}.rename")
+        try:
+            tmp.write_bytes(encode_log(content, compressed=src.suffix == ".zstd"))
+            # On the temporary file, before it becomes the conversation: a
+            # failed utime leaves the original exactly as it was.
+            os.utime(tmp, (before.st_atime, before.st_mtime))
+            os.replace(tmp, src)
+            # The restored mtime is what makes this necessary: with the size
+            # unchanged too, the memo's key is the pre-rename key and it would
+            # go on serving the old title.
+            _meta_memo.drop(src)
+        except OSError as err:
+            _log.warning("deepseek could not rename %s: %s", session_id, err)
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            return None
+        return name
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -600,6 +670,9 @@ DESCRIPTOR = ProviderDescriptor(
         colour_source="none",
         # The web surface has no approval switch on its command line.
         launch_modes=(),
+        # A name is the newest ``session/title`` event of the log, which is
+        # where the harness's web UI reads it.
+        can_rename=True,
     ),
     # No standalone extension preceded this provider, so there is no state to
     # carry over.

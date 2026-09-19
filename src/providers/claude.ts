@@ -51,6 +51,9 @@ export const descriptor: IProviderDescriptor = {
   // every turn, which is the only way a fork's name survives - a title written
   // after the fact loses to the parent title the fork inherits.
   promptsForBranchName: true,
+  // `/rename` writes a `custom-title` record into the transcript, and the
+  // store writes the same record.
+  canRename: true,
   mintsNewSessionId: true,
   launchModes: [
     {

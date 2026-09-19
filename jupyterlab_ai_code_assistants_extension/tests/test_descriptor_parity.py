@@ -4,7 +4,8 @@
 for their own side of the wire. This test is the binding: it imports the
 compiled TS descriptors under Node and asserts both registries agree on the
 fields the wire protocol depends on - id set, CLI binary, fork strategy,
-colour source and launch-mode tokens, enum VALUES included. A drift here ships
+colour source, launch-mode tokens and the rename capability, enum VALUES
+included. A drift here ships
 a panel that asks its server for behaviour the server does not recognise.
 
 The derived tab colour is bound the same way, and for the same reason: the
@@ -61,6 +62,7 @@ const { readdirSync } = require('fs');
       launchModes: (d.launchModes ?? []).map(x => x.id),
       legacyPluginId: d.legacyPluginId ?? null,
       sessionIdPrefix: d.sessionIdPrefix ?? '',
+      canRename: d.canRename,
       label: d.label
     });
   }
@@ -283,6 +285,11 @@ def test_descriptor_fields_agree_across_runtimes():
         # `(<short id>)` suffix only when the two agree - a drift shows the
         # constant prefix, or the id twice, on every untitled branch.
         assert t["sessionIdPrefix"] == d.session_id_prefix, pid
+        # Rename is gated twice off one fact - the panel hides the item, the
+        # route refuses the call. A runtime that says yes while the other says
+        # no gives either a menu entry that always fails, or an action the
+        # server would serve and no surface offers.
+        assert t["canRename"] == c.can_rename, pid
 
 
 def test_the_colour_vocabulary_is_the_same_list_in_both_runtimes():

@@ -14,6 +14,7 @@ import {
   LabIcon,
   MenuSvg,
   closeIcon,
+  editIcon,
   folderIcon,
   terminalIcon
 } from '@jupyterlab/ui-components';
@@ -64,6 +65,7 @@ import {
   IDeleteSessionsResponse,
   IFavouriteResponse,
   IForkResponse,
+  IRenameResponse,
   ILaunchArgvResponse,
   ILaunchMode,
   ILaunchRequest,
@@ -1424,6 +1426,77 @@ export class AssistantSessionsPanel extends Widget {
     window.setTimeout(() => void tick(), BRANCH_WATCH_INTERVAL_MS);
   }
 
+  /** Name the row's current conversation, in the assistant's own store.
+   *
+   * Only ever offered where the descriptor says the assistant keeps a name
+   * this extension can write - see `canRename`. The field is seeded from the
+   * conversation's OWN name and left empty otherwise: the row falls back to
+   * the project folder when a conversation is unnamed, and seeding that would
+   * have the user accept a dialog that silently names the conversation after
+   * its directory.
+   */
+  private async _renameSession(session: ISession): Promise<void> {
+    const named = await InputDialog.getText({
+      title: 'Rename Session',
+      label: `Name for this ${this._descriptor.label} conversation`,
+      text: session.name_source === 'session' ? session.name : '',
+      placeholder: this._lookupName(session)
+    });
+    if (!named.button.accept) {
+      return;
+    }
+    const name = (named.value ?? '').trim();
+    if (!name) {
+      // Refused the way Branch Session refuses an empty name (DEF-43): the
+      // placeholder shows the current name, which reads as "press Ok for the
+      // default", so an empty Ok has to say that nothing happened.
+      Notification.warning('Enter a name - nothing was renamed.', {
+        autoClose: 4000
+      });
+      return;
+    }
+    try {
+      const result = await requestProvider<IRenameResponse>(
+        this._descriptor.id,
+        'rename',
+        this._serverSettings,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            encoded_path: session.encoded_path,
+            session_id: session.session_id,
+            name
+          })
+        }
+      );
+      // The stored name, never the typed one - a store may normalise what it
+      // writes, and echoing the request would report a name that is not on
+      // disk.
+      Notification.success(`Renamed to ${result.name}`, { autoClose: 3000 });
+    } catch (err) {
+      Notification.error(this._renameError(err), { autoClose: 4000 });
+    } finally {
+      // The switcher submenu labels branches from this cache, so a stale one
+      // would keep showing the old name next to the new row title.
+      this._branchCache = null;
+      await this._fetch().catch(() => undefined);
+    }
+  }
+
+  /** What to tell the user about a refused rename. `rename_failed` is the one
+   * refusal a correct request can still earn - an assistant that keeps names
+   * per conversation may have none to rewrite yet - so it gets words rather
+   * than the raw code. */
+  private _renameError(err: unknown): string {
+    if (isResponseStatus(err, 404)) {
+      return 'That conversation no longer exists - the list has been refreshed.';
+    }
+    if ((err as Error)?.message === 'rename_failed') {
+      return `${this._descriptor.label} would not store a name for this conversation.`;
+    }
+    return `Rename failed: ${err}`;
+  }
+
   /** Make another conversation the row's current one. */
   private async _switchBranch(
     session: ISession,
@@ -2475,6 +2548,21 @@ export class AssistantSessionsPanel extends Widget {
       execute: () => void this._branchSession()
     });
 
+    this._commands.addCommand(this._cmd('rename-session'), {
+      label: this._trans.__('Rename Session...'),
+      icon: editIcon,
+      // Absent, not disabled, for an assistant with no writable name: a
+      // greyed item invites the user to find out why, and the answer is that
+      // this assistant will never have one.
+      isVisible: () => this._descriptor.canRename,
+      execute: () => {
+        const s = active();
+        if (s) {
+          void this._renameSession(s);
+        }
+      }
+    });
+
     this._commands.addCommand(this._cmd('remove'), {
       label: `Remove from ${this._descriptor.label}`,
       icon: removeIcon,
@@ -2584,6 +2672,7 @@ export class AssistantSessionsPanel extends Widget {
     add('open-terminal');
     add('show-in-filebrowser');
     add('toggle-favourite');
+    add('rename-session');
     add('copy-path');
     add('copy-session-id');
     add('reset-colour');

@@ -66,11 +66,17 @@ class Capabilities:
       colour), ``derived`` (the store computes one from the id) or ``none``
     * ``launch_modes`` - the mode tokens ``launch_argv`` accepts; anything else
       is rejected by the core with 400 ``mode_unsupported``
+    * ``can_rename`` - the store can write a conversation's name where the
+      assistant itself reads it back. False is the default and is not a gap to
+      close: an assistant whose names live in a store this extension only
+      reads has no honest rename, and the core hides the action rather than
+      offering one that fails
     """
 
     fork_strategy: str = "none"
     colour_source: str = "none"
     launch_modes: tuple[str, ...] = ()
+    can_rename: bool = False
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
+import re
 
 import pytest
 import tornado
@@ -174,18 +175,54 @@ async def test_a_flat_disable_key_gates_the_route(jp_fetch, monkeypatch, present
     assert (await jp_fetch(URL, "providers", "kimi", "sessions")).code == 200
 
 
-@pytest.mark.parametrize(
-    "verb,path,body",
-    [
-        ("GET", "branches", None),
-        ("GET", "colours", None),
-        ("POST", "switch", {"encoded_path": "x", "session_id": "y"}),
-        ("POST", "favourite", {"project_path": "/tmp", "favourite": True}),
-        ("POST", "branch", {"encoded_path": "x", "session_id": "y"}),
-        ("POST", "launch", {"project_path": "/tmp"}),
-        ("DELETE", "sessions", {"encoded_path": "x"}),
-    ],
-)
+#: One request per provider route, as ``(verb, path segments, body)``. The
+#: segments are what follows ``providers/<id>/`` in the registered pattern.
+PROVIDER_ROUTES = [
+    ("GET", ("sessions",), None),
+    ("GET", ("branches",), None),
+    ("GET", ("colours",), None),
+    ("POST", ("switch",), {"encoded_path": "x", "session_id": "y"}),
+    ("POST", ("favourite",), {"project_path": "/tmp", "favourite": True}),
+    ("POST", ("branch",), {"encoded_path": "x", "session_id": "y"}),
+    ("POST", ("rename",), {"session_id": "y", "name": "n"}),
+    ("POST", ("launch",), {"project_path": "/tmp"}),
+    ("POST", ("launch-argv",), {"project_path": "/tmp"}),
+    ("GET", ("terminal", "some-terminal"), None),
+    ("DELETE", ("sessions",), {"encoded_path": "x"}),
+]
+
+
+def registered_provider_routes() -> set[str]:
+    """The first segment of every provider route the server registers.
+
+    Read off ``setup_route_handlers`` rather than typed out, because the list
+    above is the whole value of the gate test and a hand-kept copy ages out
+    silently: ``rename``, ``launch-argv`` and ``terminal`` were all registered
+    while this test still claimed "no route can skip it" over seven of ten.
+    """
+    captured: list[tuple[str, object]] = []
+
+    class _WebApp:
+        settings = {"base_url": "/"}
+
+        def add_handlers(self, _host, handlers):
+            captured.extend(handlers)
+
+    routes.setup_route_handlers(_WebApp())
+    segments = set()
+    for pattern, _handler in captured:
+        match = re.search(r"/providers/\(\[a-z0-9-\]\+\)/([^/]+)", pattern)
+        if match:
+            segments.add(match.group(1))
+    return segments
+
+
+def test_the_gate_list_covers_every_registered_route():
+    """A route added to the server without a row above fails here, not in the field."""
+    assert registered_provider_routes() == {path[0] for _, path, _ in PROVIDER_ROUTES}
+
+
+@pytest.mark.parametrize("verb,path,body", PROVIDER_ROUTES)
 async def test_every_provider_route_is_gated(jp_fetch, disable, verb, path, body):
     """The gate lives on the shared handler, so no route can skip it."""
     disable("claude")
@@ -195,9 +232,29 @@ async def test_every_provider_route_is_gated(jp_fetch, disable, verb, path, body
     if verb == "DELETE":
         # tornado's client refuses a DELETE body unless told the verb takes one.
         kwargs["allow_nonstandard_methods"] = True
-    assert await error_of(jp_fetch, URL, "providers", "claude", path, **kwargs) == (
+    assert await error_of(jp_fetch, URL, "providers", "claude", *path, **kwargs) == (
         404,
         "provider_disabled",
+    )
+
+
+@pytest.mark.parametrize("verb,path,body", PROVIDER_ROUTES)
+async def test_every_provider_route_refuses_an_unknown_id(jp_fetch, verb, path, body):
+    """Deleting a provider module leaves no route behind that still answers.
+
+    The id is a wildcard in the registered pattern, so a removed assistant's
+    URL still MATCHES; what must not survive is an answer. Every route resolves
+    the id through the registry first, so every route answers 404
+    ``provider_unknown`` (acc-crit "Remove a provider").
+    """
+    kwargs = {"method": verb}
+    if body is not None:
+        kwargs["body"] = json.dumps(body)
+    if verb == "DELETE":
+        kwargs["allow_nonstandard_methods"] = True
+    assert await error_of(jp_fetch, URL, "providers", "nosuch", *path, **kwargs) == (
+        404,
+        "provider_unknown",
     )
 
 
@@ -238,6 +295,245 @@ async def test_branch_is_refused_when_the_provider_cannot_fork(
         body=json.dumps({"encoded_path": "x", "session_id": "y"}),
     )
     assert (status, error) == (400, "fork_unsupported")
+
+
+async def test_rename_is_refused_when_the_assistant_has_no_writable_name(
+    jp_fetch, present
+):
+    """Codex keeps thread names in a sqlite index this extension opens
+    read-only, so the descriptor says no and the route refuses before the
+    store is asked - the same shape as ``fork_unsupported``."""
+    status, error = await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "codex",
+        "rename",
+        method="POST",
+        body=json.dumps({"encoded_path": "x", "session_id": "y", "name": "New"}),
+    )
+    assert (status, error) == (400, "rename_unsupported")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="whitespace"),
+        pytest.param("x" * 201, id="over-long"),
+        pytest.param(None, id="missing"),
+        pytest.param(7, id="not-a-string"),
+    ],
+)
+async def test_rename_refuses_a_name_it_will_not_write(jp_fetch, present, name):
+    """Checked BEFORE the capability, because a malformed body is malformed
+    whichever provider it was aimed at."""
+    status, error = await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "rename",
+        method="POST",
+        body=json.dumps({"encoded_path": "x", "session_id": "y", "name": name}),
+    )
+    assert (status, error) == (400, "name_invalid")
+
+
+async def test_rename_refuses_a_conversation_the_project_does_not_hold(
+    jp_fetch, present, monkeypatch
+):
+    """The launch route's own pre-flight, applied here: a stale panel naming a
+    deleted conversation gets 404 rather than a store-level failure."""
+    provider = registry.get("claude")
+    monkeypatch.setattr(
+        provider.store, "project_session_ids", lambda encoded_path: ["kept"]
+    )
+    status, error = await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "rename",
+        method="POST",
+        body=json.dumps({"encoded_path": "x", "session_id": "gone", "name": "New"}),
+    )
+    assert (status, error) == (404, "session_not_found")
+
+
+async def test_rename_answers_the_stored_name_not_the_requested_one(
+    jp_fetch, present, monkeypatch
+):
+    """The name is trimmed on the way in, and what comes back is whatever the
+    store actually wrote - a provider may normalise it, and echoing the request
+    would report a name that is not on disk."""
+    provider = registry.get("claude")
+    seen: dict = {}
+
+    def _rename(encoded_path: str, session_id: str, name: str) -> str:
+        seen.update(encoded_path=encoded_path, session_id=session_id, name=name)
+        return f"{name} (stored)"
+
+    monkeypatch.setattr(provider.store, "project_session_ids", lambda _p: ["s1"])
+    monkeypatch.setattr(provider.store, "rename", _rename)
+    response = await jp_fetch(
+        URL,
+        "providers",
+        "claude",
+        "rename",
+        method="POST",
+        body=json.dumps(
+            {"encoded_path": "p1", "session_id": "s1", "name": "  New  "}
+        ),
+    )
+    assert json.loads(response.body) == {
+        "session_id": "s1",
+        "name": "New (stored)",
+    }
+    assert seen == {"encoded_path": "p1", "session_id": "s1", "name": "New"}
+
+
+async def test_rename_reports_a_store_that_would_not_write(
+    jp_fetch, present, monkeypatch
+):
+    """A DeepSeek conversation the harness never titled has no title event to
+    rewrite; the store answers None and the route says so."""
+    provider = registry.get("claude")
+    monkeypatch.setattr(provider.store, "project_session_ids", lambda _p: ["s1"])
+    monkeypatch.setattr(provider.store, "rename", lambda *_a: None)
+    status, error = await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "rename",
+        method="POST",
+        body=json.dumps({"encoded_path": "p1", "session_id": "s1", "name": "New"}),
+    )
+    assert (status, error) == (400, "rename_failed")
+
+
+async def test_switching_to_the_conversation_already_current_is_a_success(
+    jp_fetch, tmp_path, present, monkeypatch
+):
+    """Re-picking the conversation a row already points at is a no-op, not an
+    error: the switcher submenu excludes it, but a stale menu or a second
+    client can still ask (acc-crit "Edge: switch to already-current")."""
+    calls: list[tuple[str, str]] = []
+
+    class _Store:
+        provider_id = "claude"
+
+        def switch(self, encoded_path, session_id):
+            calls.append((encoded_path, session_id))
+            return {"requested": session_id}
+
+        def resolve_current(self, encoded_path):
+            # The route re-resolves after it writes the pin (DEF-102), and the
+            # pin it just wrote names the conversation that was already current.
+            return "sid-current"
+
+    provider = registry.get("claude")
+    monkeypatch.setattr(provider, "store", _Store())
+
+    response = await jp_fetch(
+        URL,
+        "providers",
+        "claude",
+        "switch",
+        method="POST",
+        body=json.dumps({"encoded_path": "enc", "session_id": "sid-current"}),
+    )
+    assert response.code == 200
+    payload = json.loads(response.body)
+    # Success, and the row still points where it did - the panel reads
+    # `current != requested` as a failed switch.
+    assert payload["requested"] == "sid-current"
+    assert payload["current"] == "sid-current"
+    assert calls == [("enc", "sid-current")]
+
+
+async def test_a_switch_to_a_conversation_that_is_gone_is_refused(
+    jp_fetch, tmp_path, present, monkeypatch
+):
+    """The other half of the same edge: a conversation another panel deleted
+    answers branch_not_found rather than pinning a row to nothing."""
+
+    class _Store:
+        provider_id = "claude"
+
+        def switch(self, encoded_path, session_id):
+            return {"error": "branch_not_found"}
+
+    provider = registry.get("claude")
+    monkeypatch.setattr(provider, "store", _Store())
+
+    assert await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "switch",
+        method="POST",
+        body=json.dumps({"encoded_path": "enc", "session_id": "sid-gone"}),
+    ) == (404, "branch_not_found")
+
+
+async def test_a_delete_answers_the_ids_that_actually_went(
+    jp_fetch, tmp_path, present, monkeypatch
+):
+    """A conversation another panel removed first is simply absent from
+    removed_ids, which is what lets the panel drop the colours of the ones
+    that went and keep the rest (acc-crit "Edge: concurrent delete")."""
+
+    class _Store:
+        provider_id = "claude"
+
+        def delete_branches(self, encoded_path, session_ids, to_trash=True):
+            # One of the two is already gone by the time the request lands.
+            return [sid for sid in session_ids if sid != "sid-gone"]
+
+    provider = registry.get("claude")
+    monkeypatch.setattr(provider, "store", _Store())
+
+    response = await jp_fetch(
+        URL,
+        "providers",
+        "claude",
+        "sessions",
+        method="DELETE",
+        allow_nonstandard_methods=True,
+        body=json.dumps(
+            {"encoded_path": "enc", "session_ids": ["sid-here", "sid-gone"]}
+        ),
+    )
+    payload = json.loads(response.body)
+    assert payload["removed_ids"] == ["sid-here"]
+    assert payload["removed_count"] == 1
+
+
+async def test_a_delete_the_store_refuses_outright_is_a_failure(
+    jp_fetch, tmp_path, present, monkeypatch
+):
+    class _Store:
+        provider_id = "claude"
+
+        def delete_branches(self, encoded_path, session_ids, to_trash=True):
+            return None
+
+    provider = registry.get("claude")
+    monkeypatch.setattr(provider, "store", _Store())
+
+    assert await error_of(
+        jp_fetch,
+        URL,
+        "providers",
+        "claude",
+        "sessions",
+        method="DELETE",
+        allow_nonstandard_methods=True,
+        body=json.dumps({"encoded_path": "enc", "session_ids": ["sid-here"]}),
+    ) == (400, "remove_failed")
 
 
 async def test_migrate_is_reachable_and_idempotent(jp_fetch, monkeypatch, tmp_path):

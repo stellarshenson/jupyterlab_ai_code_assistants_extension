@@ -251,6 +251,14 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - repro: process_comm node, cmdline node agent.js --provider claude: owns_pid True
   - log: 2026-09-18T21:27:14Z @kj added
   - log: 2026-09-18T21:27:14Z @kj closed
+- [x] `DEF-PROV-259` **A rename counted as a turn in the conversation** - MAJOR; every store writes the file that carries recency, so naming a conversation moved its mtime to now: Claude spent the thirty-day stamp switch() leaves, after which `claude -c` resumes whichever sibling was written to next while the panel still shows the renamed row, and Kimi, Gemini and DeepSeek jumped a week-idle row to the top of Recent, lit it as recently active and had its tooltip state a time at which the assistant said nothing
+  - related: ACC-SESS-173, ACC-CLAU-177, ACC-KIMI-179, ACC-GEMI-180, ACC-DEEP-181 - the rename criteria this defect was found under
+  - evidence: every rename puts the timestamp back - claude.py restores after the append, kimi/gemini/deepseek utime the temporary file before os.replace - and FileMemo.drop evicts the parse the restore would otherwise leave cached. Four tests at v1.2.29, each mutation-checked: severing any one of the four halves reddens exactly one; pytest 253, Galata 47
+  - repro: switch a Claude project to an older conversation, rename it, then append to a sibling: the sibling is now the newest file. Or backdate a Kimi state.json two hours, rename, and read the row file_mtime
+  - test-tags: UNIT
+  - root-cause: 2026-09-19T21:14:51Z @kj the name lives in the file whose mtime means recency or, for Claude, carries the switch stamp; neither rename put the timestamp back
+  - log: 2026-09-19T21:14:51Z @kj added
+  - log: 2026-09-19T21:14:59Z @kj closed
 
 ## Frontend / server contract `FRONT`
 
@@ -300,6 +308,13 @@ Route shapes, payloads and timeouts where the panel and the server must agree
   - repro: fork a Codex conversation, start another codex by hand in the same project within 3 minutes
   - log: 2026-09-18T21:14:33Z @kj added
   - log: 2026-09-18T21:14:33Z @kj closed
+- [x] `DEF-FRONT-260` **An over-long name shows the raw error code** - MINOR; the 200-character bound is enforced only server-side, so a longer name renders `Rename failed: Error: name_invalid` rather than words; nothing is written, nothing is lost and the action is retryable
+  - evidence: wontfix: logged, not fixed. The remedy is a third branch in _renameError for a refusal that writes nothing, loses nothing and is retryable; the round-2 adjudicator deferred it twice on that ground and this project records MINORs rather than fixing them
+  - repro: open Rename Session, paste more than 200 characters, press Ok
+  - test-tags: MANUAL
+  - root-cause: 2026-09-19T21:14:51Z @kj panel.ts _renameError names rename_failed and 404 and falls through to the raw error for everything else
+  - log: 2026-09-19T21:14:51Z @kj added
+  - log: 2026-09-19T21:14:59Z @kj closed
 
 ## Packaging `PACK`
 
@@ -870,6 +885,13 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - repro: read popup.ts:440-460 against panel.ts onDelete
   - log: 2026-09-18T21:14:33Z @kj added
   - log: 2026-09-18T21:14:33Z @kj closed
+- [x] `DEF-PANE-261` **The rename dialog shows a placeholder Ok will not accept** - MINOR; a conversation with no name of its own opens the dialog on an empty field over a greyed placeholder showing the row name, which reads as press-Ok-for-the-default; Ok on the empty field warns and renames nothing
+  - evidence: wontfix: logged, not fixed. Seeding the field from the row name is the alternative, and it would let Ok silently name a conversation after its directory - the choice is documented at panel.ts:1451-1453 together with the warning that compensates for it, and reversing a documented reasoned choice on a MINOR is how this project has produced regressions
+  - repro: rename a conversation whose row name comes from the project folder, press Ok without typing
+  - test-tags: UNIT
+  - root-cause: 2026-09-19T21:14:51Z @kj the field is seeded only from the conversation own name, deliberately, so that Ok cannot silently name a conversation after its directory; the placeholder was kept with the compensating warning
+  - log: 2026-09-19T21:14:51Z @kj added
+  - log: 2026-09-19T21:14:59Z @kj closed
 
 ## Colour store `COLO`
 
@@ -1380,3 +1402,10 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - test-tags: MANUAL
   - log: 2026-09-19T11:32:48Z @kj added
   - log: 2026-09-19T11:32:48Z @kj closed
+- [x] `DEF-GUARD-262` **The route-gating test claimed every route while covering seven of ten** - MINOR; MINOR; test_routes.py test_every_provider_route_is_gated carried the docstring "The gate lives on the shared handler, so no route can skip it" over a hand-kept list of seven routes, while setup_route_handlers registers ten: rename, launch-argv and terminal were never exercised against the gate. The gate itself was never broken - it sits on the shared resolve - so the cost was an unguarded regression, and a false statement in a test that reads as proof
+  - test-tags: FUNCTIONAL
+  - evidence: PROVIDER_ROUTES now lists all eleven requests and test_the_gate_list_covers_every_registered_route reads the registered set off setup_route_handlers, so a route added to the server without a row fails there; the false clause is gone from the docstring. test_every_provider_route_refuses_an_unknown_id sweeps the same list for 404 provider_unknown. Mutation: removing the rename route registration reddens the coverage test, and deleting the disabled branch of the shared resolve reddens all eleven gate cases. pytest 320 green
+  - repro: add a provider route to setup_route_handlers and run test_routes.py: before the fix nothing failed
+  - log: 2026-09-19T23:45:22Z @kj added
+  - log: 2026-09-19T23:45:29Z @kj closed
+  - log: 2026-09-19T23:45:29Z @kj edited test-tags (added)

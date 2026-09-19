@@ -47,6 +47,9 @@ export const descriptor: IProviderDescriptor = {
   // Forks are unnamed - Codex has no naming flag and no writable title field,
   // so the panel never asks for a name it could not stamp anywhere.
   promptsForBranchName: false,
+  // No writable name: a thread's name lives in the sqlite index the CLI
+  // owns, and Codex has no rename subcommand to shell to.
+  canRename: false,
   // A bare `codex` mints its own thread id; there is no `--session-id`.
   mintsNewSessionId: false,
   launchModes: [

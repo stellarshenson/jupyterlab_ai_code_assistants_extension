@@ -31,6 +31,7 @@ function stub(id: string): IProviderModule {
       colourSource: 'none',
       terminalScope: 'conversation',
       promptsForBranchName: false,
+      canRename: false,
       mintsNewSessionId: false,
       launchModes: [],
       hasRemoteControl: false,
@@ -66,6 +67,7 @@ describe('the providers barrel', () => {
       expect(FORK_STRATEGIES).toContain(descriptor.forkStrategy);
       expect(COLOUR_SOURCES).toContain(descriptor.colourSource);
       expect(typeof descriptor.promptsForBranchName).toBe('boolean');
+      expect(typeof descriptor.canRename).toBe('boolean');
       expect(typeof descriptor.mintsNewSessionId).toBe('boolean');
       expect(typeof descriptor.hasRemoteControl).toBe('boolean');
       expect(typeof descriptor.hasBgAgents).toBe('boolean');

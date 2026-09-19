@@ -52,6 +52,8 @@ export const descriptor: IProviderDescriptor = {
   colourSource: 'none',
   terminalScope: 'project',
   promptsForBranchName: true,
+  // The name is the newest `session/title` event of the log.
+  canRename: true,
   mintsNewSessionId: false,
   sessionIdPrefix: 'session-',
   launchModes: [],

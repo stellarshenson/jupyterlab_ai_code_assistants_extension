@@ -79,6 +79,11 @@ export interface IProviderDescriptor {
   /** Whether the branch flow asks the user to name the new conversation.
    * Where that name then GOES is `forkStrategy`'s job. */
   promptsForBranchName: boolean;
+  /** The assistant keeps a conversation name this extension can write where
+   * the assistant itself reads it back. False hides the rename action rather
+   * than offering one that cannot land - which is the honest answer for an
+   * assistant whose names live in a store this extension only reads. */
+  canRename: boolean;
   /** The CLI starts a brand-new conversation under an id we give it, so a
    * fresh session is identifiable from its argv on the first poll instead of
    * being an unknown terminal until it writes its store entry. Independent of
@@ -215,6 +220,13 @@ export interface ISwitchResponse {
 
 export interface IForkResponse {
   session_id: string;
+}
+
+export interface IRenameResponse {
+  session_id: string;
+  /** The name as STORED, which a provider may have normalised - never assume
+   * it is the string that was sent. */
+  name: string;
 }
 
 export interface ILaunchRequest {

@@ -648,6 +648,62 @@ class KimiStore(SessionStore):
             except OSError:
                 pass
 
+    def rename(self, encoded_path: str, session_id: str, name: str) -> str | None:
+        """Write ``title`` into the conversation's ``state.json``, custom-flagged.
+
+        ``isCustomTitle`` is the load-bearing half. The CLI derives a title of
+        its own by rewording the first prompt, and this store deliberately
+        prefers the folder basename over such a title - so a name written
+        without the flag is read straight back as auto-derived and never
+        shown (see ``list_sessions``).
+
+        Written through a neighbouring temporary file and renamed into place: a
+        torn ``state.json`` is not a conversation with a broken name, it is a
+        conversation this store no longer lists at all, since ``_load_state``
+        treats unreadable state as "not a session".
+
+        ``updatedAt`` is deliberately NOT restamped and the mtime is put back,
+        because a rename is not activity: recency reads the later of the two
+        (``_activity``), so leaving either at "now" would jump a week-idle row
+        to the top of Recent, light it as recently active and have its tooltip
+        report a time at which the assistant said nothing.
+        """
+        if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
+            return None
+        wd_dir = self._wd_dir(encoded_path)
+        if wd_dir is None:
+            return None
+        session_dir = wd_dir / session_id
+        state = _load_state(session_dir)
+        if state is None:
+            return None
+        new_state = dict(state)
+        new_state["title"] = name
+        new_state["isCustomTitle"] = True
+        state_file = session_dir / STATE_FILENAME
+        try:
+            before = state_file.stat()
+        except OSError as err:
+            _log.warning("kimi could not rename %s: %s", session_id, err)
+            return None
+        tmp = session_dir / f"{STATE_FILENAME}.rename"
+        try:
+            with tmp.open("w", encoding="utf-8") as fh:
+                json.dump(new_state, fh, indent=2)
+                fh.write("\n")
+            # On the temporary file, before it becomes the conversation: a
+            # failed utime leaves the original exactly as it was.
+            os.utime(tmp, (before.st_atime, before.st_mtime))
+            os.replace(tmp, state_file)
+        except OSError as err:
+            _log.warning("kimi could not rename %s: %s", session_id, err)
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            return None
+        return name
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -703,6 +759,9 @@ DESCRIPTOR = ProviderDescriptor(
         fork_strategy="server-copy",
         colour_source="derived",
         launch_modes=(YOLO_MODE,),
+        # A name is ``title`` in the conversation's ``state.json``, flagged
+        # ``isCustomTitle`` so the CLI does not reword it away.
+        can_rename=True,
     ),
     legacy=LegacySource(
         plugin_id="jupyterlab_kimi_code_extension",

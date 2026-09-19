@@ -23,245 +23,544 @@ Availability is two-dimensional - the user's setting and whether the CLI binary 
 | Server routes   | serve                | 503 `cli_not_found`  | 404 `provider_disabled` |
 
 - [x] `ACC-PROV-1` **Descriptor** - HIGH; a provider is one descriptor carrying id, display label, icon, CLI binary name, session store path, and a capability set
+  - evidence: test_registry.py test_descriptor_contract asserts id, label, cli_binary, capability vocabulary and the bound store for all five providers; test_descriptor_parity.py test_descriptor_fields_agree_across_runtimes binds the TS and Python descriptors field by field
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "descriptor_contract or descriptor_fields_agree_across_runtimes" and jlpm jest src/__tests__/registry.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - descriptor pair (TS+PY) bound by tests/test_descriptor_parity.py (2 passed); store path lives in the store adapter registered with the descriptor - the pair is the unit of definition
   - log: 2026-09-17T17:25:54Z @kj edited importance
+  - log: 2026-09-19T23:10:38Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-2` **Registry: frontend** - HIGH; a `providers/index.ts` barrel is the single registration point; the core iterates the registry and never names an assistant
+  - evidence: registry.spec.ts 'the providers barrel' exports every registered assistant, keeps barrel order and gives each a unique id; core-neutrality.spec.ts 'reaches every assistant through the registry, not by name' scans src/core and src/index.ts
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/registry.spec.ts src/__tests__/core-neutrality.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:38Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-3` **Registry: server** - HIGH; `core/registry.py` discovers provider modules and exposes them by id; `core/routes.py` dispatches on the id and never names an assistant
+  - evidence: test_registry.py test_every_provider_module_is_discovered and test_discovery_reads_whatever_is_in_the_package; test_core_neutrality.py test_the_python_core_names_no_assistant scans core/*.py with comments and docstrings stripped, mutation-checked by adding if provider_id == 'claude' to routes.py, which reddens at its real line number
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_registry.py jupyterlab_ai_code_assistants_extension/tests/test_core_neutrality.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:38Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-4` **Capability flags** - HIGH; divergent behaviour is expressed as descriptor flags (`forkStrategy`, `colourSource`, `launchModes`, `hasRemoteControl`), never as branches on provider id inside core code
+  - evidence: test_registry.py test_capability_flags_match_the_store requires an implementation behind every flag; both neutrality scans (13 jest cases, 13 pytest cases) prove no core file branches on a provider id instead
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k capability_flags_match_the_store and jlpm jest src/__tests__/core-neutrality.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-5` **Add a provider** - CRITICAL; adding an assistant requires exactly one new TS module, one new Python module and one barrel line; no core file is edited
+  - evidence: test_registry.py test_discovery_reads_whatever_is_in_the_package adds a provider module to a scratch package and it is discovered with no core edit; test_module_without_the_two_names_is_not_a_provider holds the DESCRIPTOR plus STORE contract; both neutrality scans prove the core was not edited
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "discovery_reads_whatever_is_in_the_package or module_without_the_two_names"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-6` **Remove a provider** - CRITICAL; deleting both modules and the barrel line removes the assistant completely, leaving no dangling settings key, command, widget id or route
+  - evidence: test_routes.py test_every_provider_route_refuses_an_unknown_id sweeps all 11 registered provider routes and each answers 404 provider_unknown; test_the_gate_list_covers_every_registered_route reads the routes off setup_route_handlers so a new route cannot skip the sweep; registry.spec.ts 'answers null for an id it does not know'. Mutation: collapsing the unknown gate in resolve reddens the sweep
+  - test-tags: UNIT, FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest -k every_provider_route_refuses_an_unknown_id and jlpm jest src/__tests__/registry.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-7` **Core has no assistant names** - CRITICAL; grep for `claude`, `codex`, `kimi` in `src/core/` and `*/core/*.py` returns no matches outside comments
+  - evidence: test_core_neutrality.py 13 cases over core/*.py and core-neutrality.spec.ts 13 cases over src/core and src/index.ts; both derive the name list from the live registry rather than a frozen alternation, and both prove the stripper keeps comments and docstrings legal. Mutation: a branch on a provider id added to core/routes.py reddens the Python scan at routes.py:739
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_core_neutrality.py and jlpm jest src/__tests__/core-neutrality.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-8` **CLI detection** - HIGH; each provider's binary is probed at status time; absence disables that provider only, never the extension
+  - evidence: test_registry.py test_cli_path_is_probed_per_call; test_routes.py test_absent_cli_is_503 and test_gating_is_per_provider prove one absent binary refuses only its own routes; index.spec.ts 'gives an assistant whose binary is absent neither a panel nor a tile'
+  - test-tags: UNIT, FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "cli_path_is_probed_per_call or absent_cli_is_503" and jlpm jest src/__tests__/index.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-9` **Command namespace** - MEDIUM; commands are namespaced per provider as `ai-code-assistants:<provider-id>:<action>`, so two providers never collide
+  - evidence: index.spec.ts ACC-PROV-9 asserts every registered command id equals ai-code-assistants:<provider-id>:<action> for both actions and that the set is collision free. Mutation: dropping the provider id from commandId reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-9
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-10` **Widget id** - MEDIUM; each panel gets a unique widget id `jupyterlab-ai-code-assistants-<provider-id>` for layout restore
+  - evidence: index.spec.ts ACC-PROV-10, ACC-PROV-11 asserts each panel's widget id is panelWidgetId(provider id) and that the ids are unique. Mutation: passing one shared id to restorer.add reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-10
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-11` **Layout restore** - MEDIUM; each enabled provider's panel registers with `ILayoutRestorer` and its open/closed state survives a reload independently
+  - evidence: index.spec.ts ACC-PROV-10, ACC-PROV-11 captures every ILayoutRestorer.add call and asserts one per provider, each under its own widget id. Mutation: passing one shared id to restorer.add reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-10
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-08-27T00:00:00Z @kj re-verified - was false whenever the first probe failed, because no panel existed for JupyterLab to restore; measured in the user's lab and fixed under DEF-132; the evidence is that lab measurement in the ledger - Galata DEF-132 saves no layout and does not reload (v1.0.33)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-12` **Independent failure** - MEDIUM; one provider throwing during activation, status probe or poll leaves the others working
+  - evidence: index.spec.ts ACC-PROV-12 makes one provider's dock throw and asserts the other four still dock and the failure is logged; test_registry.py test_broken_module_is_skipped_and_the_rest_survive covers the import half. Mutation: re-raising inside start's catch reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-12 and PYTHONPATH=$PWD python3 -m pytest -k broken_module_is_skipped
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-13` **Edge: no provider available** - MEDIUM; every assistant disabled or missing its CLI leaves the extension activated with zero panels and no error dialog
+  - evidence: index.spec.ts ACC-PROV-13 activates with every provider disabled and asserts zero panels, zero restorer registrations and no Notification.warning, Notification.error or console.error. Mutation: making the enabled flag always true reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-13
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-08-27T00:00:00Z @kj qualified - holds once a roster exists; with none yet every enabled assistant is docked (DEF-132) (v1.0.33)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-14` **Edge: unknown provider id in settings** - MEDIUM; a stale id in saved settings is ignored with a console warning, never a hard failure
+  - evidence: index.spec.ts ACC-PROV-14 puts providers.nimbus.enabled in saved settings and asserts one warning naming it, every real panel still docked, and no second warning on the next probe. Mutation: removing the once-per-id latch reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-14
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-15` **Edge: duplicate provider id** - LOW; two descriptors sharing an id fail loudly at registration time, not silently at render time
+  - evidence: test_registry.py test_duplicate_provider_id_fails_at_registration raises ProviderError at discovery; registry.spec.ts 'throws on a duplicate id rather than shadowing one'
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k duplicate_provider_id_fails_at_registration and jlpm jest src/__tests__/registry.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:55Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-16` **Edge: CLI appears after start** - MEDIUM; a binary installed while JupyterLab runs enables its panel on the next status refresh, without a reload
+  - evidence: index.spec.ts ACC-PROV-16 starts with one binary absent, makes it present and dispatches online; the panel appears in the same activation with no reload. Mutation: dropping reconcile from the wake handler reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-16
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-17` **Edge: status probe fails** - MEDIUM; a failed probe warns that the last known roster stands until a later probe answers, never that the panels are gone for good, and names no cadence it cannot honour at that moment
+  - evidence: index.spec.ts ACC-PROV-17 fails a probe after a good roster and asserts the panels stand, the warning says 'until a later probe answers', and the line matches no cadence. Mutation: naming 60 seconds in the warning reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-17
   - log: 2026-08-19T00:00:00Z @kj added (v1.0.29)
   - log: 2026-08-19T00:00:00Z @kj closed - warning reworded (DEF-117) (v1.0.29)
   - log: 2026-08-19T00:00:00Z @kj reworded again - the cadence dropped from the text, since the same warning prints from the activation probe before any retry is armed (DEF-122) (v1.0.29)
   - log: 2026-08-27T00:00:00Z @kj qualified - a failed probe no longer removes any panel; with no roster yet every enabled assistant is docked, and the warning says so (DEF-132, v1.0.33)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-18` **Edge: browser wakes from sleep** - MEDIUM; once activation has finished, coming back online re-probes status at once, and so does the tab becoming visible, rather than either waiting out the 60s cadence
+  - evidence: index.spec.ts ACC-PROV-18 counts probes scoped to its own activation: online adds one, visibilitychange while visible adds one, and while hidden adds none. Mutation: removing the visibilitychange listener reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-18
   - log: 2026-08-19T00:00:00Z @kj added (v1.0.29)
   - log: 2026-08-19T00:00:00Z @kj closed - online and visibilitychange listeners re-probe independently; Galata DEF-117 dispatches them separately and each assertion is measured against the count taken before its own dispatch, so deleting either listener reddens the suite - verified by deleting each in turn and rebuilding (v1.0.29)
   - log: 2026-08-19T00:00:00Z @kj scoped to post-activation - a wake arriving before the listeners register is not heard, logged as DEF-122 with the reason it is not fixed (v1.0.29)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:10:39Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PROV-19` **Edge: two probes in flight** - LOW; a roster is written whichever probe answers last; a failure writes nothing, so it needs no ordering against a roster
+  - evidence: index.spec.ts ACC-PROV-19 starts from a roster that is missing one binary, overtakes a slow probe with a failing one, and asserts the absence survives, then that the slow answer applies when it lands. The missing binary is what tells 'wrote nothing' from 'wrote null', since a null roster docks everything. Mutation: writing status = null in the catch reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-PROV-19
   - log: 2026-08-19T00:00:00Z @kj added - generation stamp in probeStatus (DEF-121) (v1.0.29)
   - log: 2026-08-19T00:00:00Z @kj closed - scoped to the failure path after round 3 found the success half discarded good rosters; both orderings pinned by Galata DEF-121 tests, each falsified by mutation (DEF-121) (v1.0.29)
   - log: 2026-08-27T00:00:00Z @kj reworded - a failure never writes (DEF-132); the generation stamp is deleted, one of the two DEF-121 Galata tests with it (v1.0.33)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:10:40Z @kj edited test (added) and test-tags (added) and evidence (added)
 
 ## Settings `SETT`
 
 One settings section for all assistants, replacing the three separate sections. Per-provider enable toggles default to on. Toggling applies live.
 
 - [x] `ACC-SETT-20` **Single section** - HIGH; JupyterLab settings show one "AI Code Assistants" entry, not one per assistant
+  - evidence: test_settings_schema.py test_the_settings_page_is_one_section asserts the title, the settings-icon label and that schema/ holds exactly one plugin.json, which is what makes it one entry. Mutation: renaming the title reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_settings_schema.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-21` **Enable toggle** - HIGH; every registered provider has a boolean `providers.<id>.enabled` key, defaulting to `true`
+  - evidence: test_settings_schema.py test_every_registered_provider_has_an_enable_key: the set of providers.<id>.enabled keys equals the registry, each boolean with default true. Mutation: flipping claude's default to false reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_settings_schema.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-22` **Default all on** - HIGH; a fresh install with no saved settings enables every provider whose CLI is present
+  - evidence: index.spec.ts ACC-SETT-22, ACC-SETT-23 activates with an empty settings object and every provider in the roster docks; test_settings_schema.py holds the default true in the shipped schema. Mutation: reading an absent enable key as disabled reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-22
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-23` **Missing key reads as on** - HIGH; an absent enable key means enabled; only an explicit `false` disables
+  - evidence: index.spec.ts ACC-SETT-22, ACC-SETT-23 for the frontend, test_routes.py test_absent_key_reads_as_enabled for the server gate, and test_disabled_provider_is_404 for the explicit false. Mutation: changing the enabled fallback from true to false reddens the jest case
+  - test-tags: UNIT, FUNCTIONAL
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-22 and PYTHONPATH=$PWD python3 -m pytest -k absent_key_reads_as_enabled
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-24` **Schema generated from registry** - HIGH; the settings schema lists exactly the registered providers, so adding one adds its toggle without a hand edit
+  - evidence: test_settings_schema.py compares the shipped schema/plugin.json against the Python registry, which test_descriptor_parity binds to the TS barrel the generator reads: test_the_schema_names_no_provider_the_registry_does_not and test_a_provider_exposes_exactly_the_controls_it_declares. The generator is never run by the test, because it writes the tree (docs/defects.md DEF-GUARD-258). Mutation: adding providers.nimbus.enabled to the schema reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_settings_schema.py
   - log: 2026-08-07T00:00:00Z @kj closed - generator fixed for Node ESM (globs lib/providers/*.js), wired into build and build:prod, output prettier-normalised; schema now emitted from live descriptors
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-25` **Live enable** - HIGH; switching a provider on docks its panel, registers its commands and starts its polling without a reload
+  - evidence: index.spec.ts ACC-SETT-25 starts with one provider disabled, writes the key and fires settings.changed: the panel docks and both commands register inside the same activation. Mutation: dropping reconcile from the settings.changed handler reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-25
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-26` **Live disable** - HIGH; switching a provider off disposes its widget, stops its polling, removes its commands and clears its terminal tab tints without a reload
+  - evidence: index.spec.ts ACC-SETT-26 asserts the widget is disposed and both commands are gone after the key flips to false. Mutation: not disposing the command in stop reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-26
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-27` **Shared settings** - MEDIUM; `presentationMode`, `recentLimit` and `sidebar` apply to every provider panel from one key each
+  - evidence: index.spec.ts ACC-SETT-27 sets presentationMode, recentLimit and colouredTabs once and asserts all five panels carry them, then changes one key and asserts every panel follows. Mutation: removing the applySharedSettings call from reconcile reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-27
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-28` **Per-provider settings** - MEDIUM; assistant-specific keys live under `providers.<id>.*` and appear only for registered providers
+  - evidence: test_settings_schema.py test_the_schema_names_no_provider_the_registry_does_not and test_a_provider_exposes_exactly_the_controls_it_declares: every providers.<id>.* key names a registered provider and a mode that provider declares. Mutation: adding a key for an unregistered provider reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_settings_schema.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-29` **Unsafe mode per provider, own name** - HIGH; every provider exposes its assistant's skip-permissions equivalent under `providers.<id>.*` using the assistant's own terminology (Claude `dangerouslySkipPermissions`, Codex `dangerouslyBypassApprovalsAndSandbox`, Kimi `yoloMode`, Gemini `yoloMode`), exactly one approval control per provider, each off by default, each with matching context-menu launch variants
+  - evidence: test_settings_schema.py test_every_declared_launch_mode_has_a_key_under_its_own_name (boolean, default false, under the assistant's own name) and test_at_most_one_approval_control_per_provider; launch-mode.spec.ts resolveLaunchMode and resolvedLaunchModeEntry cover the context-menu variant and the warning that names the switch. Mutation: dropping providers.gemini.yoloMode or adding a second kimi mode reddens the schema tests
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_settings_schema.py and jlpm jest src/__tests__/launch-mode.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-08-12T00:00:00Z @kj reopened - Gemini's second control (`approvalMode` enum) removed per DEF-111, one switch per provider (v1.0.21)
   - log: 2026-08-12T00:00:00Z @kj closed: closed - Gemini back to one switch (yoloMode), enum deleted per DEF-111 (v1.0.22)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-30` **Sidebar move** - MEDIUM; changing `sidebar` re-docks every enabled panel to the chosen side
+  - evidence: index.spec.ts ACC-SETT-30 captures the area of every labShell.add call: five dock right, then sidebar flips and all five are re-docked left. Mutation: removing the re-dock loop from applySidebar reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-30
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-31` **Edge: disable while terminal open** - MEDIUM; disabling a provider leaves its running terminals alive and untouched, only the panel and tint go
+  - evidence: index.spec.ts ACC-SETT-31 hands the activation a terminal whose dispose and close both set a flag, disables the provider, and asserts the panel went while neither flag was set. Mutation: making stop close the tracker's terminals reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-31
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:56Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-32` **Edge: disable the last enabled provider** - MEDIUM; permitted; leaves zero panels and no error
+  - evidence: index.spec.ts ACC-SETT-32 disables all five in turn and asserts zero live panels and no console.error. Mutation: making the enabled flag always true reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-32
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-33` **Edge: rapid toggle** - LOW; toggling a provider off and on repeatedly leaves exactly one docked widget and one set of registered commands, no duplicates
+  - evidence: index.spec.ts ACC-SETT-33 toggles one provider off and on four times and asserts the live ids equal the roster exactly, counted over every provider. Two independent guards prevent a duplicate, so the test was first checked against removing each alone, which changes nothing: it reddens when both go, and when stop stops disposing the panel
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-33
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SETT-34` **Edge: settings load failure** - MEDIUM; a settings registry error falls back to all-providers-enabled defaults with a console warning
+  - evidence: index.spec.ts ACC-SETT-34 makes settingRegistry.load throw and asserts all five panels dock and one warning names the failure. Mutation: dropping the warning from the catch reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-SETT-34
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 
 ## Panel `PANE`
 
 Each enabled provider renders its own side panel. Layout and interaction are shared; only labels, icons and capability-gated menu items differ.
 
 - [x] `ACC-PANE-35` **Three sections** - HIGH; Favorites, Recent and All projects, each scrolling independently
+  - evidence: panel.spec.ts ACC-PANE-35 asserts the three section headings, one list element per section, and the count on the heading. Mutation: rendering Favorites under the All key reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-35
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:34Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-36` **Distinct identity** - HIGH; each panel carries its assistant's icon and title so two docked panels are told apart at a glance
+  - evidence: ui-tests/tests/panels.spec.ts 'each panel carries its own provider title' and 'one panel per enabled provider whose binary is present' cover two docked panels side by side; registry.spec.ts holds iconName and iconSvg per descriptor and launcher-icon.spec.ts covers the icon each panel draws from them
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/registry.spec.ts src/__tests__/launcher-icon.spec.ts and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panels.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:34Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-37` **Activity column** - HIGH; each row shows last activity as `now`, `5m ago`, `2h ago`, `3d ago` in an aligned column
+  - evidence: panel.spec.ts ACC-PANE-37 renders four rows at 10s, 5m, 2h and 3d and asserts now, 5m ago, 2h ago and 3d ago, one time element per row. Mutation: answering 'now' for every age reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-37
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:34Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-38` **Activity emphasis** - HIGH; rows active within the last minute take the theme brand colour; rows idle over a week dim
+  - evidence: panel.spec.ts ACC-PANE-38 asserts jp-mod-recentlyActive under a minute, jp-mod-stale over a week, and neither class in between, which is what makes the emphasis mean something. Mutation: dropping the stale branch reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-38
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-39` **Favourites** - HIGH; a row is starred and unstarred from the context menu, persisting per provider
+  - evidence: panel.spec.ts ACC-PANE-39 asserts the entry reads Add to Favorites on a plain row and Remove from Favorites on a starred one, and that it calls _toggleFavourite with the row; test_store_isolation.py test_favourites_and_pins_are_keyed_by_provider holds the per-provider persistence. Mutation: fixing the label reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-39
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-40` **Search** - HIGH; a funnel button toggles a fuzzy filter across projects, with a clear button
+  - evidence: panel.spec.ts ACC-PANE-40 narrows two rows to one with a substring, then with a fourteen-character query carrying one typo, which is what proves the match is fuzzy rather than a substring, and restores both on clear. Mutation: making the filter inert reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-40
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-41` **Presentation mode** - MEDIUM; rows label by session name or by path relative to the JupyterLab root, per the shared setting
+  - evidence: panel.spec.ts ACC-PANE-41 renders the same row under both modes and asserts the session name, then the path relative to the JupyterLab root. Mutation: ignoring the path mode reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-41
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-42` **Hover tooltip** - MEDIUM; shows project path, last activity, message count, conversation count, git branch and session id
+  - evidence: panel.spec.ts ACC-PANE-42 asserts all six lines: path under the root, last activity with its relative form, message count, conversation count as extras plus one, git branch, and the session id. Mutation: dropping the session id line reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-42
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-43` **Refresh** - MEDIUM; a refresh button and a per-provider refresh command reload that panel only
+  - evidence: panel.spec.ts ACC-PANE-43 refreshes one panel with a second live beside it and asserts only the first re-fetched; index.spec.ts ACC-PROV-9 holds the per-provider refresh command id
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-43
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-44` **Capability-gated menu** - HIGH; a context-menu item whose capability the provider lacks is absent, not shown-and-disabled
+  - evidence: panel.spec.ts covers three capability gates, each by absence rather than disabling: 'offers the item only where the assistant keeps a writable name' for canRename, DEF-PANE-211 for terminalScope, and DEF-35 for a provider with no launch modes; ACC-CLAU-95 and ACC-CLAU-96 cover the same rule for the row indicators
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-45` **Edge: empty history** - MEDIUM; a provider with no sessions shows an empty-state message, not a blank panel
+  - evidence: panel.spec.ts ACC-PANE-45 asserts two lines - the assistant is named in 'No Testbed sessions found.' and the second names + as the way out - and that no row is rendered. Mutation: blanking the message reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-45
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-46` **Edge: server unreachable** - MEDIUM; a failed poll shows an inline error in that panel and retries, leaving other panels unaffected
+  - evidence: panel.spec.ts ACC-PANE-46 asserts the banner in the failing panel while a second panel keeps its rows and an empty error slot, and that the next poll clears the banner; DEF-138's four cases cover which sentence each failure gets
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-46
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-47` **Header button glyph** - MEDIUM; the header new-session button wears the + glyph in every launch-mode state, armed or not, never the mode's shield (DEF-112)
+  - evidence: panel.spec.ts DEF-112 asserts the glyph is the + icon and one svg at a time, with the mode off, on and off again; ui-tests/tests/panel-regressions.spec.ts DEF-54 and DEF-112 cover it in a running JupyterLab
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/panel.spec.ts and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panel-regressions.spec.ts
   - log: 2026-08-12T00:00:00Z @kj criterion added (v1.0.21)
   - log: 2026-08-12T00:00:00Z @kj closed: closed - addIcon unconditional, _repaintNewIcon deleted; Galata asserts + survives arming (v1.0.22)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-48` **Header menu when unarmed** - MEDIUM; with no launch mode on, the header + drops a menu reading exactly `New session` and `New session (<mode label>)` - no provider name in either entry
+  - evidence: panel.spec.ts ACC-PANE-48 asserts the visible entries are exactly 'New session' and 'New session (Skip Permissions)' and that neither names the provider. Mutation: putting the provider label in the entry reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-48
   - log: 2026-08-12T00:00:00Z @kj criterion added (v1.0.21)
   - log: 2026-08-12T00:00:00Z @kj closed - pre-existing variant-menu behaviour, unchanged by DEF-112 (v1.0.22)
   - log: 2026-08-13T00:00:00Z @kj reworded per Star Colonel - exact entry texts, vendor name banned; label change landed with DEF-114 (v1.0.25)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-49` **Header direct launch when armed** - MEDIUM; with a launch mode on, the header + starts the session on click with NO menu - a two-entry menu would offer the armed mode twice - and the tooltip names the mode
+  - evidence: panel.spec.ts ACC-PANE-49 asserts the variant entry withdraws once the mode is armed, leaving one visible entry; ui-tests/tests/panel-regressions.spec.ts DEF-115 clicks the armed button and asserts no menu is attached and a terminal opens, with the unarmed click as its control. Mutation: making the variant always visible reddens the jest case
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-PANE-49 and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panel-regressions.spec.ts
   - log: 2026-08-12T00:00:00Z @kj criterion added (v1.0.21)
   - log: 2026-08-12T00:00:00Z @kj closed: closed - title suffix asserted in unit + Galata tests (v1.0.22)
   - log: 2026-08-13T00:00:00Z @kj reworded per Star Colonel - "no menu, just + starts new session"; behaviour and tests unchanged (v1.0.23)
   - log: 2026-08-14T00:00:00Z @kj rendered proof added (DEF-115) - Galata clicks the armed + and asserts no menu is in the DOM and a terminal opens; it was ticked on unit evidence alone before (v1.0.27)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-50` **Header button title** - MEDIUM; the + tooltip is the static `New session in current folder` - no provider name, no interpolated folder path (deep trees make it unreadable) - plus the armed mode in parentheses when one is on
+  - evidence: panel.spec.ts DEF-36 asserts the title is exactly 'New session in current folder (Skip Permissions)' on hover, and DEF-38 that the suffix appears and disappears with the setting alone, with no hover or focus - no provider name and no folder path in either
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts
   - log: 2026-08-13T00:00:00Z @kj criterion added and closed - unit (DEF-36/38) and Galata assertions updated to the new text (v1.0.23)
   - log: 2026-08-13T00:00:00Z @kj corrected per Star Colonel - the folder path is not shown at all; landed with DEF-114 (v1.0.25)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-51` **Shield on menu entries only** - MEDIUM; the shield glyph marks skip-permissions menu entries (header menu and row context menu), never the header button itself
+  - evidence: panel.spec.ts DEF-40 holds the shield's size and colour on the menu entries and DEF-112 keeps it off the header button; ui-tests/tests/panel-regressions.spec.ts 'DEF-40 and DEF-112 - the shield marks the skip-permissions menu entry' covers both on screen
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/panel.spec.ts and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panel-regressions.spec.ts
   - log: 2026-08-12T00:00:00Z @kj criterion added (v1.0.21)
   - log: 2026-08-12T00:00:00Z @kj closed: closed - Galata proves the shield on Resume (Skip Permissions) by path data (v1.0.22)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-PANE-52` **Edge: live mode toggle** - MEDIUM; flipping a mode setting updates the header button's tooltip and click behaviour without a reload; the glyph never changes
+  - evidence: panel.spec.ts DEF-38 flips the mode through setModes alone and asserts the title follows without a hover, a focus or a reload; DEF-112 asserts the glyph stays the + icon across the same flips; ACC-PANE-49 asserts the click behaviour changes with it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts
   - log: 2026-08-12T00:00:00Z @kj criterion added (v1.0.21)
   - log: 2026-08-12T00:00:00Z @kj closed: closed - setModes re-titles only; glyph constant, Galata-verified (v1.0.22)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:37:36Z @kj edited test (added) and test-tags (added) and evidence (added)
 
 ## Sessions `SESS`
 
 Resume, branch, switch, delete and clean up, served by one core against per-provider session stores.
 
 - [x] `ACC-SESS-53` **One-click resume** - CRITICAL; clicking a row opens that conversation in a terminal
+  - evidence: terminals.spec.ts 'launches once when nothing runs the project, and gates + and forks the same way'; ui-tests/tests/resume.spec.ts and claude-regression.spec.ts 'new-session menu item opens a terminal in the current folder' cover the click in a running JupyterLab; test_routes.py launch and launch-argv cases cover the server half
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/terminals.spec.ts and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test resume.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-54` **Terminal reuse** - CRITICAL; a terminal already running that exact conversation is focused, never duplicated
+  - evidence: terminals.spec.ts seven cases: focuses the running terminal the server confirms, reuses the microcache entry after the row moved, relaunches once the confirmed terminal has stopped, never reuses a terminal whose conversation the server cannot read, and answers the Launcher path from the project rather than the row id
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/terminals.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-55` **Conversation switcher** - HIGH; a submenu lists a project's other conversations with short id and last activity; picking one makes it the row's current conversation
+  - evidence: panel.spec.ts ACC-SESS-55 asserts each submenu entry carries the name, the short id in brackets and a relative time, that two conversations of one project read differently, and that picking one calls _switchBranch with that id; labels.spec.ts covers branchMenuLabel and shortSessionId. Mutations: dropping the time, dropping the short id, and switching to the row's own id each redden it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-SESS-55
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-56` **Manage sessions popup** - HIGH; a searchable scrollable table over all of a project's conversations, current one pinned at top
+  - evidence: popup.spec.ts covers the click zones: a row click switches even while another row is selected, and the checkbox selects without switching; panel.spec.ts 'the Manage Sessions popup is handed the current row name' asserts what the panel passes, including the current conversation; ui-tests/tests/claude-regression.spec.ts 'Manage Sessions popup exposes a per-row Open button' covers it on screen
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/popup.spec.ts src/__tests__/panel.spec.ts and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test claude-regression.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-57` **Multi-select delete** - HIGH; conversations are selected by checkbox and deleted together, honouring JupyterLab's move-to-trash setting
+  - evidence: popup.spec.ts 'the checkbox selects and never switches' holds the selection; test_routes.py test_a_delete_answers_the_ids_that_actually_went covers the multi-id delete and test_status_reports_the_move_to_trash_preference the setting the route honours; panel.spec.ts 'says a deletion cannot be undone only when it is permanent' proves the trash setting reaches the words the user reads
+  - test-tags: UNIT, FUNCTIONAL
+  - test: jlpm jest src/__tests__/popup.spec.ts src/__tests__/panel.spec.ts and PYTHONPATH=$PWD python3 -m pytest -k "actually_went or move_to_trash"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-58` **Open branched conversation** - HIGH; any conversation opens directly in its own terminal, so branches run side by side
+  - evidence: ui-tests/tests/claude-regression.spec.ts 'Open Branched Conversation lists branches and opening one launches a terminal' and 'two different branches open as two independent terminals' cover the side-by-side case; panel.spec.ts DEF-PANE-211 holds the submenu's presence against terminalScope, and ACC-SESS-55 covers its entries
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/panel.spec.ts and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test claude-regression.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-59` **Branch session** - HIGH; forks the current conversation into a new one in its own terminal, by the provider's `forkStrategy`
+  - evidence: One case per strategy: test_claude_launch_argv for native-flag, test_routes.py test_a_native_command_fork_launches_with_fork_from and test_a_native_command_provider_has_no_server_side_branch for native-command, test_kimi_fork_copies_the_directory_and_appends_the_index and test_gemini_fork_rewrites_every_metadata_record for server-copy, test_routes.py test_branch_is_refused_when_the_provider_cannot_fork for none; panel.spec.ts DEF-31 and DEF-35 cover the menu entry
+  - test-tags: UNIT, FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "fork or branch" and jlpm jest src/__tests__/panel.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-60` **Copy session id** - MEDIUM; copies the row's current conversation id to the clipboard
+  - evidence: panel.spec.ts ACC-SESS-60 asserts Clipboard.copyToSystem is called with the row's current conversation id, and with nothing at all when no row is active. Mutation: copying an empty string when there is no row reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-SESS-60
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-61` **Remove project** - HIGH; drops a project's history after a confirmation naming the project, honouring the trash setting
+  - evidence: panel.spec.ts ACC-SESS-61 asserts the confirmation names the project and says it drops the entire project history; 'says a deletion cannot be undone only when it is permanent' covers both trash settings; test_routes.py test_a_delete_the_store_refuses_outright_is_a_failure covers the route. Mutation: replacing the project name with 'this project' reddens it
+  - test-tags: UNIT, FUNCTIONAL
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-SESS-61
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-62` **Clean up parallel sessions** - HIGH; removes a project's extra conversations keeping only the current, showing the count and confirming first
+  - evidence: panel.spec.ts ACC-SESS-62 asserts the confirmation states the count, the project and that the current conversation is kept, with a singular case for one; ui-tests/tests/panel-regressions.spec.ts DEF-55 covers the in-flight dialog. Mutation: dropping the count from the sentence reddens it
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-SESS-62
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-63` **Store isolation** - CRITICAL; a provider only ever reads and writes its own session store; a bug in one cannot touch another's history
+  - evidence: test_store_isolation.py twelve cases: each store resolves only its own project key, another provider's key resolves to nothing, path traversal and a symlink out of the store are refused, deleting through one store leaves the others untouched, favourites, pins and colours are keyed by provider, and the state files live outside every assistant store
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_store_isolation.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-64` **Edge: conversation removed before click** - MEDIUM; resume returns 404, the panel shows an error and refreshes
+  - evidence: test_launch_missing_session.py test_resuming_a_conversation_whose_history_is_gone_is_a_404 over a live server, with test_a_resumable_conversation_still_launches as its control; panel.spec.ts DEF-138 covers the panel naming a refused listing
+  - test-tags: FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_launch_missing_session.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-65` **Edge: switch to already-current** - MEDIUM; no-op success
+  - evidence: test_routes.py test_switching_to_the_conversation_already_current_is_a_success answers 200 with current equal to requested, which is what the panel reads as success; test_a_switch_to_a_conversation_that_is_gone_is_refused holds the other half at 404 branch_not_found. Mutation: answering a null current reddens the first
+  - test-tags: FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "already_current or switch_to_a_conversation_that_is_gone"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-66` **Edge: same project in two providers** - MEDIUM; a folder used by two assistants shows one row in each panel, with independent favourite and current-conversation state
+  - evidence: test_store_isolation.py test_favourites_and_pins_are_keyed_by_provider and test_colours_are_keyed_by_provider keep the two panels' state independent for one folder; test_each_store_resolves_only_its_own_project_key gives each provider its own row for that folder
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "favourites_and_pins_are_keyed_by_provider or colours_are_keyed_by_provider or each_store_resolves_only_its_own"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-67` **Edge: concurrent delete** - MEDIUM; deleting a conversation another panel has open reports the failure and refreshes, never leaving a phantom row
+  - evidence: panel.spec.ts ACC-SESS-67 asserts a refused delete reports 'Delete failed' once and still re-reads the list, and that a partial delete forgets the colour of only the ids the server says went; test_routes.py test_a_delete_answers_the_ids_that_actually_went and test_a_delete_the_store_refuses_outright_is_a_failure cover the route. Mutations: forgetting every requested id, removing the refresh, and counting every requested id each redden one
+  - test-tags: UNIT, FUNCTIONAL
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-SESS-67 and PYTHONPATH=$PWD python3 -m pytest -k "actually_went or refuses_outright"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-68` **Edge: unusable field in an assistant's session record** - MEDIUM; a value the assistant wrote that the panel cannot use - an ISO string where a number is compared, a pid outside the OS range - costs its own row that field and nothing else; the listing still answers for every project
+  - evidence: test_provider_stores.py test_a_malformed_number_costs_a_row_a_field_not_the_whole_listing, test_an_out_of_range_pid_costs_a_row_a_field_not_the_whole_listing and test_a_non_positive_pid_is_dead_and_never_gates_the_repair; test_store_isolation.py test_a_corrupt_store_file_costs_rows_not_the_panel holds the listing as a whole
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "costs_a_row_a_field or non_positive_pid or corrupt_store_file"
   - log: 2026-08-26T00:00:00Z @kj added
   - log: 2026-08-26T00:00:00Z @kj closed: closed - DEF-126: pid_alive catches OverflowError so an out-of-range pid reads dead; pinned by test_an_out_of_range_pid_costs_a_row_a_field_not_the_whole_listing, mutation-verified (v1.0.30 tree)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-SESS-173` **Rename session** - HIGH; a Rename Session item in the row context menu renames the row current conversation; the new name replaces the row title on the next poll, with no reload
+  - evidence: ui-tests/tests/rename.spec.ts round trip at v1.2.28 - dialog to route to the Claude transcript and back onto the row as name_source session, nothing mocked; src/__tests__/panel.spec.ts asserts the trimmed body and the stored-name notification; Galata 47 green
+  - related: ACC-SESS-174, ACC-SESS-175, ACC-API-176 - the dispatch, the empty-name refusal and the route this item rides on
+  - test: rename the current conversation from the context menu, then read the row title
+  - test-tags: UNIT, FUNCTIONAL, E2E
+  - mechanism: 2026-09-19T20:11:40Z @kj the panel prompts with InputDialog.getText seeded with the current name, POSTs the trimmed value to the provider rename route, then refreshes the listing
+  - log: 2026-09-19T20:11:40Z @kj added
+  - log: 2026-09-19T20:19:48Z @kj edited text and test (replaced)
+  - log: 2026-09-19T20:19:48Z @kj scope narrowed to the context menu - the Manage Sessions popup was not asked for and is left for the Star Colonel to call
+  - log: 2026-09-19T20:30:47Z @kj closed
+  - log: 2026-09-19T20:54:17Z @kj edited text and test (replaced)
+  - log: 2026-09-19T20:54:17Z @kj the switcher-submenu clause was removed as unreproducible: the submenu lists a project other conversations and excludes the current one, which is the only conversation this item renames
+- [x] `ACC-SESS-174` **Rename belongs to the provider** - HIGH; core never writes a name itself: it calls the store rename hook and the menu item is absent for a provider whose descriptor declares no rename support
+  - evidence: Capabilities.can_rename plus IProviderDescriptor.canRename, bound by test_descriptor_parity; panel.spec.ts ACC-SESS-174 reddens when isVisible is severed (mutation-checked); test_routes rename_unsupported reddens when the route gate is severed
+  - test: declare no rename support on one descriptor and assert the item does not render and the route answers 400
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-09-19T20:11:40Z @kj a rename capability on the descriptor, read by isVisible on the command and enforced again server-side before the store is asked
+  - log: 2026-09-19T20:11:40Z @kj added
+  - log: 2026-09-19T20:11:57Z @kj edited title
+  - log: 2026-09-19T20:30:47Z @kj closed
+- [x] `ACC-SESS-175` **Empty rename refused** - MEDIUM; Ok on an empty field renames nothing and says so in a notification, the way Branch Session already refuses an empty name
+  - evidence: panel.spec.ts ACC-SESS-175 - an empty field sends no request and warns; test_routes name_invalid over empty, whitespace, over-long, missing and non-string
+  - test: open the rename dialog, clear the field, press Ok, assert no request went out and a warning notification appeared
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-09-19T20:11:40Z @kj the trimmed value is tested before the request, and the server rejects an empty or over-long name as well
+  - log: 2026-09-19T20:11:40Z @kj added
+  - log: 2026-09-19T20:30:47Z @kj closed
 
 ## Colour `COLO`
 
@@ -274,20 +573,39 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
 | Branch inherits      | stored colour only         | always (overrides new hash) | always                    |
 
 - [x] `ACC-COLO-69` **Colour source flag** - HIGH; `colourSource` on the descriptor is `native`, `derived` or `none` and decides only the default tint
+  - evidence: colour.spec.ts effectiveColour covers all three sources: native takes the assistant's own colour, derived computes from the conversation id, none answers nothing; test_registry.py test_capability_flags_match_the_store requires an implementation behind the flag and test_descriptor_parity.py binds the value across runtimes
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "capability_flags_match_the_store or descriptor_fields_agree" and jlpm jest src/__tests__/colour.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-70` **Tab colour write-back** - HIGH; for EVERY provider, changing the colour on a terminal tab registers as that conversation's colour in the extension's store, exactly as if the assistant itself had changed colour
+  - evidence: tab-colour-capture.spec.ts 'a colour picked on a tab is filed against the running conversation as the user own choice' and 'paints the choice rather than the colour the ladder would derive'; test_routes.py test_the_colour_store_serves_all_three_verbs and test_a_native_colour_provider_accepts_a_write cover the route for a native provider too, which is the every-provider half
+  - test-tags: UNIT, FUNCTIONAL
+  - test: jlpm jest src/__tests__/tab-colour-capture.spec.ts and PYTHONPATH=$PWD python3 -m pytest -k "colour_store_serves_all_three or native_colour_provider or colours_are_per_provider"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-08-09T00:00:00Z @kj widened - was "for providers without native colour"; a hand-set tab colour now registers for native providers too (v1.0.0)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-71` **Write-back persistence** - HIGH; user-set colours persist per provider keyed by session id and survive a JupyterLab reload
+  - evidence: test_colour_store.py test_a_colour_survives_a_reload reads the value back from disk; test_routes.py test_colours_are_per_provider keys the store per provider, and the entries are keyed by session id throughout test_colour_store.py
+  - test-tags: UNIT, FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py and PYTHONPATH=$PWD python3 -m pytest -k colours_are_per_provider
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-72` **Override precedence** - HIGH; a user-set colour beats every default: the derived hash (Kimi), the empty default (Codex, Gemini) AND the assistant's own colour (Claude's `/color`). Releasing the override hands the conversation back to its default
+  - evidence: test_colour_store.py test_user_set_colour_beats_the_derived_hash, test_a_hand_set_colour_beats_the_assistants_own, test_user_set_colour_supplies_the_tint_where_there_is_none and test_dropping_the_override_hands_a_native_conversation_back_to_the_assistant cover all four defaults and the release; colour.spec.ts effectiveColour 'lets a user-set colour beat every default' holds the frontend ladder
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py and jlpm jest src/__tests__/colour.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-08-09T00:00:00Z @kj widened - was "native colour (Claude) remains owned by the assistant"; the tab is the control surface for every assistant, so the last preference the user expressed wins and is remembered (v1.0.0)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-73` **Colour release affordance** - HIGH; a "Reset Tab Colour" item in the row's context menu drops the stored override and re-tints from the default at once; it is shown only while a HAND-SET override exists and tab colouring is on. It covers every conversation of that project whose branch list arrived, never fewer than the row's own conversation, names its count, and drops them in a single request so a release is never half applied. The companion extension's own Clear now reaches the same place by the signal route and does drop the override, but only for a conversation whose terminal is open and probes as this assistant's - which is why the menu item remains the way to release a colour whose tab is closed
+  - evidence: ui-tests/tests/colour-override.spec.ts five cases: the item appears only once a colour has been set, it hands the conversation back, it leaves an inherited tint alone, it names how many conversations it reaches, and it reaches a colour set on a branch; colour.spec.ts 'releases a whole set in one request, or none of it' and 'keeps every colour when a release is not carried out' hold the single-request guarantee
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/colour.spec.ts and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test colour-override.spec.ts
   - log: 2026-08-09T00:00:00Z @kj criterion added - adversarial round 1 (ux CRITICAL, bug-hunter MAJOR, architect MINOR): without it a hand-set colour was a one-way door and `/color` never showed again (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj closed - Galata drives the menu item itself: hidden with no override, visible with one, and clicking it empties the store and restores the assistant's colour (19/19)
   - log: 2026-08-09T00:00:00Z @kj widened - adversarial round 2, all three adversaries: the item covered only the row's CURRENT conversation, so a colour set on a terminal opened via Open Branched Conversation was unreachable; it now targets every conversation of the row that carries an override, and is absent while tab colouring is off (v1.0.0)
@@ -299,7 +617,11 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
   - log: 2026-09-04T21:13:08Z @kj edited text
   - log: 2026-09-04T21:13:08Z @kj corrected - the old wording said the companion's Clear cannot serve as the release because it strips the tab's classes but not the stored colour; since the ownership change the companion reports a Clear through colourChanged and this extension releases the override on it (DEF-COLO-155 fix)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-74` **Colour capture safety** - CRITICAL; a hand-set colour is written against the OBSERVED conversation only, never one guessed from a cwd, and it reaches the store only because the companion extension REPORTED the user picking it - never because a stored value was read back out of the browser. A choice whose conversation cannot yet be read from its process - a brand-new Codex or Kimi launch, which carries no id on its argv - is held and re-attempted on the next reconcile pass, and the terminal is not painted over while its choice is pending, so the pick is not destroyed before it can be filed
+  - evidence: tab-colour-capture.spec.ts covers every clause: 'is never resolved from the folder the terminal sits in' for the cwd guess, 'is ignored when the terminal runs something else' and 'is ignored when no open terminal carries that widget id' for the report, and the pending-choice group - filed by the next pass, shown and nothing else until then, replaced by a later choice, dropped when the assistant is gone
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/tab-colour-capture.spec.ts
   - log: 2026-08-09T00:00:00Z @kj criterion added - adversarial round 1, raised independently by all three adversaries (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj closed - write-back keys on `info.session_id`; `ColourStore.set` answers whether the write landed and rolls the cache back when it did not
   - log: 2026-08-09T00:00:00Z @kj extended - adversarial round 2 (bug-hunter): the pass now strips THIS extension's own tint before bailing, since Lumino rebuilds the tab classes from title.className and a stale tint would otherwise keep showing in place of the colour just picked (v1.0.0)
@@ -309,33 +631,58 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
   - log: 2026-09-04T21:13:19Z @kj edited text
   - log: 2026-09-04T21:13:19Z @kj corrected - the old wording described the scrape-and-gate mechanism: the tab left untouched until the store confirmed the colour, because painting made the companion release its own record. Capture is now event-driven and a claimed tab is never persisted by the companion, so that gate no longer exists; the caveat that a brand-new launch is not captured at all is replaced by the pending-choice retry (DEF-COLO-155 fix)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-75` **Branch colour inheritance** - HIGH; a branched conversation inherits the parent's effective colour at fork time. For a native provider only a colour this extension's own store holds for the parent is inherited - an entry the parent itself inherited counts; copying the parent's assistant-chosen tint would pin the fork to it and shadow the fork's own `/color`
+  - evidence: test_colour_store.py test_a_branch_inherits_the_parents_default, test_a_branch_inherits_the_parents_override_not_its_default, test_inheritance_is_written_at_fork_time_not_resolved_later and test_a_colourless_parent_gives_the_branch_nothing cover the fork-time copy and the native exclusion
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-08-09T00:00:00Z @kj qualified - native providers inherit only the override, now that the store accepts writes for them (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj wording corrected - adversarial round 5 (architect, bug-hunter, both traced): the code inherits any STORED colour, which is what Edge: branch of a branch requires; five artefacts said hand-set only, inviting a filter that would break that criterion
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-76` **Edge: branch of a branch** - MEDIUM; inherits the effective colour of its immediate parent, including any user-set override
+  - evidence: test_colour_store.py test_a_branch_of_a_branch_inherits_the_override takes the immediate parent's effective colour, override included
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k branch_of_a_branch
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:59Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-77` **Edge: colour of a deleted conversation** - MEDIUM; deleting a conversation drops its stored colour entry, leaving no orphan keys
+  - evidence: test_colour_store.py test_dropping_deleted_conversations_leaves_no_orphan_keys and test_dropping_a_conversation_drops_its_override_marker cover the entry and its origin marker
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "dropping_deleted_conversations or dropping_a_conversation_drops"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-78` **Edge: colour set on a branch terminal** - MEDIUM; a terminal opened with Open Branched Conversation carries a conversation that is not the row's current one; a colour set on that tab is stored against the branch and released from the same row, without first switching the project's current conversation
+  - evidence: tab-colour-capture.spec.ts files the choice against the conversation the terminal's own process reports, which on a branch terminal is the branch; ui-tests/tests/colour-override.spec.ts 'the release reaches a colour set on a branch, not just the current one' covers the release without a switch
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/tab-colour-capture.spec.ts and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test colour-override.spec.ts
   - log: 2026-08-09T00:00:00Z @kj added
   - log: 2026-08-09T00:00:00Z @kj closed - the reset targets the row's conversation plus its branches; Galata asserts the release of a branch-only colour, mutation-checked against the row-only keying (v1.0.0)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-79` **Colour origin** - MEDIUM; the store records whether a colour was set by hand on a tab or written at fork time; both outrank the default identically and only the hand-set ones are offered for release, so dropping an override never un-inherits a branch. A store written before origins were recorded holds NOTHING hand-set - both writers predate the marker, and offering an inherited tint for release destroys a branch's colour with no undo, while withholding the release costs one re-pick on the tab. Caveat: an inherited tint has no release of its own, so releasing a parent's override leaves branches that inherited it still wearing that colour
+  - evidence: test_colour_store.py test_an_inherited_tint_is_not_a_hand_set_one, test_colouring_an_inherited_conversation_by_hand_makes_it_the_users, test_releasing_an_override_forgets_that_it_was_one and test_a_file_written_before_origins_holds_nothing_hand_set; colour.spec.ts 'ColourStore origins' holds the same two rules on the frontend
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py and jlpm jest src/__tests__/colour.spec.ts
   - log: 2026-08-09T00:00:00Z @kj added
   - log: 2026-08-09T00:00:00Z @kj closed - state file carries `overrides` beside `colours`; pytest covers inherit-vs-hand-set, the legacy file and the marker's removal, and Galata asserts an inherited tint survives a release (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj corrected - adversarial round 4 (architect MAJOR, bug-hunter MAJOR, both reproduced): the legacy rule claimed a pre-1.0.0 file held only tab write-backs, but inherit_colour shipped in 8e62249, so an upgrader's release would un-inherit exactly as before; a legacy file now holds nothing hand-set, and re-picking the colour on the tab is the way back
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-80` **Colour write failure is reported** - MEDIUM; a colour the store cannot persist answers 500 rather than 200, and the panel treats an answer that does not hold the colour as a failed write - it leaves the cache untouched, paints nothing, and says in the console that the choice did not stick. What the user sees is the class the companion put on the tab element, which survives only until the next tab switch, so the failure is visible rather than silent
+  - evidence: test_colour_store.py test_a_colour_that_cannot_be_persisted_is_not_reported_as_stored and test_a_refused_write_says_so_in_the_server_log; colour.spec.ts 'treats an answer that does not hold the colour as a failed write' and 'keeps the last confirmed colour when the server refuses, and says so'; tab-colour-capture.spec.ts 'paints nothing, and says the choice did not stick'
+  - test-tags: UNIT, FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py and jlpm jest src/__tests__/colour.spec.ts src/__tests__/tab-colour-capture.spec.ts
   - log: 2026-08-09T00:00:00Z @kj added
   - log: 2026-08-09T00:00:00Z @kj closed - adversarial round 3 (bug-hunter MAJOR, reproduced against a full disk): route answers colour_store_unwritable, and ColourStore.set/forget verify the returned map (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj extended - adversarial round 4: a malformed colour answers 400 colour_invalid rather than the 500 that means the state dir is unwritable, and the DELETE half of the 500 is now covered by a test (v1.0.0)
   - log: 2026-09-04T21:13:20Z @kj edited text
   - log: 2026-09-04T21:13:20Z @kj corrected - the old reason for not painting was that painting makes the companion drop the tab's own record of the choice; a claimed tab has no companion record to drop, and the true reason is that nothing would be holding the colour in its place (DEF-COLO-155 fix)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:05Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-164` **Colour ownership is declared, not inferred** - HIGH; a colour reaches the hand-set rung only because the companion extension reported the user picking it on a tab. This extension never reads the companion's browser storage, and it declares ownership of each terminal it recognises so the companion persists nothing for that tab. Against a companion too old to carry the ownership API this extension tints nothing at all and says so once, because painting a colour it cannot capture would repaint over the user's pick on the next pass
   - evidence: IColourfulTabs gained claim(widget): IDisposable, reference counted; this extension claims a terminal the probe recognises and releases it when recognition lapses, the widget closes, colouring is switched off, or the panel is disposed. Claim lifecycle covered by nine tests in src/__tests__/tab-colour-capture.spec.ts and by the companion's own suite
   - related: DEF-COLO-155 - the defect this criterion exists to prevent recurring
@@ -359,142 +706,314 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
 This extension retires the three standalone extensions. A user upgrading must not end up with duplicate panels or lost state.
 
 - [x] `ACC-RETI-81` **Feature parity** - CRITICAL; every feature listed in the three standalone READMEs is present here or explicitly recorded as dropped, with a reason
+  - evidence: Checked 2026-09-20 against the three retired repositories under /home/lab/workspace/private/jupyterlab. Parity is recorded as criteria rather than prose: the Claude, Codex and Kimi categories carry every divergence the standalone READMEs listed, and each is now tagged with the test that holds it. No automated test can assert a claim about another repository's README, so this stays a read
+  - test-tags: MANUAL
+  - test: read the three retired READMEs against docs/acc-crit-jupyterlab-ai-code-assistants.md and this README
   - log: 2026-08-07T00:00:00Z @kj closed - all 41 README features of the three standalone extensions audited with file:line evidence: 42 present after the DEF-9 fix, 0 missing, and 2 dropped - the `install-claude-statusline` and `install-kimi-statusline` companion CLIs, orthogonal to session management, so no `[project.scripts]` entry ships here
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-82` **Conflict detection** - CRITICAL; a standalone extension still installed alongside this one is detected at activation
+  - evidence: index.spec.ts ACC-RETI-82, ACC-RETI-83 hands activation an app whose hasPlugin reports the retired package installed, and the detection runs at activation. Mutation: removing the suppressed.add call reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-RETI-82
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-83` **Conflict resolution** - CRITICAL; a detected standalone extension suppresses this extension's panel for that assistant, so the user never sees two panels for one assistant
+  - evidence: index.spec.ts asserts the suppressed assistant gets neither a panel nor a command while the other four dock, and the companion case asserts that with nothing retired installed every assistant keeps its panel. Mutation: removing the suppressed.add call reddens it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-RETI-83
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-84` **Conflict notice** - HIGH; the suppressed case tells the user which package to uninstall, once, not on every refresh
+  - evidence: index.spec.ts ACC-RETI-84 asserts one Notification.warning naming the package and the word uninstall, with autoClose false, and that a later probe raises no second one. Mutations: raising the notice on every reconcile, letting it auto-close, and dropping the package name each redden it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/index.spec.ts -t ACC-RETI-84
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-85` **Settings migration** - CRITICAL; saved settings from each standalone plugin id are read once and mapped onto the matching `providers.<id>.*` keys
+  - evidence: test_migrate.py test_settings_and_favourites_are_carried_over maps each retired plugin id onto the providers.<id>.* keys the shipped schema declares; test_migrate_end_to_end.py test_the_route_carries_a_retired_install_over covers it through the live migrate route; test_settings_schema.py holds the target keys
+  - test-tags: UNIT, FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_migrate.py jupyterlab_ai_code_assistants_extension/tests/test_migrate_end_to_end.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-86` **Favourites migration** - CRITICAL; favourites recorded by a standalone extension carry over to the matching provider
+  - evidence: test_migrate.py test_settings_and_favourites_are_carried_over asserts the favourites sidecar's entries land against the matching provider; test_migrate_end_to_end.py covers the same through the route
+  - test-tags: UNIT, FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "settings_and_favourites or route_carries_a_retired"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-87` **Session stores untouched** - HIGH; migration reads the assistants' own history directories in place and never moves, copies or rewrites them
+  - evidence: test_migrate.py test_the_retired_sidecar_is_only_ever_read asserts the retired file is unchanged after a migration; test_migration_state_lives_outside_every_assistant_store keeps the marker out of the assistants' own directories
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "retired_sidecar_is_only_ever_read or migration_state_lives_outside"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-88` **Migration is idempotent** - HIGH; running twice changes nothing the second time and never overwrites a value the user has since set here
+  - evidence: test_migrate.py test_running_twice_changes_nothing_and_writes_nothing and test_a_value_set_here_is_never_clobbered cover both halves: the second run is inert, and a value the user has since set here survives
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "running_twice_changes_nothing or value_set_here_is_never_clobbered"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-89` **Metapackage updated** - MEDIUM; `stellars_jupyterlab_extensions` depends on this extension and drops the three standalone ones
+  - evidence: Checked 2026-09-20: stellars_jupyterlab_extensions/pyproject.toml line 30 depends on jupyterlab_ai_code_assistants_extension, and none of jupyterlab_claude_code_extension, jupyterlab_codex_extension or jupyterlab_kimi_code_extension appears in its dependencies. A separate repository, so no test here can assert it
+  - test-tags: MANUAL
+  - test: grep the metapackage pyproject for this package and for the three retired ones
   - log: 2026-08-07T00:00:00Z @kj deferred until this package is published - the metapackage cannot depend on an unpublished package; execute at release
   - log: 2026-08-08T00:00:00Z @kj closed: stellars_jupyterlab_extensions 1.1.5 published: claude/codex deps replaced with jupyterlab_ai_code_assistants_extension, README bullet updated, pushed
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-90` **Standalone repos marked** - MEDIUM; each retired extension's README states it is superseded, naming this package
+  - evidence: Checked 2026-09-20: all three of jupyterlab_claude_code_extension, jupyterlab_codex_extension and jupyterlab_kimi_code_extension open their README with the blockquote 'Superseded. This extension is retired and no longer maintained. Its functionality lives on in ...' naming this package. Separate repositories, so no test here can assert it
+  - test-tags: MANUAL
+  - test: read the first lines of each retired extension README
   - log: 2026-08-07T00:00:00Z @kj deferred until release alongside the metapackage repoint - marking READMEs superseded before the replacement is installable would strand users
   - log: 2026-08-08T00:00:00Z @kj closed: superseded notice added atop README of claude/codex/kimi standalone repos, committed and pushed
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-91` **Edge: nothing to migrate** - MEDIUM; a fresh install with no prior extension runs migration as a silent no-op
+  - evidence: test_migrate.py test_nothing_to_migrate_is_a_silent_no_op asserts a fresh install writes nothing and raises nothing
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k nothing_to_migrate
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-92` **Edge: partial prior install** - MEDIUM; one standalone extension present and two absent migrates the one and skips the rest without error
+  - evidence: test_migrate.py test_one_prior_install_migrates_and_the_others_are_skipped covers the partial case; test_a_provider_with_no_legacy_source_is_skipped covers a provider that never had a standalone extension
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "one_prior_install or provider_with_no_legacy_source"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-RETI-93` **Edge: corrupt prior settings** - MEDIUM; unreadable saved settings are skipped with a console warning, defaults apply, migration continues for the others
+  - evidence: test_migrate.py test_corrupt_prior_settings_are_skipped_and_the_rest_continue asserts the unreadable source is skipped, the warning is logged, and the remaining providers still migrate
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k corrupt_prior_settings
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 
 ## Claude Provider `CLAU`
 
 Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. Capabilities - native fork, user-set colour, remote control, background agents.
 
 - [x] `ACC-CLAU-94` **Native fork** - HIGH; branching uses `claude --fork-session`; the chosen name is stamped and the fork becomes the row's current conversation
+  - evidence: test_claude_launch_argv asserts --resume <parent> --fork-session --session-id <fork> -n <name>, so the flag pair, the minted id and the stamped name are one argv; test_claude_a_fork_of_an_agent_owned_conversation_still_forks holds the fork path against an attach; test_routes.py asserts the fork id reaches the argv route; test_claude_parse_session_id_prefers_the_fork makes the fork, not the parent, the row's current conversation
+  - test-tags: UNIT, FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k "claude_launch_argv or fork_of_an_agent_owned" and PYTHONPATH=$PWD python3 -m pytest -k native_command_fork
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-CLAU-95` **Remote control indicator** - HIGH; a green dot marks sessions actively under remote control, not merely a running terminal
+  - evidence: panel.spec.ts three cases: remote control gives the dot its own sentence, a live process alone gives a different one, and a provider that does not declare the capability never shows the remote sentence. Mutations: dropping the hasRemoteControl gate, and reordering the two branches, each redden it
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-CLAU-95
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-CLAU-96` **Background agents** - HIGH; a conversation held by a running background agent shows a `bg` chip and is attached to, never resumed
+  - evidence: panel.spec.ts asserts the bg chip appears only with bg_id and only on a provider declaring hasBgAgents; test_claude_a_background_agent_conversation_is_attached_not_resumed and test_claude_an_attach_carries_no_mode_and_no_name prove the open is an attach. Mutations: ungating the chip, and removing the attach branch, redden them
+  - test-tags: UNIT, FUNCTIONAL
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-CLAU-96 and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k attach
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-CLAU-97` **Launch verb resolved server-side** - HIGH; the server decides resume-versus-attach at launch time, so a stale panel cannot pick the wrong one
+  - evidence: test_claude_the_launch_verb_is_read_at_launch_time_not_carried_from_the_panel asks for the same conversation twice across a background agent exiting and gets attach then --resume, with nothing about the request changed. Mutation: removing the attach branch reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k launch_verb_is_read_at_launch_time
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-CLAU-98` **Coloured tabs from `/color`** - HIGH; the terminal tab tint comes from the session's own colour, via `jupyterlab_colourful_tab_extension`, unless the user set a colour on the tab by hand (see Colour / Override precedence)
+  - evidence: test_claude_default_colour_reads_the_conversation_not_the_row takes the tint from the conversation's own agentColor; test_colour_store.py test_a_hand_set_colour_beats_the_assistants_own and test_dropping_the_override_hands_a_native_conversation_back_to_the_assistant hold the precedence; ui-tests/tests/tab-colour-ownership.spec.ts and colour-override.spec.ts cover it in a running JupyterLab
+  - test-tags: UNIT, E2E
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "claude_default_colour or hand_set_colour" and jlpm jest src/__tests__/colour.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-08-09T00:00:00Z @kj qualified - `/color` is now the DEFAULT, not the last word; a hand-set tab colour overrides it (v1.0.0)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-CLAU-99` **Skip-permissions mode** - HIGH; an opt-in setting and matching menu entries launch with `--dangerously-skip-permissions`, off by default
+  - evidence: test_claude_launch_argv asserts --dangerously-skip-permissions appears only for the declared mode; test_settings_schema.py holds the key under Claude's own name with default false; launch-mode.spec.ts covers the menu variant and the warning that names the switch
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k claude_launch_argv and jlpm jest src/__tests__/launch-mode.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-CLAU-100` **Terminal -c follows the panel** - HIGH; switching to or launching a conversation makes plain 'claude -c' in that project resume it, including a conversation that has been compacted
+  - evidence: test_a_compacted_transcript_gets_a_root_claude_c_will_select, test_switching_to_a_compacted_conversation_makes_claude_c_select_it and test_launching_a_compacted_conversation_makes_claude_c_select_it cover the compacted case; test_claude_picks_the_conversation_the_cli_would_pick and test_an_already_continuable_transcript_is_left_byte_for_byte hold the ordinary one; test_a_repair_keeps_the_mtime_the_transcript_carried stops the repair itself counting as activity
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k "claude_c or continuable or compacted"
   - log: 2026-08-26T00:00:00Z @kj added
   - log: 2026-08-26T00:00:00Z @kj closed: closed - DEF-127: switch and launch repair a compact_boundary root so -c can select it; verified end to end against the real CLI, 7 mutation-checked tests
   - log: 2026-08-26T00:00:00Z @kj qualified - -c picks by mtime, and only the SWITCH path touches it; an already-continuable conversation opened by launch alone still leaves -c on the project's newest transcript until the resumed CLI appends (round-1 architect)
   - log: 2026-08-26T00:00:00Z @kj qualified - launching a conversation held by a background agent attaches to that agent and does NOT repair it, so an agent-held compacted conversation is not made -c-selectable by launch (see DEF-128)
   - log: 2026-09-06T21:24:57Z @kj qualified - the carve-out now covers ANY conversation opened by launch alone, compacted or not. ensure_continuable used to give the repaired file a fresh mtime through os.replace; it now carries the old mtime across, so that a switch's stamp is not silently spent. Launch therefore repairs a compacted conversation without making it the CLI's newest; only switch moves -c (DEF-PANE-197 round, round-5 architect)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-CLAU-177` **Rename appends a custom-title record** - HIGH; renaming appends {"type": "custom-title", "customTitle": <name>, "sessionId": <id>} to the conversation transcript, which is exactly what the CLI /rename command writes, so the CLI and the panel agree and the name survives a restart
+  - evidence: ClaudeStore.rename appends {"type": "custom-title"}; test_claude_rename_appends_the_record_its_own_slash_command_writes asserts both titles in order, and a second test proves a transcript cut mid-write is not fused
+  - related: ACC-SESS-174 - the capability this provider answers
+  - test: rename a Claude conversation, then read the last custom-title record of its jsonl and the row title
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-09-19T20:11:57Z @kj the store already reads the newest custom-title record out of the transcript tail for the row label, so a rename writes the record that read is looking for
+  - log: 2026-09-19T20:11:57Z @kj added
+  - log: 2026-09-19T20:30:47Z @kj closed
 
 ## Codex Provider `CODE`
 
 Ported from `jupyterlab_codex_extension` v0.6.12. Capabilities - no colour source, approval-bypass launch mode.
 
 - [x] `ACC-CODE-101` **Live activity indicator** - HIGH; shows which projects have a Codex process running right now
+  - evidence: test_codex_marks_only_the_projects_a_codex_process_is_running_in drives live_cwds through empty, this project and another project; panel.spec.ts ACC-CODE-101 asserts the dot follows session.live and the capability. Mutation: hardcoding live True reddens the store test
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k codex_marks_only and jlpm jest src/__tests__/panel.spec.ts -t ACC-CODE-101
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-CODE-102` **Approval bypass** - HIGH; an opt-in setting and matching menu entry launch with `--dangerously-bypass-approvals-and-sandbox`, off by default
+  - evidence: test_codex_launch_argv asserts --dangerously-bypass-approvals-and-sandbox appears only for the declared mode; test_settings_schema.py test_every_declared_launch_mode_has_a_key_under_its_own_name holds the key under Codex's own name with default false
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k codex_launch_argv
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-CODE-103` **No native colour** - HIGH; the provider declares `colourSource: none`; default is no tint, user-set colours apply via the write-back store per the Colour section
+  - evidence: codex declares colour_source none, held by test_registry.py test_capability_flags_match_the_store and bound across runtimes by test_descriptor_parity.py test_descriptor_fields_agree_across_runtimes; test_colour_store.py test_user_set_colour_supplies_the_tint_where_there_is_none and test_no_conversation_means_no_colour cover no tint by default and the write-back override
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "capability_flags_match_the_store or descriptor_fields_agree" and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py
   - log: 2026-08-07T00:00:00Z @kj reworded - write-back store makes user-set colour possible on colour-less assistants
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-CODE-178` **No rename, and the item says so by being absent** - HIGH; Codex declares no rename support: the thread name is a column of state_<N>.sqlite, which this store opens read-only, there is no codex rename subcommand, and the only write surface is the app-server method codex.thread.rename, which this extension does not speak; the menu item is absent rather than present and failing
+  - evidence: codex declares can_rename False and inherits the base refusal; test_codex_has_no_rename_at_all asserts both, and the route answers 400 rename_unsupported
+  - related: ACC-SESS-174 - the capability this provider answers
+  - test: open the context menu on a Codex row and assert there is no rename item; POST the rename route and assert 400 rename_unsupported
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-09-19T20:11:58Z @kj the descriptor declares no rename, so the command hides itself and the route refuses before the store is asked
+  - log: 2026-09-19T20:11:58Z @kj added
+  - log: 2026-09-19T20:30:47Z @kj closed
 
 ## Kimi Provider `KIMI`
 
 Ported from `jupyterlab_kimi_code_extension` v0.7.8. Capabilities - server-side fork, session-id-derived colour, YOLO launch mode.
 
 - [x] `ACC-KIMI-104` **Resume by session id** - HIGH; conversations open with `kimi -S <session-id>`
+  - evidence: test_kimi_launch_argv_and_argv_read_back asserts launch_argv yields kimi -S <session-id> and that parse_session_id reads the same argv back, which is what keeps terminal reuse from degrading to duplicates
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k kimi_launch_argv
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-KIMI-105` **Server-side fork** - HIGH; Kimi has no fork flag, so branching copies the session directory with a fresh id and title, then opens it
+  - evidence: test_kimi_fork_copies_the_directory_and_appends_the_index copies the session directory under a fresh id and appends the index row; test_kimi_fork_default_title_names_its_parent holds the title. Kimi declares fork_strategy server-copy, checked by test_registry.py test_capability_flags_match_the_store
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k kimi_fork
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-KIMI-106` **YOLO mode** - HIGH; every launch action has a YOLO variant using `--yolo`; a setting makes it the default, off by default
+  - evidence: test_kimi_launch_argv_and_argv_read_back asserts --yolo for the declared mode and nothing without it; test_settings_schema.py holds providers.kimi.yoloMode as a boolean defaulting to false, and at most one approval control
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k kimi_launch_argv and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_settings_schema.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-KIMI-107` **Deterministic tab colour** - HIGH; the default tint derives from the session id, stable per conversation, since Kimi has no colour command; a user-set colour and branch inheritance override it per the Colour section
+  - evidence: test_kimi_derived_colour_is_stable_and_in_vocabulary derives the tint from the session id and holds it inside the shared vocabulary; test_descriptor_parity.py test_the_derived_colour_agrees_across_runtimes binds the two runtimes to one derivation; test_colour_store.py covers the user-set and inherited overrides
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k kimi_derived_colour and PYTHONPATH=$PWD python3 -m pytest -k derived_colour_agrees
   - log: 2026-08-07T00:00:00Z @kj reworded - derived hash is the default only, write-back and inheritance take precedence
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-KIMI-179` **Rename writes title and isCustomTitle** - HIGH; renaming writes title into the conversation state.json and sets isCustomTitle true, which is the flag that stops the CLI replacing the name with a reworded first prompt
+  - evidence: KimiStore.rename writes title and isCustomTitle through a temporary file; test_kimi_rename_writes_the_title_and_flags_it_custom reddens when the flag write is severed (mutation-checked)
+  - related: ACC-SESS-174 - the capability this provider answers
+  - test: rename a Kimi conversation, then read title and isCustomTitle out of its state.json
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-09-19T20:11:58Z @kj the store already prefers a title only when isCustomTitle is set, so a rename must set both fields or the name is read back as auto-derived and ignored
+  - log: 2026-09-19T20:11:58Z @kj added
+  - log: 2026-09-19T20:30:47Z @kj closed
 
 ## Gemini Provider `GEMI`
 
 New provider - no standalone extension to port from. Gemini CLI 0.54.4 (`@google/gemini-cli`, installed via `lab-utils install-ai-assistant/google-gemini-cli`). Store: `~/.gemini/projects.json` registry maps project root to a short id; chats live under `~/.gemini/tmp/<shortId>/chats/` as JSON files. Capabilities - no fork flag (server-side fork), no colour command (`colourSource: none`), YOLO launch mode.
 
 - [x] `ACC-GEMI-108` **Store scan** - HIGH; projects come from the `projects.json` registry and sessions from `tmp/<shortId>/chats/*.json`, read in place, never via the auth-gated CLI listing
+  - evidence: test_gemini_scans_the_registry_and_chat_files reads projects.json and tmp/<shortId>/chats; test_gemini_skips_subagent_transcripts holds the filter; test_gemini_lists_without_the_cli makes both subprocess entry points raise and shutil.which answer None, so a listing that ever spawned the CLI would redden. Mutation: adding a subprocess.run to the listing reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k "gemini_scans or gemini_skips or lists_without_the_cli"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-GEMI-109` **Resume** - HIGH; clicking a row opens the conversation via its chat file (`--session-file <path>`), never by the positional index of `--resume`, which is ordering-dependent and stale the moment another session lands
+  - evidence: test_gemini_launch_argv_resumes_by_chat_file_never_by_resume asserts --session-file with the chat path and no --resume; test_gemini_parse_session_id_ignores_the_positional_forms holds the read-back against the ordering-dependent form
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k "gemini_launch_argv_resumes or ignores_the_positional"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-GEMI-110` **New session** - HIGH; a new conversation launches with `--session-id <uuid>` minted by the extension, so the row can be tracked from first poll
+  - evidence: test_gemini_launch_argv_starts_and_modes asserts a new conversation launches with --session-id carrying the id the extension minted, which is what lets the row be tracked from the first poll
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k gemini_launch_argv_starts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-GEMI-111` **Server-side fork** - HIGH; Gemini has no fork flag, so branching copies the chat file with a fresh id, Kimi-style, and opens it
+  - evidence: test_gemini_fork_rewrites_every_metadata_record copies the chat file under a fresh id; test_gemini_fork_copies_a_record_carrying_a_line_separator_untouched and test_gemini_fork_declines_a_record_that_cannot_be_encoded cover the file-shape edges. Gemini declares fork_strategy server-copy, checked by test_registry.py
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k gemini_fork
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-GEMI-112` **YOLO mode** - HIGH; one boolean `yoloMode` setting, off by default, with matching `--yolo` launch variants; the four-rung `approvalMode` ladder is not exposed (DEF-111)
+  - evidence: test_settings_schema.py test_a_provider_exposes_exactly_the_controls_it_declares holds gemini to one key, yoloMode, so the retired four-rung approvalMode ladder cannot return; test_gemini_launch_argv_starts_and_modes asserts --yolo for the declared mode. Mutation: adding a second gemini key to the schema reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_settings_schema.py and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k gemini_launch_argv_starts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-08-12T00:00:00Z @kj reopened - rewritten to the single-switch shape; `auto_edit` and `plan` are no longer settable (v1.0.21)
   - log: 2026-08-12T00:00:00Z @kj closed: closed - single boolean per DEF-111 (v1.0.22)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-GEMI-113` **Edge: stale approvalMode key** - MEDIUM; a saved `providers.gemini.approvalMode` from an older version is ignored with a warning, and no `--approval-mode` flag ever reaches the CLI
+  - evidence: test_gemini_launch_argv_starts_and_modes passes the stale token approvalMode=plan and asserts no --approval-mode reaches the argv; launch-mode.spec.ts 'ignores a token from a retired setting' covers the frontend half (DEF-111)
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k gemini_launch_argv_starts and jlpm jest src/__tests__/launch-mode.spec.ts
   - log: 2026-08-12T00:00:00Z @kj criterion added (v1.0.21)
   - log: 2026-08-12T00:00:00Z @kj closed: closed - registry warns on unknown keys; stale token dropped server-side, pinned in test_provider_stores.py (v1.0.22)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-GEMI-114` **Edge: unauthenticated CLI** - MEDIUM; a gemini binary without auth configured still lists sessions in the panel (disk scan); the auth error surfaces only inside the launched terminal
+  - evidence: test_gemini_lists_without_the_cli patches subprocess.run and subprocess.check_output to raise and shutil.which to answer None, then asserts the rows and the branch listing are unchanged: the panel fills from disk and the auth error stays inside the launched terminal. Mutation: adding a subprocess.run call to list_sessions reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k lists_without_the_cli
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:24:14Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-GEMI-115` **Edge: registry migration** - MEDIUM; Gemini versions that migrate legacy hash-named project dirs to registry short ids must not produce duplicate rows during migration
+  - evidence: test_gemini_a_project_in_both_the_registry_and_the_markers_yields_one_row covers the mid-migration state, where the registry entry is gone and the .project_root marker still names the project, and asserts exactly one row; test_gemini_a_repointed_slug_is_listed_where_the_registry_says gives the stale slug the name that sorts last, so reversing the precedence changes the answer. Mutations: reading the registry only, keying the markers by slug, and letting the markers win each redden one of them
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k "in_both_the_registry or repointed_slug"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:24:15Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-GEMI-180` **Rename stamps summary on every metadata record** - HIGH; renaming sets summary on every metadata record of the chat file, the head record and the $set updates alike, because a later record would otherwise restore the old summary; the CLI may still re-summarise the conversation as it grows, so the name holds until it does
+  - evidence: GeminiStore.rename stamps summary on every metadata record via stamp_summary; test_gemini_rename_stamps_every_metadata_record covers a trailing $set update, and a second test proves a failed rewrite leaves the file byte-identical
+  - related: ACC-SESS-174 - the capability this provider answers
+  - test: rename a Gemini conversation whose chat file carries more than one metadata record, then assert every one of them carries the new summary
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-09-19T20:11:58Z @kj the same whole-file stamping the fork path already performs, minus the id and timestamp rewrite
+  - log: 2026-09-19T20:11:58Z @kj added
+  - log: 2026-09-19T20:30:47Z @kj closed
 
 ## Testing `TEST`
 
@@ -509,91 +1028,199 @@ Three tiers - pytest for the server core and each provider module, Jest for fron
 | Migration          | idempotent mapping | -                | -                            |
 
 - [x] `ACC-TEST-116` **Port knob** - MEDIUM; `JLAB_TEST_PORT` threads through `playwright.config.js` baseURL, the webServer command and `jupyter_server_test_config.py`, so the suite runs where 8888 is taken
+  - evidence: test_ui_test_harness.py test_the_port_knob_reaches_the_base_url_the_command_and_the_server_config asserts JLAB_TEST_PORT in all three places: the baseURL template, the --port argument of the webServer command, and the server config's own read
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:41:42Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-117` **Empty port value** - LOW; the server config reads the port with `or "8888"`, not a `get()` default, so an exported-but-empty variable does not raise
+  - evidence: test_ui_test_harness.py test_an_exported_but_empty_port_falls_back_rather_than_raising requires the `get(name) or default` form, refuses `get(name, default)`, and asserts the semantics it rests on: a get with a default answers the empty string for an exported-but-empty variable. Mutation: switching to the two-argument get reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-118` **No server adoption** - MEDIUM; `reuseExistingServer` is `false` unconditionally; the suite drives terminals and session stores and must never adopt a developer's live lab
+  - evidence: test_ui_test_harness.py test_a_running_lab_is_never_adopted asserts the literal false and that reuseExistingServer occurs exactly once, so it cannot sit behind an environment variable. Mutation: making it !process.env.CI reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-119` **Serialised specs** - MEDIUM; `workers: 1` and `fullyParallel: false`, since all specs share one server and its per-provider session stores
+  - evidence: test_ui_test_harness.py test_the_specs_run_one_at_a_time asserts workers: 1 and fullyParallel: false. Mutation: four workers reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-120` **Exit status preserved** - MEDIUM; test runs redirect rather than pipe through `tee`, so a suite whose server never started reports failure
+  - evidence: test_ui_test_harness.py test_the_run_instructions_redirect_rather_than_pipe holds the sentence in ui-tests/README.md that states the rule and its reason: a pipe reports tee's exit status, so a suite whose server never started reads as a pass
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-121` **Isolated session stores** - HIGH; Galata points every provider's session store at a scratch directory; no test reads or writes the developer's real assistant history
+  - evidence: test_ui_test_harness.py test_every_assistant_store_is_redirected_out_of_the_developer_history requires the ASSIGNMENT of each store root, with its right-hand side under the scratch home or the scratch tree - matching the name alone passed on the fixture code that reads the variable back. Mutation: deleting the CLAUDE_CONFIG_DIR assignment reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-122` **Isolated runtime dir** - MEDIUM; `JUPYTER_RUNTIME_DIR` points at a private folder and inherited hub tokens are deleted from the spawn environment
+  - evidence: test_ui_test_harness.py test_the_runtime_and_config_dirs_are_private_to_the_run and test_inherited_hub_tokens_are_dropped_from_the_spawn_environment: JUPYTER_RUNTIME_DIR, JUPYTER_CONFIG_DIR and JUPYTER_DATA_DIR are assigned, and JUPYTERHUB_API_TOKEN, JPY_API_TOKEN and JUPYTER_TOKEN are popped. Mutation: keeping the hub token reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:02Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-123` **Scratch swept at both ends** - MEDIUM; scratch stores are cleared by the webServer command before start and again in `globalTeardown`, since `globalSetup` runs after the server
+  - evidence: test_ui_test_harness.py test_the_scratch_tree_is_swept_before_the_run_and_after_it holds both ends - the rm in the webServer command, because globalSetup runs after the server, and the rmSync in global-teardown.js; test_the_scratch_tree_is_keyed_by_the_run_own_port holds the port keying that stops one run sweeping another's fixtures (DEF-49). Mutations: removing the pre-start sweep, and sharing one scratch path, each redden one
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-124` **Activation message** - MEDIUM; `src/index.ts` logs `JupyterLab extension jupyterlab_ai_code_assistants_extension is activated!` verbatim, matching the template UI test
+  - evidence: test_ui_test_harness.py test_the_activation_message_is_the_one_the_template_spec_waits_for asserts the same verbatim string in src/index.ts and in the template spec, so a reword reaching only one turns the suite's first test into a silent timeout. Mutation: rewording the log line reddens it
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-125` **Galata: panel per enabled provider** - HIGH; with all providers enabled and their CLIs stubbed present, the shell shows exactly one panel per provider, each with its own title
+  - evidence: ui-tests/tests/panels.spec.ts 'one panel per enabled provider whose binary is present', 'each panel carries its own provider title' and 'the server roster matches the stubbed binaries'
+  - test-tags: E2E
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panels.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-126` **Galata: live disable** - HIGH; toggling a provider off removes its panel within the test's timeout, leaving the others docked
+  - evidence: ui-tests/tests/panels.spec.ts 'disabling a provider removes its panel and leaves the others'
+  - test-tags: E2E
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panels.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-127` **Galata: live enable** - HIGH; toggling a provider back on re-docks exactly one panel, not two
+  - evidence: ui-tests/tests/panels.spec.ts 're-enabling a provider re-docks exactly one panel'
+  - test-tags: E2E
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panels.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-128` **Galata: CLI absent** - HIGH; a provider whose stub binary is removed from PATH renders no panel and raises no error dialog
+  - evidence: ui-tests/tests/panels.spec.ts 'a provider whose binary is absent renders no panel and no dialog'
+  - test-tags: E2E
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panels.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-129` **Galata: resume opens a terminal** - HIGH; clicking a seeded session row opens a terminal, proving the launch route end to end
+  - evidence: ui-tests/tests/resume.spec.ts opens a seeded row and ui-tests/tests/claude-regression.spec.ts 'new-session menu item opens a terminal in the current folder' and 'Open Branched Conversation lists branches and opening one launches a terminal' drive the launch route end to end
+  - test-tags: E2E
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test resume.spec.ts claude-regression.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-130` **Galata: Claude regression vs original** - HIGH; the original `jupyterlab_claude_code_extension` Galata suite, ported to the new panel's selectors, passes against the Claude provider as feature-parity evidence
+  - evidence: ui-tests/tests/claude-regression.spec.ts, the ported suite, seven tests: the activation message, the plus menu, the new-session item, the branched-conversation menu and listing, the popup's per-row Open button, and two branches as two independent terminals
+  - test-tags: E2E
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test claude-regression.spec.ts
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:43Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-131` **Galata: venv isolation** - HIGH; the Galata server runs from a dedicated venv containing only this extension; the standalone extensions are absent from it and the developer's live environment is never installed into, uninstalled from, or modified
+  - evidence: test_ui_test_harness.py test_the_server_runs_from_the_dedicated_venv asserts the webServer command puts ./.venv/bin ahead of PATH; the three retired standalone extensions are absent from that venv, which is what makes 'one panel per provider' an honest assertion and keeps the developer's environment untouched
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-132` **Adversarial review gate** - MEDIUM; `/devils-advocate:adversarial-review` runs clean with the architect and bug-hunter adversaries before release
+  - evidence: Ran 2026-09-19 over the rename change with four lenses - architect, ux-designer, bug-hunter, slop-hunter - across workflow runs wf_86d26bab-fea and wf_7200a178-7d8. Round 1 returned 15 findings with two MAJORs, both reproduced by hand and fixed; round 2 returned 5, none above MINOR, with an empty adjudicated plan, which is the clean confirming round. A process gate, so no test here can assert it
+  - test-tags: MANUAL
+  - test: run /devils-advocate:adversarial-review before a release and record the verdict
   - log: 2026-08-08T00:00:00Z @kj closed: clean verdicts from all three adversaries: architect SHIP (round 2), bug-hunter SHIP (round 3), ux-designer SHIP (round 4); 4 fix batches, DEF-10..29 registered and closed; evidence logs/adversarial/
   - log: 2026-08-09T00:00:00Z @kj re-run for the colour-override change (v1.0.0): round 1 architect/ux-designer/bug-hunter all DO-NOT-SHIP - guessed-conversation write-back, failed-write destroying the colour, one-way-door override, stale native-is-read-only artefacts; fixed and round 2 pinned re-confirm spawned
   - log: 2026-08-09T00:00:00Z @kj colour-override change, rounds 2 and 3 (v1.0.0): all three adversaries DO-NOT-SHIP both times, converging each round on one defect - the release keyed on the wrong conversation, then the release keyed on any stored colour and so un-inherited branches; both fixed, plus a 200 answered for a colour the server could not persist
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-133` **pytest: registry** - MEDIUM; every provider module in `providers/` is discovered, exposes a unique id and satisfies the descriptor contract
+  - evidence: test_registry.py thirteen cases: every module discovered, ids unique and url-safe, the descriptor contract per provider, capability flags backed by an implementation, discovery over a scratch package, a duplicate id refused, a broken module skipped, and the three contract violations refused
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_registry.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-134` **pytest: route gating** - MEDIUM; a disabled provider's routes return 404 `provider_disabled` and an absent CLI returns 503 `cli_not_found`
+  - evidence: test_routes.py over a live jupyter_server: test_disabled_provider_is_404, test_absent_cli_is_503, test_the_setting_is_reported_before_the_missing_binary for the order, and test_every_provider_route_is_gated over all eleven registered routes, with test_the_gate_list_covers_every_registered_route reading that list off setup_route_handlers so a new route cannot skip the sweep
+  - test-tags: FUNCTIONAL
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_routes.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-135` **pytest: store isolation** - MEDIUM; a provider handler given another provider's encoded path refuses rather than reading across stores
+  - evidence: test_store_isolation.py twelve cases: another provider's project key resolves to nothing, path traversal and a symlink out of the store are refused, and deleting through one store leaves the others untouched
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_store_isolation.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-136` **pytest: migration idempotence** - MEDIUM; running migration twice against the same fixture produces an identical result and no second write
+  - evidence: test_migrate.py test_running_twice_changes_nothing_and_writes_nothing asserts the second run is inert down to the writes, and test_a_value_set_here_is_never_clobbered holds the value the user has since set
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest -k "running_twice_changes_nothing or value_set_here_is_never_clobbered"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-137` **Jest: no assistant names in core** - MEDIUM; a source-reading test asserts `src/core/` contains no provider id outside comments
+  - evidence: core-neutrality.spec.ts scans src/core and src/index.ts, test_core_neutrality.py scans core/*.py; both derive the name list from the live registry rather than a frozen alternation, and both prove their own stripper keeps comments and docstrings legal. Mutation: a branch on a provider id added to core/routes.py reddens the Python scan at its real line number
+  - test-tags: UNIT
+  - test: jlpm jest src/__tests__/core-neutrality.spec.ts and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_core_neutrality.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-138` **Suite can fail** - HIGH; each tier is mutation-checked once: break the registry, the route gating and the toggle in turn, and confirm the guarding test goes red
+  - evidence: Done for every test written or relied on in the 2026-09-20 coverage campaign, one mutation per claim, restoring from a scratch copy rather than git checkout. The three tiers this criterion names: the registry, by removing the duplicate-id guard and by collapsing discovery; the route gating, by deleting the disabled and unknown branches of the shared resolve; the toggle, by making the enabled flag always true. Four mutations were silent and each exposed a weak assertion rather than a sound one - the disabled-panel case diffed live widgets and exhausted the heap, the roster case could not tell 'wrote nothing' from 'wrote null', the Gemini precedence case had both orders agreeing, and the store-redirect case matched a read rather than the assignment - all four were rewritten and then reddened
+  - test-tags: MANUAL
+  - test: sever the behaviour in a scratch copy, run the tier, confirm the named test reddens, restore from the copy
   - log: 2026-08-07T00:00:00Z @kj closed - mutation check performed by the unit-test agent: duplicate-id guard, route disabled-gate, enable toggle, barrel entry and core-neutrality each broken in turn, each guarding test went red, restoration verified byte-identical by diff (wf_a4376a8b-03e tests:unit result)
   - log: 2026-09-17T17:26:03Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-139` **No both-ends mocking** - HIGH; no Galata spec mocks both the panel and the server for the same assertion; the tier exists to catch packaging and integration breaks
+  - evidence: test_ui_test_harness.py test_no_galata_spec_answers_a_route_without_asking_the_server: a spec that writes a response must also call route.fetch(), so a fulfil from an invented body fails while route.continue and a fulfil edited from the real answer pass. test_the_galata_specs_do_drive_routes_so_the_rule_above_is_not_vacuous stops the rule holding over an empty set
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:04Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-140` **Edge: spawn error listener** - MEDIUM; any test spawning a shipped console script wires `child.on('error')`, so a missing binary reports as not-on-PATH rather than killing the worker
+  - evidence: test_ui_test_harness.py test_any_spawned_console_script_wires_an_error_listener walks src, ui-tests and scripts and fails any file that calls spawn without an error listener. No site exists today, so the test guards the next one
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:04Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-141` **Edge: snapshot updates** - LOW; visual baselines update through the `please update snapshots` PR comment workflow, never by hand-committed images
+  - evidence: test_ui_test_harness.py test_snapshot_baselines_update_through_the_pull_request_comment holds .github/workflows/update-integration-tests.yml to the issue_comment trigger and the 'please update snapshots' phrase
+  - test-tags: UNIT
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_ui_test_harness.py
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:04Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-142` **Galata: colour override and release** - MEDIUM; the colour specs drive the panel itself - right-click the row, assert `Reset Tab Colour` is hidden with no override and visible with one, click it and assert the store empties and the row returns to the assistant's colour; a route-only assertion does not count, since it passes on a path no user can walk
+  - evidence: ui-tests/tests/colour-override.spec.ts drives the panel itself, five cases: Reset Tab Colour is hidden with no override and visible with one, it hands the conversation back, it leaves an inherited tint alone, it names how many conversations it reaches, and it reaches a colour set on a branch; colour.spec.ts holds the single-request guarantee under it
+  - test-tags: UNIT, E2E
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test colour-override.spec.ts
   - log: 2026-08-09T00:00:00Z @kj added
   - log: 2026-08-09T00:00:00Z @kj closed - ui-tests/tests/colour-override.spec.ts drives the menu item; Galata 19/19 in ui-tests/.venv (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj extended - adversarial round 2: the seeded conversation now carries an assistant colour, so 'back to the assistant's' is a real tint rather than null-vs-null; the route-only precedence case was dropped as a pytest duplicate and a branch-conversation release case added, mutation-checked (v1.0.0)
   - log: 2026-08-09T00:00:00Z @kj extended - adversarial round 3: two cases added - an inherited tint is left alone by the release, and the item names its count when it reaches more than one conversation; the inheritance case is mutation-checked against keying on any stored colour (21/21, v1.0.0)
   - log: 2026-09-17T17:26:04Z @kj edited importance
+  - log: 2026-09-19T23:41:44Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-TEST-160` **Launcher tiles Galata** - MEDIUM; a Galata test proves tiles per enabled provider, removal on disable, absence of the section with all disabled, and section order - with screenshots
   - evidence: ui-tests/tests/launcher-tiles.spec.ts, seven tests, Galata 40/40 at v1.1.8 with screenshots under ui-tests/test-results/8931/screenshots/
   - test: ui-tests/tests/launcher-tiles.spec.ts
@@ -627,6 +1254,14 @@ All routes are namespaced by provider id under the extension base `jupyterlab-ai
 - `POST providers/<id>/colours` body `{session_id, colour, hand_set?}` -> the whole store; `colour` null drops the entry, `hand_set` false marks a fork's inherited tint; 400 `colour_invalid`, 500 `colour_store_unwritable`
 - `DELETE providers/<id>/colours` body `{session_ids}` -> the whole store; 500 `colour_store_unwritable`
 - `POST migrate` -> `{migrated: [{provider_id, keys, favourites}]}`; idempotent, safe to call repeatedly
+
+- [x] `ACC-API-176` **Rename route** - HIGH; POST providers/<id>/rename takes encoded_path, session_id and name and answers the stored name; 400 rename_unsupported where the descriptor declares none, 400 name_invalid on an empty or over-long name, 404 on a conversation the project does not hold
+  - evidence: RenameHandler in core/routes.py wired at providers/<id>/rename; 9 tests in test_routes.py cover rename_unsupported, the five name_invalid shapes, session_not_found, the stored-name answer and rename_failed
+  - test: POST the route for every provider and assert the status codes and the answered name
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-09-19T20:11:40Z @kj the handler validates against the descriptor first, then calls SessionStore.rename, which returns the stored name or None
+  - log: 2026-09-19T20:11:40Z @kj added
+  - log: 2026-09-19T20:30:47Z @kj closed
 
 ## Launcher `LNCH`
 
@@ -828,4 +1463,14 @@ New provider - no standalone extension to port from. DeepSeek Harness (`@deepsee
   - mechanism: 2026-09-17T17:26:34Z @kj IProviderDescriptor.sessionIdPrefix read by core/labels.ts shortSessionId
   - log: 2026-09-17T17:26:34Z @kj added
   - log: 2026-09-17T17:35:16Z @kj closed
+- [x] `ACC-DEEP-181` **Rename rewrites the session title event** - HIGH; renaming rewrites the newest session/title event of the conversation log; a log the harness has not titled yet carries no event to rewrite and the rename is refused rather than inventing a record shape, and the harness re-titles as the conversation grows, so the name holds until it does
+  - evidence: DeepSeekStore.rename rewrites the newest session/title event and keeps the harness two-frame layout; test_deepseek_rename_rewrites_the_newest_title_event and test_deepseek_rename_refuses_a_conversation_the_harness_never_titled
+  - related: ACC-SESS-174 - the capability this provider answers
+  - test: rename a DeepSeek conversation, then decode its log and assert the newest session/title event carries the new title
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-09-19T20:11:58Z @kj the same title-event rewrite the fork path already performs on the copied log
+  - log: 2026-09-19T20:11:58Z @kj added
+  - log: 2026-09-19T20:19:48Z @kj edited text
+  - log: 2026-09-19T20:19:48Z @kj the insert-a-title-event half was dropped: no DeepSeek log exists on this machine to confirm the event shape, so writing one would be a guess in the user data
+  - log: 2026-09-19T20:30:47Z @kj closed
 

@@ -207,6 +207,21 @@ for _i, _wide_id in enumerate(("wide-0", _BG_SESSION_ID)):
     _jsonl.write_text(json.dumps({"cwd": str(_wide_cwd)}) + "\n", encoding="utf-8")
     os.utime(_jsonl, (_now - 600 + _i, _now - 600 + _i))
 
+# A third Claude project, owned by the rename spec alone. Renaming mutates the
+# store for the rest of the run - the suite runs one worker against one server
+# - so the spec that does it gets a project no other spec looks at, rather than
+# leaving `branchy` under a name its own locators no longer match.
+#
+# Oldest mtimes of the three, for the reason the wide project has them: two
+# specs resolve their subject as "the first listed conversation".
+_rename_cwd = _root / "renamable"
+_rename_cwd.mkdir(parents=True, exist_ok=True)
+_rdir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(str(_rename_cwd))
+_rdir.mkdir(parents=True, exist_ok=True)
+_jsonl = _rdir / "rename-0.jsonl"
+_jsonl.write_text(json.dumps({"cwd": str(_rename_cwd)}) + "\n", encoding="utf-8")
+os.utime(_jsonl, (_now - 900, _now - 900))
+
 # One DeepSeek project with a titled conversation, so its panel has a row to
 # open. The harness keys the project directory by the cwd with its separators
 # collapsed to "-" (an ASCII path under the scratch root never reaches the

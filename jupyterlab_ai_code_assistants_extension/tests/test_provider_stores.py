@@ -9,6 +9,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
+import subprocess
 import time
 from datetime import datetime, timezone
 
@@ -526,6 +528,96 @@ def test_claude_launch_argv(claude):
     )
 
 
+def test_claude_a_background_agent_conversation_is_attached_not_resumed(
+    claude, monkeypatch
+):
+    """A live agent owns the conversation, and ``--resume`` on it is refused."""
+    store, _root = claude
+    session_id = new_uuid()
+    short = session_id[:8]
+    monkeypatch.setattr(claude_provider, "bg_agents", lambda _b=None: {session_id: short})
+
+    assert store.launch_argv("/bin/claude", session_id=session_id) == [
+        "/bin/claude",
+        "attach",
+        short,
+    ]
+
+
+def test_claude_an_attach_carries_no_mode_and_no_name(claude, monkeypatch):
+    """``claude attach`` answers an extra argument with a warning it prints
+    into the user's terminal, and the running agent already owns both."""
+    store, _root = claude
+    session_id = new_uuid()
+    short = session_id[:8]
+    monkeypatch.setattr(claude_provider, "bg_agents", lambda _b=None: {session_id: short})
+
+    argv = store.launch_argv(
+        "/bin/claude",
+        session_id=session_id,
+        mode="dangerouslySkipPermissions",
+        name="Renamed",
+    )
+    assert argv == ["/bin/claude", "attach", short]
+    assert "--dangerously-skip-permissions" not in argv
+    assert "-n" not in argv
+
+
+def test_claude_a_fork_of_an_agent_owned_conversation_still_forks(
+    claude, monkeypatch
+):
+    """Forking is Claude's own escape from an agent-owned conversation."""
+    store, _root = claude
+    session_id, fork_id = new_uuid(), new_uuid()
+    monkeypatch.setattr(
+        claude_provider, "bg_agents", lambda _b=None: {session_id: session_id[:8]}
+    )
+
+    argv = store.launch_argv(
+        "/bin/claude", session_id=session_id, fork_session_id=fork_id
+    )
+    assert "attach" not in argv
+    assert argv[:3] == ["/bin/claude", "--resume", session_id]
+    assert argv[3:] == ["--fork-session", "--session-id", fork_id]
+
+
+def test_claude_the_launch_verb_is_read_at_launch_time_not_carried_from_the_panel(
+    claude, monkeypatch
+):
+    """The same conversation id gets a different verb once the agent exits.
+
+    The panel polls every 30s, so a verb chosen in the browser can be wrong by
+    the time the launch lands; the decision therefore lives in the store and is
+    taken from a roster read at that moment (acc-crit "Launch verb resolved
+    server-side").
+    """
+    store, _root = claude
+    session_id = new_uuid()
+    short = session_id[:8]
+
+    live = {session_id: short}
+    monkeypatch.setattr(claude_provider, "bg_agents", lambda _b=None: live)
+    assert store.launch_argv("/bin/claude", session_id=session_id)[1] == "attach"
+
+    # The agent finished between one launch and the next; nothing about the
+    # request changed.
+    live.clear()
+    assert store.launch_argv("/bin/claude", session_id=session_id)[1] == "--resume"
+
+
+def test_claude_an_attach_cmdline_is_recognised_only_in_its_exact_shape(claude):
+    """``attach`` must be the first positional and the id must look like one,
+    so a prompt that merely contains the word is never mistaken for a client."""
+    parse = claude_provider._parse_attach_id
+    assert parse(cmdline("claude", "attach", "abcd1234")) == "abcd1234"
+    # A prompt carrying the word.
+    assert parse(cmdline("claude", "-p", "attach", "abcd1234")) is None
+    # An argument that is not id-shaped.
+    assert parse(cmdline("claude", "attach", "my notes")) is None
+    assert parse(cmdline("claude", "attach")) is None
+    assert parse(cmdline("claude")) is None
+
+
 def test_claude_parse_session_id_prefers_the_fork(claude):
     store, _root = claude
     parent, fork = new_uuid(), new_uuid()
@@ -613,6 +705,29 @@ def test_codex_husks_are_enumerable_but_never_current(codex):
     listing = store.list_branches(PROJECT_PATH)
     assert listing["current"] == real
     assert [b["session_id"] for b in listing["branches"]] == [husk]
+
+
+def test_codex_marks_only_the_projects_a_codex_process_is_running_in(
+    codex, monkeypatch
+):
+    """The activity dot answers "running right now", not "has a thread".
+
+    Codex keeps no per-pid session record, so the working directories of the
+    live ``codex`` processes are the whole signal (acc-crit "Live activity
+    indicator").
+    """
+    store, root = codex
+    write_codex_db(root, [{"id": new_uuid(), "preview": "hello"}])
+
+    monkeypatch.setattr(codex_provider, "live_cwds", lambda: set())
+    assert [row["live"] for row in store.list_sessions()] == [False]
+
+    monkeypatch.setattr(codex_provider, "live_cwds", lambda: {PROJECT_PATH})
+    assert [row["live"] for row in store.list_sessions()] == [True]
+
+    # A codex running somewhere else is not this project's activity.
+    monkeypatch.setattr(codex_provider, "live_cwds", lambda: {"/srv/other"})
+    assert [row["live"] for row in store.list_sessions()] == [False]
 
 
 def test_codex_falls_back_to_the_rollout_scan(codex):
@@ -851,6 +966,78 @@ def test_gemini_scans_the_registry_and_chat_files(gemini):
     # The first prompt is read for the BRANCH label, not put on the row - no
     # client reads it there.
     assert store.list_branches(GEMINI_SHORT_ID) is not None
+
+
+def test_gemini_a_project_in_both_the_registry_and_the_markers_yields_one_row(
+    gemini,
+):
+    """Migration listing, without duplicates.
+
+    While the CLI re-points a slug it drops the registry entry and re-claims the
+    slug from the ``.project_root`` markers, so for a moment a project owns a
+    directory the registry has forgotten. Both maps are read and both are keyed
+    by PROJECT ROOT, which is what makes a project present in both one row
+    rather than two (acc-crit "Edge: registry migration").
+    """
+    store, root = gemini
+    write_gemini_tree(root, GEMINI_SHORT_ID, [{"id": new_uuid()}])
+
+    # Present in the registry and in the marker, the ordinary steady state.
+    rows = store.list_sessions()
+    assert [row["encoded_path"] for row in rows] == [GEMINI_SHORT_ID]
+
+    # Mid-migration: the registry entry is gone, the marker still names the
+    # project. The row must survive rather than vanish from the panel.
+    (root / "projects.json").write_text(
+        json.dumps({"projects": {}}), encoding="utf-8"
+    )
+    rows = store.list_sessions()
+    assert [row["encoded_path"] for row in rows] == [GEMINI_SHORT_ID]
+
+
+def test_gemini_a_repointed_slug_is_listed_where_the_registry_says(gemini):
+    """The registry wins over a stale marker, and neither is listed twice.
+
+    The old slug is deliberately the one that sorts LAST, so it is the marker
+    map's surviving entry for this project: with the precedence reversed the
+    stale directory would be the row, which is what this asserts against. An
+    old slug sorting first would leave both orders agreeing and the assertion
+    unable to fail.
+    """
+    store, root = gemini
+    stale = "demo-9f9f"
+    current = "demo-4c5d"
+    write_gemini_tree(root, stale, [{"id": new_uuid()}])
+    # The second call re-points the registry at `current` and leaves the stale
+    # directory's `.project_root` marker naming the same project.
+    write_gemini_tree(root, current, [{"id": new_uuid()}])
+
+    rows = store.list_sessions()
+    assert [row["encoded_path"] for row in rows] == [current]
+
+
+def test_gemini_lists_without_the_cli(gemini, monkeypatch):
+    """A binary with no auth configured still fills the panel.
+
+    The listing is a disk scan of ``~/.gemini``; the auth error belongs inside
+    the launched terminal, not in an empty panel. Both ways of reaching the CLI
+    are made to fail loudly, so a listing that ever grows one reddens here
+    (acc-crit "Edge: unauthenticated CLI").
+    """
+    store, root = gemini
+    session = new_uuid()
+    write_gemini_tree(root, GEMINI_SHORT_ID, [{"id": session, "messages": 2}])
+
+    def _no_cli(*args, **kwargs):
+        raise AssertionError("the listing must not run the gemini CLI")
+
+    monkeypatch.setattr(subprocess, "run", _no_cli)
+    monkeypatch.setattr(subprocess, "check_output", _no_cli)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+    rows = store.list_sessions()
+    assert [row["session_id"] for row in rows] == [session]
+    assert store.list_branches(GEMINI_SHORT_ID)["total"] == 1
 
 
 def test_gemini_skips_subagent_transcripts(gemini):
@@ -1848,3 +2035,271 @@ def test_deepseek_owns_pid_needs_the_harness_in_the_argv(deepseek, monkeypatch):
     monkeypatch.setattr(deepseek_provider, "process_comm", lambda pid: "bash")
     assert not store.owns_pid(1)
 
+
+# --------------------------------------------------------------------- rename
+
+# The five answers together, because rename is the one behaviour whose whole
+# point is that each assistant keeps its name somewhere else - read side by
+# side, the section IS the divergence the capability flag declares.
+
+
+def test_claude_rename_appends_the_record_its_own_slash_command_writes(claude):
+    """The tail scan takes the LAST ``custom-title``, so a rename is one
+    appended line and the previous name stays in the file behind it."""
+    store, root = claude
+    session = new_uuid()
+    write_claude_tree(root, [{"id": session, "cwd": PROJECT_PATH, "title": "Old"}])
+    assert store.list_sessions()[0]["name"] == "Old"
+
+    assert store.rename(CLAUDE_ENCODED, session, "New") == "New"
+    jsonl = root / claude_provider.PROJECTS_DIRNAME / CLAUDE_ENCODED / f"{session}.jsonl"
+    titles = [
+        json.loads(line)["customTitle"]
+        for line in jsonl.read_text(encoding="utf-8").splitlines()
+        if line and json.loads(line).get("type") == "custom-title"
+    ]
+    assert titles == ["Old", "New"]
+    row = store.list_sessions()[0]
+    assert (row["name"], row["name_source"]) == ("New", "session")
+
+
+def test_claude_rename_does_not_fuse_onto_a_transcript_cut_mid_write(claude):
+    """A transcript whose last write was cut short has no trailing newline.
+    Appending straight onto it would fuse the two records and lose both."""
+    store, root = claude
+    session = new_uuid()
+    write_claude_tree(root, [{"id": session, "cwd": PROJECT_PATH, "title": "Old"}])
+    jsonl = root / claude_provider.PROJECTS_DIRNAME / CLAUDE_ENCODED / f"{session}.jsonl"
+    text = jsonl.read_text(encoding="utf-8")
+    assert text.endswith("\n")
+    jsonl.write_text(text.rstrip("\n"), encoding="utf-8")
+
+    assert store.rename(CLAUDE_ENCODED, session, "New") == "New"
+    lines = jsonl.read_text(encoding="utf-8").splitlines()
+    # Every line still parses, which is the whole assertion: a fused pair
+    # would raise here long before the name was read back.
+    assert all(json.loads(line) for line in lines if line)
+    assert store.list_sessions()[0]["name"] == "New"
+
+
+def test_claude_rename_refuses_a_conversation_the_project_does_not_hold(claude):
+    store, root = claude
+    session = new_uuid()
+    write_claude_tree(root, [{"id": session, "cwd": PROJECT_PATH, "title": "Old"}])
+    assert store.rename(CLAUDE_ENCODED, new_uuid(), "New") is None
+    assert store.rename("../escape", session, "New") is None
+    assert store.rename(CLAUDE_ENCODED, "../escape", "New") is None
+
+
+def test_codex_has_no_rename_at_all(codex):
+    """Codex's names live in a sqlite index this store opens read-only, and the
+    CLI exposes no rename subcommand - so the base class's refusal stands and
+    the descriptor says so, which is what hides the action."""
+    store, _root = codex
+    assert codex_provider.DESCRIPTOR.capabilities.can_rename is False
+    assert type(store).rename is store_module.SessionStore.rename
+
+
+def test_kimi_rename_writes_the_title_and_flags_it_custom(kimi):
+    """Without ``isCustomTitle`` the store reads the name straight back as
+    auto-derived and shows the folder basename instead - so the flag is the
+    half that makes the rename visible at all."""
+    store, root = kimi
+    session = f"session_{new_uuid()}"
+    write_kimi_tree(root, KIMI_WD, [{"id": session, "title": "Auto", "messages": 1}])
+    state_file = root / "sessions" / KIMI_WD / session / "state.json"
+    before = json.loads(state_file.read_text(encoding="utf-8"))
+    before["isCustomTitle"] = False
+    state_file.write_text(json.dumps(before, indent=2) + "\n", encoding="utf-8")
+    assert store.list_sessions()[0]["name_source"] == "basename"
+
+    assert store.rename(KIMI_WD, session, "New") == "New"
+    after = json.loads(state_file.read_text(encoding="utf-8"))
+    assert (after["title"], after["isCustomTitle"]) == ("New", True)
+    # Everything else the CLI put there is still there.
+    assert after["workDir"] == before["workDir"]
+    row = store.list_sessions()[0]
+    assert (row["name"], row["name_source"]) == ("New", "session")
+    assert store.rename(KIMI_WD, "session_not-a-uuid", "New") is None
+    assert store.rename(KIMI_WD, f"session_{new_uuid()}", "New") is None
+
+
+def test_gemini_rename_stamps_every_metadata_record(gemini):
+    """The summary is re-sent in ``$set`` updates as a conversation grows, so a
+    head-only stamp would be undone by the next line down the file."""
+    store, root = gemini
+    session = new_uuid()
+    chats = write_gemini_tree(
+        root, GEMINI_SHORT_ID, [{"id": session, "summary": "Old", "messages": 2}]
+    )
+    chat = next(chats.iterdir())
+    with chat.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"$set": {"sessionId": session, "summary": "Old"}}) + "\n")
+
+    assert store.rename(GEMINI_SHORT_ID, session, "New") == "New"
+    records = [
+        json.loads(line)
+        for line in chat.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    summaries = [
+        (r.get("$set") or r)["summary"] for r in records if "summary" in (r.get("$set") or r)
+    ]
+    assert summaries == ["New", "New"]
+    # The conversation is the same one, under the same id and start time.
+    ids = {(r.get("$set") or r)["sessionId"] for r in records if "sessionId" in (r.get("$set") or r)}
+    assert ids == {session}
+    assert store.list_sessions()[0]["name"] == "New"
+    assert store.rename(GEMINI_SHORT_ID, new_uuid(), "New") is None
+
+
+def test_gemini_rename_leaves_the_file_alone_when_the_rewrite_fails(
+    gemini, monkeypatch
+):
+    """Written through a neighbouring file and renamed into place, so a failed
+    write cannot leave a conversation truncated mid-record."""
+    store, root = gemini
+    session = new_uuid()
+    chats = write_gemini_tree(
+        root, GEMINI_SHORT_ID, [{"id": session, "summary": "Old", "messages": 2}]
+    )
+    chat = next(chats.iterdir())
+    before = chat.read_bytes()
+
+    # A lone surrogate cannot be encoded back out, which is the one failure
+    # that lands mid-write rather than before it.
+    monkeypatch.setattr(gemini_provider, "stamp_summary", lambda *_a: "\ud800")
+    assert store.rename(GEMINI_SHORT_ID, session, "New") is None
+    assert chat.read_bytes() == before
+    assert not any(p.name.endswith(".rename") for p in chats.iterdir())
+
+
+def test_deepseek_rename_rewrites_the_newest_title_event(deepseek):
+    store, root = deepseek
+    session = _dsh_id()
+    project = write_deepseek_tree(
+        root, [{"id": session, "title": "Old", "messages": 2}]
+    )
+    log = next((project / session).iterdir())
+
+    assert store.rename(DEEPSEEK_ENCODED, session, "New") == "New"
+    lines = deepseek_provider.read_log(log).rstrip("\n").split("\n")
+    titles = [
+        json.loads(line)["data"]["title"]
+        for line in lines
+        if line.startswith('{"type":"session/title"')
+    ]
+    assert titles == ["New"]
+    # Still the harness's own two-frame layout, and still the same conversation.
+    first = zstandard.ZstdDecompressor().decompressobj().decompress(log.read_bytes())
+    assert first == (lines[0] + "\n").encode()
+    assert json.loads(lines[0])["id"] == session
+    assert sum(line.startswith('{"type":"user/message"') for line in lines) == 1
+    assert store.list_sessions()[0]["name"] == "New"
+
+
+def test_deepseek_rename_refuses_a_conversation_the_harness_never_titled(deepseek):
+    """The harness records a title only as an event, and this store writes no
+    events of its own - so an untitled log offers nothing to rewrite and the
+    refusal is reported rather than a record shape being invented."""
+    store, root = deepseek
+    session = _dsh_id()
+    project = write_deepseek_tree(root, [{"id": session, "messages": 2}])
+    log = next((project / session).iterdir())
+    before = log.read_bytes()
+
+    assert store.rename(DEEPSEEK_ENCODED, session, "New") is None
+    assert log.read_bytes() == before
+    assert store.rename(DEEPSEEK_ENCODED, _dsh_id(), "New") is None
+
+
+# A rename is not activity. Every store writes the file that carries recency,
+# so each one has to put the mtime back - and for the two whose parse is
+# memoised on (mtime, size), putting it back is what makes the eviction
+# necessary: a name swapped for one of equal length leaves both halves of the
+# key identical and the cache would go on serving the old name.
+
+
+def test_claude_rename_keeps_the_switch_stamp(claude):
+    """The stamp is what makes the panel, not recency, decide what `claude -c`
+    resumes. An append writes an mtime of now, which spends it - after which a
+    sibling's next turn takes the conversation the terminal will open."""
+    store, root = claude
+    chosen, sibling = new_uuid(), new_uuid()
+    write_claude_tree(
+        root,
+        [
+            {"id": chosen, "cwd": PROJECT_PATH},
+            {"id": sibling, "cwd": PROJECT_PATH},
+        ],
+    )
+    project_dir = root / claude_provider.PROJECTS_DIRNAME / CLAUDE_ENCODED
+    jsonl = project_dir / f"{chosen}.jsonl"
+    store.switch(CLAUDE_ENCODED, chosen)
+    lead = jsonl.stat().st_mtime - time.time()
+    assert lead > claude_provider.SWITCH_MTIME_LEAD_S - 60
+
+    assert store.rename(CLAUDE_ENCODED, chosen, "New name") == "New name"
+    assert jsonl.stat().st_mtime - time.time() > claude_provider.SWITCH_MTIME_LEAD_S - 60
+    # Which is the whole point: the sibling's next turn still loses to it.
+    touch(project_dir / f"{sibling}.jsonl", 0)
+    newest = max(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    assert newest.stem == chosen
+
+
+def test_kimi_rename_is_not_activity(kimi):
+    store, root = kimi
+    session = f"session_{new_uuid()}"
+    write_kimi_tree(root, KIMI_WD, [{"id": session, "title": "Old", "messages": 1}])
+    state_file = root / "sessions" / KIMI_WD / session / "state.json"
+    touch(state_file, -7200)
+    before = store.list_sessions()[0]["file_mtime"]
+
+    assert store.rename(KIMI_WD, session, "New") == "New"
+    row = store.list_sessions()[0]
+    assert row["file_mtime"] == before
+    assert row["name"] == "New"
+
+
+def test_gemini_rename_is_not_activity_and_still_shows_the_new_name(gemini):
+    """`Old` and `New` are the same length on purpose: with the mtime restored
+    the memo's key is byte-identical to the pre-rename one, so only the
+    eviction can make the new summary visible."""
+    store, root = gemini
+    session = new_uuid()
+    chats = write_gemini_tree(
+        root, GEMINI_SHORT_ID, [{"id": session, "summary": "Old", "messages": 2}]
+    )
+    chat = next(chats.iterdir())
+    touch(chat, -7200)
+    before = store.list_sessions()[0]
+    assert before["name"] == "Old"
+    size_before = chat.stat().st_size
+
+    assert store.rename(GEMINI_SHORT_ID, session, "New") == "New"
+    assert chat.stat().st_size == size_before
+    row = store.list_sessions()[0]
+    assert row["file_mtime"] == before["file_mtime"]
+    assert row["name"] == "New"
+
+
+def test_deepseek_rename_is_not_activity_and_still_shows_the_new_name(deepseek):
+    """Same equal-length pair, same reason - see the Gemini case above, and on
+    a ``compression: 'none'`` root, which is where the sizes really do match:
+    re-compressing the same line count moved this log by three bytes, so a
+    Zstandard fixture would have let the eviction be removed with every test
+    still green."""
+    store, root = deepseek
+    session = _dsh_id()
+    project = write_deepseek_tree(
+        root, [{"id": session, "title": "Old", "messages": 2}], compressed=False
+    )
+    log = next((project / session).iterdir())
+    touch(log, -7200)
+    before = store.list_sessions()[0]
+    assert before["name"] == "Old"
+
+    assert store.rename(DEEPSEEK_ENCODED, session, "New") == "New"
+    row = store.list_sessions()[0]
+    assert row["file_mtime"] == before["file_mtime"]
+    assert row["name"] == "New"

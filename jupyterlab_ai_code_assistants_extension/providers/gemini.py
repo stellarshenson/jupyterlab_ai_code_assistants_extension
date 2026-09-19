@@ -45,6 +45,7 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -335,34 +336,18 @@ def parse_session_file(cmdline: bytes) -> str | None:
     return flag_value(cmdline_args(cmdline), "--session-file")
 
 
-def stamp_fork(text: str, new_id: str, name: str) -> str | None:
-    """Rewrite a chat file's content as a fork: fresh id, fresh timestamps, name.
+def _restamp(text: str, stamp: Callable[[dict], bool]) -> str | None:
+    """Apply ``stamp`` to every metadata record of a chat file, both shapes.
 
-    Both file shapes go through here. Every metadata record is re-stamped, not
-    only the first: the id, the timestamps and the summary are all re-sent in
-    ``$set`` updates as a conversation grows, so stamping the head alone would
-    leave a later line restoring the parent's id. Message records are copied
-    through untouched - they are the conversation being branched.
+    A chat file is either one JSON object or one record per line, and the
+    metadata is re-sent in ``$set`` updates as a conversation grows - so
+    stamping the head record alone would leave a later line restoring what was
+    just changed. ``stamp`` mutates one record in place and answers whether it
+    carried the conversation id; message records are copied through untouched.
 
-    None when no metadata record carried an id, which means the file is not a
-    conversation and must not be forked into one.
+    None when no record carried an id, which means the file is not a
+    conversation and must not be rewritten as one.
     """
-    now = now_iso_z()
-
-    def stamp(record: dict) -> bool:
-        update = record.get("$set")
-        payload = update if isinstance(update, dict) else record
-        carries_id = "sessionId" in payload
-        if carries_id:
-            payload["sessionId"] = new_id
-        if "startTime" in payload:
-            payload["startTime"] = now
-        if "lastUpdated" in payload:
-            payload["lastUpdated"] = now
-        if carries_id or "summary" in payload:
-            payload["summary"] = name
-        return carries_id
-
     try:
         parsed = json.loads(text)
     except ValueError:
@@ -393,6 +378,50 @@ def stamp_fork(text: str, new_id: str, name: str) -> str | None:
     if not stamped:
         return None
     return "\n".join(lines) + "\n"
+
+
+def stamp_fork(text: str, new_id: str, name: str) -> str | None:
+    """Rewrite a chat file's content as a fork: fresh id, fresh timestamps, name.
+
+    None when no metadata record carried an id, which means the file is not a
+    conversation and must not be forked into one.
+    """
+    now = now_iso_z()
+
+    def stamp(record: dict) -> bool:
+        update = record.get("$set")
+        payload = update if isinstance(update, dict) else record
+        carries_id = "sessionId" in payload
+        if carries_id:
+            payload["sessionId"] = new_id
+        if "startTime" in payload:
+            payload["startTime"] = now
+        if "lastUpdated" in payload:
+            payload["lastUpdated"] = now
+        if carries_id or "summary" in payload:
+            payload["summary"] = name
+        return carries_id
+
+    return _restamp(text, stamp)
+
+
+def stamp_summary(text: str, name: str) -> str | None:
+    """Rewrite a chat file's content under a new summary, changing nothing else.
+
+    The id and the timestamps are left exactly as they are: this is the same
+    conversation, newly named, and restamping its start time would move it in
+    a listing the CLI sorts by that field.
+    """
+
+    def stamp(record: dict) -> bool:
+        update = record.get("$set")
+        payload = update if isinstance(update, dict) else record
+        carries_id = "sessionId" in payload
+        if carries_id or "summary" in payload:
+            payload["summary"] = name
+        return carries_id
+
+    return _restamp(text, stamp)
 
 
 class GeminiStore(SessionStore):
@@ -773,6 +802,64 @@ class GeminiStore(SessionStore):
             return None
         return new_id
 
+    def rename(self, encoded_path: str, session_id: str, name: str) -> str | None:
+        """Set ``summary`` on every metadata record of the conversation's file.
+
+        ``summary`` is the CLI's own display name for a conversation, so this
+        is the field both surfaces read - and it is re-sent in ``$set`` updates
+        as the conversation grows, which is why every record is stamped and not
+        just the head (the same reason the fork path stamps them all).
+
+        The file is rewritten whole through a neighbouring temporary file and
+        renamed into place, so a failed write leaves the conversation exactly
+        as it was rather than truncated mid-record. Its mtime is put back,
+        because a rename is not activity and this file's mtime IS the row's
+        last-activity time.
+
+        Gemini re-summarises a conversation as it grows, so this name holds
+        until the CLI writes its own over it. That is the assistant's
+        behaviour, not a gap here: writing the name anywhere else would give
+        the panel a name the CLI never shows.
+        """
+        if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
+            return None
+        chats_dir = self._chats_dir(encoded_path)
+        if chats_dir is None:
+            return None
+        src = self._find_chat(chats_dir, session_id)
+        if src is None:
+            return None
+        try:
+            before = src.stat()
+        except OSError as err:
+            _log.warning("gemini could not rename %s: %s", session_id, err)
+            return None
+        tmp = src.with_name(f"{src.name}.rename")
+        try:
+            content = stamp_summary(
+                src.read_text(encoding="utf-8", errors="replace"), name
+            )
+            if content is None:
+                return None
+            with tmp.open("w", encoding="utf-8") as fh:
+                fh.write(content)
+            # On the temporary file, before it becomes the conversation: a
+            # failed utime leaves the original exactly as it was.
+            os.utime(tmp, (before.st_atime, before.st_mtime))
+            os.replace(tmp, src)
+            # The restored mtime is what makes this necessary: with the size
+            # unchanged too, the memo's key is the pre-rename key and it would
+            # go on serving the old summary.
+            _meta_memo.drop(src)
+        except (OSError, UnicodeEncodeError) as err:
+            _log.warning("gemini could not rename %s: %s", session_id, err)
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            return None
+        return name
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -895,6 +982,9 @@ DESCRIPTOR = ProviderDescriptor(
         colour_source="none",
         # One approval switch, like every other provider.
         launch_modes=(YOLO_MODE,),
+        # A name is ``summary`` in the chat file, the CLI's own display name
+        # for a conversation.
+        can_rename=True,
     ),
     # No standalone extension preceded this provider, so there is no state to
     # carry over.

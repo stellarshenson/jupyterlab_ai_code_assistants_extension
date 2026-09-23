@@ -4,6 +4,16 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.31] - 2026-09-23
+
+### Changed
+
+- The favourite star on a session row sits beside the time-ago label, 6px from it on every row; on a short label such as "now" it stood 32px away. Its left edge now follows the label rather than forming a straight column
+
+### Fixed
+
+- The "11mo ago" label overflowed its fixed-width box and ended 5.8px right of every other label; the label now sizes to its own text, so every label ends on the same line
+
 ## [1.2.30] - 2026-09-20
 
 ### Added

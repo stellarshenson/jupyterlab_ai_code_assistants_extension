@@ -956,17 +956,20 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotGlyph {
   color: var(--jp-layout-color1);
 }
 
-/* Last-activity time on session rows - dim, fixed-width right-aligned column so
-   values line up across rows; the star column sits before it. */
+/* Last-activity time on session rows - dim, and ending on the same vertical
+   line down the whole panel because it is the last item on a row whose name
+   takes all the slack.
+   The label sizes to its own text. A fixed 4.5em box held the difference
+   between the label and the widest one ("11mo ago") open as empty space on its
+   LEFT, which is where the favourite star sits, so the star stood 32px from a
+   short label such as "now" and 6px from the longest - measured on the row
+   markup against this stylesheet, 2026-09-23. Sizing to the text puts the star
+   the row's own 6px gap from every label, and removes the one case the fixed
+   box still got wrong: a label wider than the box overflowed it and broke the
+   alignment the box was there to keep. Tabular figures keep the digits an even
+   width, as the branch popup's twin already does. */
 .jp-AiAssistantsPanel-rowTime {
   flex: 0 0 auto;
-
-  /* 4.5em, not 4em: the longest label this column draws ("11mo ago") measures
-     47.4px against a 43.3px box, so the one column promised as fixed-width
-     right-aligned went ragged on exactly the oldest rows. Tabular figures keep
-     the digits aligned down the column, as the branch popup's twin already
-     does. */
-  width: 4.5em;
   white-space: nowrap;
   text-align: right;
   color: var(--jp-ui-font-color2);

@@ -416,6 +416,24 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - log: 2026-08-12T00:00:00Z @kj closed: closed - setModes re-titles only; glyph constant, Galata-verified (v1.0.22)
   - log: 2026-09-17T17:25:58Z @kj edited importance
   - log: 2026-09-19T23:37:36Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-PANE-182` **Favourite star column** - MEDIUM; outside Favorites a favourite row shows a star directly before its time label; every time box is at least 4.5em wide, so the stars of rows whose label fits in 4.5em form one straight column; a wider label grows its box leftward, stays aligned with the other labels, and moves its row's star left by the excess
+  - evidence: panel-layout.spec.ts ACC-PANE-182, clock fixed at the newest mtime plus 5s: each time box equals max(4.5em, label), star 0-7px before it, one right edge; Galata 49 at 1.2.33. Mutations: min-width 0, star order after time and fixed width 4.5em each redden it
+  - related: DEF-PANE-264
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panel-layout -g ACC-PANE-182
+  - test-tags: E2E
+  - mechanism: 2026-09-24T23:39:52Z @kj rowTime has min-width 4.5em, not a fixed width; the star is the flex item before it
+  - log: 2026-09-24T23:39:52Z @kj added
+  - log: 2026-09-25T01:32:18Z @kj amended text "outside Favorites a favourite row shows a star directly before its time label; every time box is at least 4.5em wide, so the stars form one straight column; a label wider than 4.5em grows its own box leftward and stays aligned with the other labels" -> "outside Favorites a favourite row shows a star directly before its time label; every time box is at least 4.5em wide, so the stars form one straight column; a wider label grows its box leftward, stays aligned with the other labels, and moves its row's star left by the excess"
+  - log: 2026-09-25T01:41:40Z @kj amended text "outside Favorites a favourite row shows a star directly before its time label; every time box is at least 4.5em wide, so the stars form one straight column; a wider label grows its box leftward, stays aligned with the other labels, and moves its row's star left by the excess" -> "outside Favorites a favourite row shows a star directly before its time label; every time box is at least 4.5em wide, so the stars of rows whose label fits in 4.5em form one straight column; a wider label grows its box leftward, stays aligned with the other labels, and moves its row's star left by the excess"; reason: states both the fitting-label and the wider-label case, as round 2 of the adversarial review required
+  - log: 2026-09-25T01:51:38Z @kj closed
+- [x] `ACC-PANE-183` **Panel inset** - MEDIUM; panel content stands 4px from the panel border on both sides: title, header buttons, search field, error line, section headers and rows; the caret column and the status-dot column share that left edge; the time column ends 4px short of the list's content edge, before its reserved scrollbar gutter
+  - evidence: panel-layout.spec.ts ACC-PANE-183: title, last header button, search field, caret and every dot box 4px from the panel edge, every time box 4px short of the list content edge; Galata 49 at 1.2.33. Mutations: --aica-inset 8px and row padding 8px each redden it
+  - related: DEF-PANE-263
+  - test: cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test panel-layout -g ACC-PANE-183
+  - test-tags: E2E
+  - mechanism: 2026-09-24T23:39:52Z @kj one --aica-inset on .jp-AiAssistantsPanel, read by header, searchWrap, error, sectionHeader and row
+  - log: 2026-09-24T23:39:52Z @kj added
+  - log: 2026-09-25T01:51:38Z @kj closed
 
 ## Sessions `SESS`
 

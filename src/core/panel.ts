@@ -1927,10 +1927,8 @@ export class AssistantSessionsPanel extends Widget {
     }
 
     // No star in the Favorites section - every row there is one by definition.
-    // The star sits before the time label and beside it: the label sizes to its
-    // own text, so the distance between the two is the row's gap on every row
-    // rather than however much shorter than "11mo ago" this label happens to
-    // be.
+    // The star sits before the time so the minimum-width time column stays the
+    // rightmost alignment anchor across all rows.
     if (session.favourite && sectionKey !== 'favourites') {
       // A marker, not a control. It carried a `title` that made it read as
       // one while a click fell through to the row and launched a terminal;
@@ -1944,8 +1942,8 @@ export class AssistantSessionsPanel extends Widget {
       row.appendChild(star);
     }
 
-    // Always present, empty when the session carries no mtime, so every row
-    // has the same elements in the same order whatever the data holds.
+    // Always present (empty without an mtime) so the star column keeps the
+    // same anchor across every row in the panel.
     const time = document.createElement('span');
     time.className = 'jp-AiAssistantsPanel-rowTime';
     time.textContent = session.file_mtime

@@ -7,7 +7,7 @@ You may install it from [nodejs.org](https://nodejs.org/en/download). We
 recommend using the latest LTS version of Node.js.
 
 The project `Makefile` owns the build lifecycle: it cleans, builds the
-wheel and installs it, and bumps the patch version on every build. Do not run
+wheel and installs it, and bumps the patch version on every `make install`. Do not run
 `pip`, `jlpm build`, `jupyter-builder` or `npm` by hand.
 
 ```bash

@@ -13,6 +13,14 @@
      on purpose - the partial row is the scroll-continuation cue. */
   --aica-row-height: 24px;
 
+  /* Single source for the gap between the panel border and its content, on
+     both sides: the header, search field, error line, section headers and rows
+     all read it, so the title, the search field, the caret column and the
+     status-dot column keep one left edge. 4px, not 8px: the lists reserve a
+     scrollbar gutter as well, so 8px put the time column 23px from the right
+     border where the file browser's sits 12px from it. */
+  --aica-inset: 4px;
+
   display: flex;
   flex-direction: column;
   position: relative;
@@ -27,7 +35,7 @@
 .jp-AiAssistantsPanel-header {
   display: flex;
   align-items: center;
-  padding: 4px 8px;
+  padding: 4px var(--aica-inset);
   border-bottom: 1px solid var(--jp-border-color2);
   background: var(--jp-layout-color2);
   flex: 0 0 auto;
@@ -87,7 +95,7 @@
   flex: 0 0 auto;
   display: flex;
   position: relative;
-  margin: 4px 8px;
+  margin: 4px var(--aica-inset);
 }
 
 /* `display: flex` above would beat the user-agent `[hidden] { display: none }`,
@@ -169,7 +177,7 @@
    server must leave the other panels alone. */
 .jp-AiAssistantsPanel-error {
   flex: 0 0 auto;
-  margin: 4px 8px;
+  margin: 4px var(--aica-inset);
   padding: 4px 6px;
   border-radius: 2px;
 
@@ -246,7 +254,7 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 4px 8px;
+  padding: 4px var(--aica-inset);
   background: var(--jp-layout-color2);
   border: none;
   cursor: pointer;
@@ -305,7 +313,7 @@
 .jp-AiAssistantsPanel-row {
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 var(--aica-inset);
   height: var(--aica-row-height);
   line-height: var(--aica-row-height);
   cursor: pointer;
@@ -956,20 +964,21 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotGlyph {
   color: var(--jp-layout-color1);
 }
 
-/* Last-activity time on session rows - dim, and ending on the same vertical
-   line down the whole panel because it is the last item on a row whose name
-   takes all the slack.
-   The label sizes to its own text. A fixed 4.5em box held the difference
-   between the label and the widest one ("11mo ago") open as empty space on its
-   LEFT, which is where the favourite star sits, so the star stood 32px from a
-   short label such as "now" and 6px from the longest - measured on the row
-   markup against this stylesheet, 2026-09-23. Sizing to the text puts the star
-   the row's own 6px gap from every label, and removes the one case the fixed
-   box still got wrong: a label wider than the box overflowed it and broke the
-   alignment the box was there to keep. Tabular figures keep the digits an even
-   width, as the branch popup's twin already does. */
+/* Last-activity time on session rows - dim, minimum-width right-aligned column so
+   values line up across rows; the star column sits before it. */
 .jp-AiAssistantsPanel-rowTime {
   flex: 0 0 auto;
+
+  /* 4.5em, not 4em: the longest label this column draws ("11mo ago") measures
+     47.4px against a 43.3px box, so the one column promised as fixed-width
+     right-aligned went ragged on exactly the oldest rows. A minimum, not a
+     width: where system-ui is a wider face - DejaVu Sans on a stock Linux
+     desktop, 54.5px for the same label - a fixed box let the label spill 5.8px
+     past the column's right edge; a minimum grows that one box leftward
+     instead, so the labels stay aligned and only that row's star moves.
+     Tabular figures keep the digits aligned down the column, as the branch
+     popup's twin already does. */
+  min-width: 4.5em;
   white-space: nowrap;
   text-align: right;
   color: var(--jp-ui-font-color2);

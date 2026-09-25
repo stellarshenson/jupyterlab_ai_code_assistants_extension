@@ -4,7 +4,7 @@ The extension can be published to `PyPI` and `npm` through the project `Makefile
 
 ## Local release
 
-`make publish` builds, bumps the patch version, publishes to npm and PyPI and commits the version metadata. It runs only on an explicit request; never bump the version or run `twine`, `npm publish` or `hatch version` by hand.
+`make publish` runs the tests, bumps the patch version, builds, commits and pushes the version metadata, and only then publishes to npm and PyPI. It runs only on an explicit request; never bump the version or run `twine`, `npm publish` or `hatch version` by hand.
 
 ## Automated releases with the Jupyter Releaser
 

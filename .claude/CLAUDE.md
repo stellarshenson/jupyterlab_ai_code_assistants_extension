@@ -83,6 +83,6 @@ All three share the same shape - `icons.ts` / `index.ts` / `request.ts` / `types
 
 ## Strengthened Rules
 
-- **Version bumps are the Makefile's job** - `make build` runs `increment_version`; never hand-edit the version in `package.json`
+- **Version bumps are the Makefile's job** - `make install` runs `increment_version` (Makefile 1.42; `make build` alone does not); never hand-edit the version in `package.json`
 - **Surgical changes** - this extension absorbs three working extensions; when porting behaviour, copy the mechanism, not the whole file, and keep each assistant's panel isolated behind its settings toggle
 - **UI claims need verification** - never state that a panel, menu, or icon renders correctly without a Playwright screenshot from a running JupyterLab

@@ -892,6 +892,30 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-09-19T21:14:51Z @kj the field is seeded only from the conversation own name, deliberately, so that Ok cannot silently name a conversation after its directory; the placeholder was kept with the compensating warning
   - log: 2026-09-19T21:14:51Z @kj added
   - log: 2026-09-19T21:14:59Z @kj closed
+- [x] `DEF-PANE-263` **Panel inset wider than the file browser's** - MINOR; every panel-edge inset was 8px and each list adds a 15px scrollbar gutter, so the time column ended 23px from the right border and names started 22px from the left; the file browser's rows use 12px and no gutter; reported by the Star Colonel 2026-09-25 with two screenshots
+  - evidence: fixed: one --aica-inset 4px on .jp-AiAssistantsPanel for header, searchWrap, error, sectionHeader and row; names 18px from the left border (was 22px), time column 19px from the right (was 23px); ACC-PANE-183 Galata green at 1.2.33
+  - repro: open a panel on a platform with classic scrollbars; measure the time column's right edge against the panel border
+  - root-cause: 2026-09-24T23:40:04Z @kj 8px inset repeated at header, searchWrap, error, sectionHeader and row, on top of scrollbar-gutter: stable on every list
+  - log: 2026-09-24T23:40:04Z @kj added
+  - log: 2026-09-25T01:51:37Z @kj closed
+- [x] `DEF-PANE-264` **Time labels spill past the time column in DejaVu Sans** - MINOR; rowTime was a fixed 4.5em box; a label wider than it ends past the other labels' right edge: 14m ago measured 50px against 48.73px in this machine's Galata browser, and 11mo ago 54.5px against 48.75px in headless Chromium with DejaVu Sans
+  - evidence: fixed: .jp-AiAssistantsPanel-rowTime min-width 4.5em, not width; ACC-PANE-182 asserts each time box equals max(4.5em, label); the fixed-width mutant reddens it (14m ago 50px against 48.73px); Galata 49 at 1.2.33
+  - repro: headless Chromium on this machine; a row idle 11 months; compare its time text right edge with the other rows
+  - root-cause: 2026-09-24T23:40:04Z @kj the 4.5em width was sized from a 47.4px measurement in a narrower face
+  - log: 2026-09-24T23:40:04Z @kj added
+  - log: 2026-09-24T23:56:23Z @kj amended title "11mo ago spills past the time column in DejaVu Sans" -> "Time labels spill past the time column in DejaVu Sans"; text "rowTime was a fixed 4.5em box; where system-ui resolves to DejaVu Sans, as on a stock Linux desktop and in this machine's Galata browser, 11mo ago measures 54.5px against 48.75px and ends 5.8px right of the other labels" -> "rowTime was a fixed 4.5em box; where system-ui resolves to DejaVu Sans, as on a stock Linux desktop and in this machine's Galata browser, 15m ago is 50px against a 48.73px box and 11mo ago 54.5px, so those labels end past the other labels' right edge"
+  - log: 2026-09-25T01:32:01Z @kj amended text "rowTime was a fixed 4.5em box; where system-ui resolves to DejaVu Sans, as on a stock Linux desktop and in this machine's Galata browser, 15m ago is 50px against a 48.73px box and 11mo ago 54.5px, so those labels end past the other labels' right edge" -> "rowTime was a fixed 4.5em box; a label wider than it ends past the other labels' right edge: 14m ago measured 50px against 48.73px in this machine's Galata browser, and 11mo ago 54.5px against 48.75px in headless Chromium with DejaVu Sans"
+  - log: 2026-09-25T01:51:37Z @kj closed
+- [x] `DEF-PANE-266` **Star left of the column on rows labelled 11mo or 12mo ago in DejaVu Sans** - MINOR; 11mo ago and 12mo ago measure 54.5px against the 48.75px minimum, so their box grows leftward and the star sits 5.8px left of the other stars
+  - evidence: wontfix: MINOR logged not fixed; 5.1em would take about 6.5px of name width from every row in every face for rows idle 11-12 months in one font; round-1 adversarial review
+  - repro: headless Chromium with DejaVu Sans; a favourite idle 11 months beside a favourite idle 5 minutes
+  - log: 2026-09-25T01:51:23Z @kj added
+  - log: 2026-09-25T01:51:37Z @kj closed
+- [x] `DEF-PANE-268` **Light-theme live-dot glow clipped at the 4px inset** - MINOR; the light theme draws a 2px drop-shadow glow round the live dot; at a 4px inset its left edge reaches the panel border and ends flat, about one faint pixel wide at 1x; the green dot itself is not clipped
+  - evidence: wontfix: MINOR logged not fixed; cosmetic, and any local fix separates the dot from the caret edge ACC-PANE-183 requires; round-1 adversarial review
+  - repro: light theme, a row with a live session, zoom into the dot's left edge
+  - log: 2026-09-25T01:51:23Z @kj added
+  - log: 2026-09-25T01:51:37Z @kj closed
 
 ## Colour store `COLO`
 
@@ -1409,3 +1433,29 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - log: 2026-09-19T23:45:22Z @kj added
   - log: 2026-09-19T23:45:29Z @kj closed
   - log: 2026-09-19T23:45:29Z @kj edited test-tags (added)
+- [x] `DEF-GUARD-265` **Release auth gate checked the installed wheel, not the source** - MAJOR; Makefile 1.41 and 1.42 run test before install in publish, and python .github/scripts/check_auth.py puts only .github/scripts on sys.path, so the gate imported the wheel the last make install left in site-packages; a new handler missing @tornado.web.authenticated would ship unchecked
+  - evidence: fixed: Makefile 1.43 (canonical and project) runs PYTHONPATH=$(CURDIR) python .github/scripts/check_auth.py; the import resolves to the source tree; make test exit 0 at 1.2.33; found by round-1 adversarial review
+  - repro: cd .github/scripts && python -c 'import jupyterlab_ai_code_assistants_extension as m; print(m.__file__)' prints the site-packages path
+  - root-cause: 2026-09-25T01:51:23Z @kj python script.py adds only the script's own directory to sys.path
+  - log: 2026-09-25T01:51:23Z @kj added
+  - log: 2026-09-25T01:51:37Z @kj closed
+- [x] `DEF-GUARD-267` **Star-column spec passes a fixed-width revert where every seeded label fits** - MINOR; ACC-PANE-182 detects width: 4.5em only when a starred label is wider than 4.5em; in this machine's Galata browser 14m ago is 50px and the revert fails, but a face where it fits lets the revert pass
+  - evidence: wontfix: MINOR logged not fixed; the revert does fail in this machine's Galata browser, the only environment the suite runs in; round-1 adversarial review
+  - repro: run panel-layout -g ACC-PANE-182 with .jp-AiAssistantsPanel-rowTime { width: 4.5em; min-width: 0 } in a font where 14m ago fits
+  - log: 2026-09-25T01:51:23Z @kj added
+  - log: 2026-09-25T01:51:37Z @kj closed
+- [x] `DEF-GUARD-269` **Star-column spec favourites rows before its try block** - MINOR; panel-layout.spec.ts adds both favourites before try; if the second Add to Favorites times out, the finally block is never reached and branchy stays a favourite for later specs in that run
+  - evidence: wontfix: MINOR logged not fixed; test hygiene only, and the fix adds a mechanism (a list of added names); round-1 adversarial review
+  - repro: make the second toggleFavourite call throw inside ACC-PANE-182
+  - log: 2026-09-25T01:51:23Z @kj added
+  - log: 2026-09-25T01:51:37Z @kj closed
+- [x] `DEF-GUARD-270` **Star-column spec never compares star positions** - MINOR; ACC-PANE-182 asserts box width, the star-to-time gap and one right edge, but no star x position, so a star offset smaller than the 7px gap bound passes
+  - evidence: wontfix: MINOR logged not fixed; the box-width assertion already fixes each star's position relative to the shared right edge; round-2 adversarial review
+  - repro: read panel-layout.spec.ts ACC-PANE-182: no assertion on starBox.x across rows
+  - log: 2026-09-25T01:51:23Z @kj added
+  - log: 2026-09-25T01:51:38Z @kj closed
+- [x] `DEF-GUARD-271` **Star-column test title states the column claim without its condition** - MINOR; the title reads favourite stars keep one column beside the time, while ACC-PANE-182 and the spec comments say only rows whose label fits in 4.5em line up
+  - evidence: wontfix: MINOR logged not fixed; a test title, and -g ACC-PANE-182 still selects it; round-3 adversarial review ruled the round clean
+  - repro: panel-layout.spec.ts:42
+  - log: 2026-09-25T01:51:23Z @kj added
+  - log: 2026-09-25T01:51:38Z @kj closed

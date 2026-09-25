@@ -4,6 +4,14 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.35] - 2026-09-25
+
+### Changed
+
+- Favourite stars sit in one straight column again, directly before a time column at least 4.5em wide. A time label wider than that, such as "14m ago" in some Linux fonts, grows its own box to the left, so the labels stay right-aligned and only that row's star moves
+- Panel content stands 4px from the panel border on both sides instead of 8px: the title, header buttons, search field, error line, section headers and rows share one inset, so names start 18px from the left border and the time column ends 19px from the right
+- Build: every `make install` raises the patch version, and `make publish` runs the test suite before it builds. Its authentication check now imports the source being released instead of the previously installed copy
+
 ## [1.2.31] - 2026-09-23
 
 ### Changed

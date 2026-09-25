@@ -1,6 +1,6 @@
 {
     "name": "jupyterlab_ai_code_assistants_extension",
-    "version": "1.2.31",
+    "version": "1.2.35",
     "description": "A full launcher and manager for every AI code assistant in JupyterLab - Claude Code, Codex, Kimi, Gemini and DeepSeek. Start, resume, fork, switch, and clean up CLI sessions from a side panel per assistant - one click lands you in the right terminal with the assistant already running, no duplicate tabs, no UUID hunting.",
     "keywords": [
         "jupyter",

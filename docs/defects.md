@@ -942,6 +942,23 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: UNIT
   - log: 2026-09-28T11:54:49Z @kj added
   - log: 2026-09-28T11:54:49Z @kj closed
+- [x] `DEF-PANE-277` **Toast warns about an assistant CLI that is not installed** - MEDIUM; every page load raises a warning toast for each assistant whose CLI is absent while its enable key is saved in user settings; enabled means supported, not installed, so an absent CLI must hide the panel with no toast
+  - related: ACC-TEST-128, ACC-PROV-8 - an absent CLI shows no panel and no error
+  - evidence: toast removed from src/index.ts reconcile(), console.info kept; jest index.spec.ts DEF-PANE-277 and Galata panels.spec.ts 'an absent provider saved as enabled raises no toast' both fail on 1.2.37 and pass on 1.2.39; jest 274, pytest 322, Galata 51
+  - repro: save providers.deepseek.enabled true, no dsh on the server PATH, reload JupyterLab: toast 'DeepSeek is enabled but `dsh` was not found on the Jupyter server's PATH, so its panel is not shown.'
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-09-28T18:47:22Z @kj src/index.ts reconcile() calls Notification.warning when the status probe reports the binary absent and providers.<id>.enabled is user-set (added in 212aeb8, v1.0.8); no test covered it
+  - log: 2026-09-28T18:47:22Z @kj added
+  - log: 2026-09-28T18:53:30Z @kj closed
+  - log: 2026-09-28T19:02:49Z @kj edited test-tags "UNIT" -> "UNIT, E2E"
+  - log: 2026-09-28T19:02:54Z @kj review r1 F6 logged: a failed activation probe still docks an absent assistant and its tile until the next probe (up to 60 s), no toast; the accepted DEF-132 trade, unchanged
+  - log: 2026-09-28T19:02:54Z @kj review r1 F8 declined as taste: ACC-TEST-128 text says no panel and no error dialog; the no-toast rule is held by this entry and its two tests
+- [x] `DEF-PANE-278` **Enable-key descriptions say 'on PATH', not the Jupyter server's PATH** - MINOR; schema/plugin.json enable descriptions and README.md:49 say the binary must be 'on PATH'; a user whose own shell finds the binary may read the condition as met; since DEF-PANE-277 removed the toast this copy is the only in-product hint
+  - evidence: wontfix: MINOR from the DEF-PANE-277 review round 1, not a false statement; logged, not fixed under the house rule
+  - repro: Settings, AI Code Assistants: DeepSeek enable reads 'A panel appears only when this is on AND the `dsh` binary is on PATH'
+  - test-tags: MANUAL
+  - log: 2026-09-28T19:02:49Z @kj added
+  - log: 2026-09-28T19:02:54Z @kj closed
 
 ## Colour store `COLO`
 
@@ -1491,3 +1508,21 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - test-tags: UNIT
   - log: 2026-09-28T11:45:36Z @kj added
   - log: 2026-09-28T11:45:44Z @kj closed
+- [x] `DEF-GUARD-279` **Jest harness userSet option has no callers** - MINOR; src/__tests__/index.spec.ts IOptions.userSet (lines 327-328, 379) is passed by no test, before or after DEF-PANE-277; the user projection it feeds stays, because it models a key the settings editor saved
+  - evidence: wontfix: MINOR from the DEF-PANE-277 review round 1, not a false statement; logged, not fixed under the house rule
+  - repro: grep -n userSet src/__tests__/index.spec.ts: the declaration and its reads only
+  - test-tags: UNIT
+  - log: 2026-09-28T19:02:49Z @kj added
+  - log: 2026-09-28T19:02:54Z @kj closed
+- [x] `DEF-GUARD-280` **DEF-PANE-277 jest case does not exercise the once-per-id latch** - MINOR; index.spec.ts DEF-PANE-277 counts one console line after a single reconcile, so it stays green without the latch; the latch is held by Galata 'DEF-125 - the PATH warning re-arms once the binary comes back'
+  - evidence: wontfix: MINOR from the DEF-PANE-277 review round 1, not a false statement; logged, not fixed under the house rule
+  - repro: delete warnedUnavailable.add(id) in src/index.ts, run jlpm jest -t DEF-PANE-277: still green
+  - test-tags: UNIT
+  - log: 2026-09-28T19:02:49Z @kj added
+  - log: 2026-09-28T19:02:54Z @kj closed
+- [x] `DEF-GUARD-281` **resume.spec terminal count can miss the new terminal** - MINOR; Galata 'clicking a seeded session row opens a terminal' failed once at 1.2.40 with before 10, after 10 although the terminal widget appeared; likely cause: an earlier test's terminal closed between the two /api/terminals reads; not reproduced in the full rerun
+  - evidence: wontfix: MINOR, one failure in two full runs, rerun 51/51 (logs/galata-def-pane-277-1.2.40-rerun.log); logged, not fixed under the house rule
+  - repro: full Galata run at 1.2.40, logs/galata-def-pane-277-1.2.40.log: resume.spec.ts:40 Expected > 10, Received 10
+  - test-tags: E2E
+  - log: 2026-09-28T19:11:06Z @kj added
+  - log: 2026-09-28T19:11:06Z @kj closed

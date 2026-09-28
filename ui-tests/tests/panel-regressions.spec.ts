@@ -598,8 +598,7 @@ test('DEF-125 - the PATH warning re-arms once the binary comes back', async ({
 
   await page.goto();
 
-  // The warning only fires for a provider the user CHOSE to enable, so make
-  // that choice explicitly - this is the `chosen` gate in reconcile.
+  // The line fires for every enabled provider whose binary is absent.
   await setProviderEnabled(page, id, true);
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect.poll(() => infos.length, { timeout: 10000 }).toBe(1);

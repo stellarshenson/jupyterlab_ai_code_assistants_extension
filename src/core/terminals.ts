@@ -65,8 +65,8 @@ function warnLegacyCompanion(): void {
   // And said where the user is looking. The symptom is tabs that are simply
   // plain, which reads as a feature that was never on rather than as something
   // to fix, and a console line only reaches someone already suspecting the
-  // cause. The two neighbouring "an installed thing is wrong" announcements in
-  // this extension both pair the console line with this toast. It does not
+  // cause. The retired-extension notice in index.ts pairs its console line
+  // with a toast the same way. It does not
   // close on its own, because the condition does not go away on its own.
   Notification.warning(message, { autoClose: false });
 }

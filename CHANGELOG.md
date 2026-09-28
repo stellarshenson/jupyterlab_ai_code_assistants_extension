@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.41] - 2026-09-28
+
+### Fixed
+
+- An assistant whose command-line tool is not installed no longer raises a warning when JupyterLab loads or settings change, even when its enable setting is saved as on. Enabled means the extension supports the assistant, not that it is installed. Its panel and Launcher tile stay hidden, and the reason is written once to the browser console
+
 ## [1.2.38] - 2026-09-28
 
 ### Fixed

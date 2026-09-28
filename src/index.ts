@@ -333,46 +333,30 @@ const plugin: JupyterFrontEndPlugin<void> = {
         const roster = status;
         const available =
           roster === null ? true : probe !== null && probe.available !== false;
-        // Enabled but binary absent must not be a silent state: the user sees
-        // a missing panel with no clue that PATH under the Jupyter server
-        // differs from their shell. Once per id, not per reconcile.
-        // Only when the probe SUCCEEDED and this provider is the one missing.
-        // Blaming PATH for a server the frontend never reached names the wrong
-        // cause; and every provider defaults to enabled, so a machine with one
-        // assistant installed would otherwise raise three toasts about assistants
-        // the user has never heard of. The console line stays for that case.
-        const chosen =
-          settings?.get(`providers.${id}.enabled`).user !== undefined;
+        // Enabled but binary absent is logged to the console, never announced:
+        // enabled means the extension supports the assistant, not that it is
+        // installed, so a toast would name a tool the user never installed
+        // (DEF-PANE-277). Only when the probe SUCCEEDED and this provider is
+        // the one missing - blaming PATH for a server the frontend never
+        // reached names the wrong cause. Once per id, not per reconcile.
         if (
           probe !== null &&
           probe.available === false &&
           enabled &&
-          chosen &&
           !warnedUnavailable.has(id)
         ) {
           warnedUnavailable.add(id);
           const binary = registry.get(id)?.descriptor.cliBinary ?? id;
-          const label = registry.get(id)?.descriptor.label ?? id;
           console.info(
             `${LOG_PREFIX} "${id}" is enabled but its \`${binary}\` binary was not found on the server's PATH; panel not shown.`
           );
-          // And say it where the user is looking. A console line satisfies the
-          // comment above only for someone who already suspects the cause; the
-          // symptom is a panel that never appears, which reads as a broken
-          // install rather than a PATH difference between the Jupyter server
-          // and the user's shell. The retired-extension case next door already
-          // gets a notification, so the COMMON failure was the quiet one.
-          Notification.warning(
-            `${label} is enabled but \`${binary}\` was not found on the Jupyter server's PATH, so its panel is not shown.`,
-            { autoClose: 8000 }
-          );
         }
         // The latch is per ABSENCE, not per page load. Once the server reports
-        // the binary present again, a later disappearance gets its own warning:
+        // the binary present again, a later disappearance gets its own line:
         // without this, one transient absence - a CLI upgrade unlinking the
         // binary for a moment, or an obsolete roster from an overlapping probe -
         // permanently suppresses the real one (DEF-125). It cannot make the
-        // warning repeat while the state is unchanged, which is what the
+        // line repeat while the state is unchanged, which is what the
         // once-per-id latch above exists to prevent: the two conditions are
         // mutually exclusive.
         if (probe !== null && probe.available !== false) {

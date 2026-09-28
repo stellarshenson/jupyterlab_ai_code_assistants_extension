@@ -500,6 +500,40 @@ describe('ACC-PROV - the activation contract', () => {
     live.docked.forEach(widget => widget.dispose());
   });
 
+  it('DEF-PANE-277 - an enabled assistant whose binary is absent gets no panel and no toast', async () => {
+    const toasted = jest
+      .spyOn(Notification, 'warning')
+      .mockImplementation(() => '');
+    const logged = jest
+      .spyOn(console, 'info')
+      .mockImplementation(() => undefined);
+    const absent = PROVIDERS[1].descriptor.id;
+
+    // Saved explicitly, as the settings editor writes it. Enabled means the
+    // extension supports the assistant, not that it is installed.
+    const live = await activate({
+      composite: { [`providers.${absent}.enabled`]: true },
+      answers: [() => Promise.resolve(roster(absent))]
+    });
+
+    expect(
+      live.docked
+        .filter(widget => !widget.isDisposed)
+        .map(widget => widget.descriptor.id)
+    ).not.toContain(absent);
+    expect(toasted).not.toHaveBeenCalled();
+    // The reason stays in the browser console, once.
+    expect(
+      logged.mock.calls
+        .map(args => String(args[0]))
+        .filter(line => line.includes(`"${absent}"`))
+    ).toHaveLength(1);
+
+    toasted.mockRestore();
+    logged.mockRestore();
+    live.docked.forEach(widget => widget.dispose());
+  });
+
   it('ACC-PROV-16 - a binary installed after start gains its panel on the next probe', async () => {
     const late = PROVIDERS[2].descriptor.id;
     let present = false;

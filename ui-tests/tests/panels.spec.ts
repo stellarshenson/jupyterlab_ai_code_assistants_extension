@@ -92,6 +92,30 @@ test('a provider whose binary is absent renders no panel and no dialog', async (
   await expect(page.locator('.jp-Dialog')).toHaveCount(0);
 });
 
+test('an absent provider saved as enabled raises no toast', async ({
+  page
+}) => {
+  // DEF-PANE-277: enabled means the extension supports the assistant, not
+  // that it is installed. The key is saved explicitly, as the settings editor
+  // writes it.
+  const [absent] = ABSENT;
+  const [, other] = AVAILABLE;
+  await page.goto();
+  // Wait for the installed assistants to dock.
+  await expect(panels(page)).toHaveCount(AVAILABLE.length);
+
+  await setProviderEnabled(page, absent, true);
+  // A panel removed by a later save proves a reconcile ran after the key above
+  // was stored - the reconcile that would raise the toast.
+  await setProviderEnabled(page, other, false);
+  await expect(panelFor(page, other)).toHaveCount(0);
+
+  await expect(panelFor(page, absent)).toHaveCount(0);
+  await expect(
+    page.locator('.Toastify__toast', { hasText: 'was not found' })
+  ).toHaveCount(0);
+});
+
 test('disabling a provider removes its panel and leaves the others', async ({
   page
 }) => {

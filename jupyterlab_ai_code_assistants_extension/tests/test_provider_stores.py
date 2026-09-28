@@ -26,6 +26,9 @@ from jupyterlab_ai_code_assistants_extension.providers import gemini as gemini_p
 from jupyterlab_ai_code_assistants_extension.providers import kimi as kimi_provider
 from jupyterlab_ai_code_assistants_extension.providers import claude as claude_provider
 from jupyterlab_ai_code_assistants_extension.providers.claude import ClaudeStore
+
+# Taken before the autouse fixture stubs it, for the tests of the stop itself.
+REAL_STOP_BG_AGENT = claude_provider.stop_bg_agent
 from jupyterlab_ai_code_assistants_extension.providers.codex import CodexStore
 from jupyterlab_ai_code_assistants_extension.providers.deepseek import DeepSeekStore
 from jupyterlab_ai_code_assistants_extension.providers.gemini import (
@@ -528,29 +531,52 @@ def test_claude_launch_argv(claude):
     )
 
 
-def test_claude_a_background_agent_conversation_is_attached_not_resumed(
+def stop_records(monkeypatch, succeeds: bool) -> list:
+    """Stub the agent stop with one that succeeds or fails, and record its calls."""
+    calls: list = []
+
+    def stop(binary, short, session_id):
+        calls.append((binary, short, session_id))
+        return succeeds
+
+    monkeypatch.setattr(claude_provider, "stop_bg_agent", stop)
+    return calls
+
+
+def test_claude_a_background_agent_is_stopped_and_its_conversation_resumed(
     claude, monkeypatch
 ):
-    """A live agent owns the conversation, and ``--resume`` on it is refused."""
+    """An attach leaves the conversation with the agent however long the user
+    works in that terminal, so the agent is stopped and the same id resumed
+    there - with the launch mode, which a resume carries (DEF-PROV-272)."""
     store, _root = claude
     session_id = new_uuid()
     short = session_id[:8]
     monkeypatch.setattr(claude_provider, "bg_agents", lambda _b=None: {session_id: short})
+    calls = stop_records(monkeypatch, succeeds=True)
 
-    assert store.launch_argv("/bin/claude", session_id=session_id) == [
+    argv = store.launch_argv(
+        "/bin/claude", session_id=session_id, mode="dangerouslySkipPermissions"
+    )
+    assert argv == [
         "/bin/claude",
-        "attach",
-        short,
+        "--resume",
+        session_id,
+        "--dangerously-skip-permissions",
     ]
+    assert calls == [("/bin/claude", short, session_id)]
 
 
-def test_claude_an_attach_carries_no_mode_and_no_name(claude, monkeypatch):
-    """``claude attach`` answers an extra argument with a warning it prints
-    into the user's terminal, and the running agent already owns both."""
+def test_claude_a_failed_stop_attaches_with_no_mode_and_no_name(claude, monkeypatch):
+    """A conversation whose agent could not be stopped refuses ``--resume``, so
+    it is still reached through the agent. ``claude attach`` answers an extra
+    argument with a warning it prints into the user's terminal, and the running
+    agent already owns both."""
     store, _root = claude
     session_id = new_uuid()
     short = session_id[:8]
     monkeypatch.setattr(claude_provider, "bg_agents", lambda _b=None: {session_id: short})
+    stop_records(monkeypatch, succeeds=False)
 
     argv = store.launch_argv(
         "/bin/claude",
@@ -572,10 +598,13 @@ def test_claude_a_fork_of_an_agent_owned_conversation_still_forks(
     monkeypatch.setattr(
         claude_provider, "bg_agents", lambda _b=None: {session_id: session_id[:8]}
     )
+    calls = stop_records(monkeypatch, succeeds=True)
 
     argv = store.launch_argv(
         "/bin/claude", session_id=session_id, fork_session_id=fork_id
     )
+    # The fork is a new conversation, so the agent keeps running.
+    assert calls == []
     assert "attach" not in argv
     assert argv[:3] == ["/bin/claude", "--resume", session_id]
     assert argv[3:] == ["--fork-session", "--session-id", fork_id]
@@ -584,9 +613,9 @@ def test_claude_a_fork_of_an_agent_owned_conversation_still_forks(
 def test_claude_the_launch_verb_is_read_at_launch_time_not_carried_from_the_panel(
     claude, monkeypatch
 ):
-    """The same conversation id gets a different verb once the agent exits.
+    """The same conversation id stops an agent only while one holds it.
 
-    The panel polls every 30s, so a verb chosen in the browser can be wrong by
+    The panel polls every 30s, so an answer read in the browser can be wrong by
     the time the launch lands; the decision therefore lives in the store and is
     taken from a roster read at that moment (acc-crit "Launch verb resolved
     server-side").
@@ -594,15 +623,76 @@ def test_claude_the_launch_verb_is_read_at_launch_time_not_carried_from_the_pane
     store, _root = claude
     session_id = new_uuid()
     short = session_id[:8]
+    calls = stop_records(monkeypatch, succeeds=True)
 
     live = {session_id: short}
     monkeypatch.setattr(claude_provider, "bg_agents", lambda _b=None: live)
-    assert store.launch_argv("/bin/claude", session_id=session_id)[1] == "attach"
+    assert store.launch_argv("/bin/claude", session_id=session_id)[1] == "--resume"
+    assert len(calls) == 1
 
     # The agent finished between one launch and the next; nothing about the
     # request changed.
     live.clear()
     assert store.launch_argv("/bin/claude", session_id=session_id)[1] == "--resume"
+    assert len(calls) == 1
+
+
+def fake_claude_stop(tmp_path, record):
+    """A ``claude`` that obeys ``stop abcd1234`` only on a terminal.
+
+    The real CLI, measured on 2.1.283, turns ``stop <id>`` without a TTY into a
+    new conversation with the prompt "stop" and leaves the agent running; the
+    fake exits 3 instead, and on a terminal removes the worker's record the way
+    a clean stop does.
+    """
+    binary = tmp_path / "claude"
+    binary.write_text(
+        "#!/bin/sh\n"
+        "[ -t 0 ] && [ -t 1 ] || exit 3\n"
+        '[ "$1" = stop ] && [ "$2" = abcd1234 ] || exit 4\n'
+        f"rm -f '{record}'\n"
+        "exit 0\n"
+    )
+    binary.chmod(0o755)
+    return str(binary)
+
+
+def worker_record(claude_root, session_id):
+    """A live worker's record for ``session_id``, under this test's pid."""
+    sessions = claude_root / claude_provider.SESSIONS_DIRNAME
+    sessions.mkdir(parents=True, exist_ok=True)
+    record = sessions / f"{os.getpid()}.json"
+    record.write_text(json.dumps({"pid": os.getpid(), "sessionId": session_id}))
+    return record
+
+
+def test_claude_stop_bg_agent_runs_the_stop_on_a_terminal(claude, tmp_path, monkeypatch):
+    """Without a TTY the CLI never sees the subcommand, so the stop would
+    silently leave the agent running and start a conversation instead."""
+    _store, root = claude
+    session_id = new_uuid()
+    record = worker_record(root, session_id)
+    binary = fake_claude_stop(tmp_path, record)
+    monkeypatch.setattr(claude_provider, "_bg_agents_cache", (0.0, {session_id: "abcd1234"}))
+
+    assert REAL_STOP_BG_AGENT(binary, "abcd1234", session_id) is True
+    assert not record.exists()
+    # The next menu fetch reads a fresh roster rather than the stopped agent.
+    assert claude_provider._bg_agents_cache is None
+
+
+def test_claude_stop_bg_agent_fails_while_a_live_worker_still_holds_it(
+    claude, tmp_path, monkeypatch
+):
+    """An exit code of 0 is not enough: a record naming a live process is what
+    makes ``--resume`` refuse the conversation, so that is what is read."""
+    _store, root = claude
+    session_id = new_uuid()
+    record = worker_record(root, session_id)
+    binary = fake_claude_stop(tmp_path, tmp_path / "not-the-record")
+
+    assert REAL_STOP_BG_AGENT(binary, "abcd1234", session_id) is False
+    assert record.exists()
 
 
 def test_claude_an_attach_cmdline_is_recognised_only_in_its_exact_shape(claude):

@@ -11,7 +11,8 @@ base. Everything Claude-specific lives here and nowhere else:
 * the pid-file protocol under ``~/.claude/sessions/`` that says which
   conversation a running process is on and whether a remote bridge is driving it
 * the background-agent roster from ``claude agents --json``, and the
-  attach-versus-resume decision it drives at launch time
+  stop-before-resume decision it drives at launch time (attach only when the
+  stop fails)
 * the argv grammar, in both directions - what is spawned, and what a ``/proc``
   cmdline is read back as
 
@@ -104,6 +105,9 @@ BG_AGENTS_TIMEOUT_S = 5.0
 # poll, which refreshes the cache - so a menu open between polls is spawn-free
 # AND its markers agree with the row chips (same snapshot).
 BG_AGENTS_CACHE_MAX_AGE_S = 35.0
+# Ceiling on ``claude stop <short>`` (measured 0.55s). A stop that has not
+# answered by then is treated as failed, and the launch attaches instead.
+BG_STOP_TIMEOUT_S = 10.0
 
 # 128 KiB is enough to hold the last ``cwd``, ``custom-title``,
 # ``agent-color`` and ``timestamp`` records: measured across live transcripts the newest of each
@@ -466,8 +470,8 @@ def bg_agents(binary: str | None = None) -> dict[str, str]:
     """Map conversation id to short agent id for every LIVE background agent.
 
     A background agent owns its conversation only while its worker process
-    lives: that is exactly when ``claude --resume <id>`` is refused, and such a
-    conversation must be opened with ``claude attach <short>`` instead.
+    lives: that is exactly when ``claude --resume <id>`` is refused, so a
+    launch has to stop the agent first (``stop_bg_agent``).
 
     ``claude agents --json`` is Claude's own scripting surface, but it is NOT a
     live-worker roster - it is derived from the on-disk job records, so it keeps
@@ -549,6 +553,48 @@ def bg_agents_cached() -> dict[str, str]:
     ):
         return snapshot[1]
     return _bg_agents_refresh()
+
+
+def stop_bg_agent(binary: str, short: str, session_id: str) -> bool:
+    """Stop the background agent ``short``; True on a zero exit and no live record.
+
+    ``claude stop`` is Claude's own surface for this: it ends the worker and
+    its pty host and removes the worker's record, and the conversation is kept.
+    It runs on a pseudo-terminal because, measured on CLI 2.1.283, ``claude
+    stop <id>`` without a TTY is not treated as the subcommand at all: the CLI
+    starts a new print-mode conversation with the prompt "stop" and leaves the
+    agent running. The result needs a zero exit and is also read from the
+    records, because a zero exit is not enough: a record that still names a
+    live process is exactly what makes ``--resume`` refuse the conversation.
+
+    The roster snapshot is dropped on success, so the next menu fetch does not
+    mark the conversation as agent-held for up to 35s after it stopped.
+    """
+    global _bg_agents_cache
+    try:
+        import pty
+
+        leader, follower = pty.openpty()
+    except (ImportError, OSError):
+        return False
+    try:
+        proc = subprocess.run(
+            [binary, "stop", short],
+            stdin=follower,
+            stdout=follower,
+            stderr=follower,
+            timeout=BG_STOP_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    finally:
+        os.close(follower)
+        os.close(leader)
+    if proc.returncode != 0 or _conversation_is_live(session_id):
+        return False
+    _bg_agents_cache = None
+    return True
 
 
 def _parse_attach_id(cmdline: bytes) -> str | None:
@@ -1044,9 +1090,10 @@ class ClaudeStore(SessionStore):
                 # scan above - British on the wire and here alike, so the core
                 # never re-derives per row what the store has in hand.
                 "colour": _TAB_COLOUR_ID.get(latest.get("agentColor") or ""),
-                # Set means "open by attaching, not resuming" - a resume would
-                # be refused. Display only: the launch endpoint decides the verb
-                # itself, where it cannot be stale.
+                # Set means a live agent holds it, so an open stops that agent
+                # before resuming - a resume is refused while it runs. Display
+                # only: the launch endpoint decides itself, where it cannot be
+                # stale.
                 "bg_id": bg_owned.get(session_id),
             })
 
@@ -1387,17 +1434,25 @@ class ClaudeStore(SessionStore):
         id the store minted (``fork_strategy: native-flag``), so a branch
         arrives as ``fork_session_id``.
 
-        Resume versus attach is decided HERE rather than by the caller: a
-        conversation held by a live background agent refuses ``--resume``, and
-        an agent can start or finish inside the panel's 30s poll window, so a
-        verb chosen in the browser can be wrong by the time the launch lands.
-        Only a plain open can be attached to - a fork is Claude's own documented
-        escape from an agent-owned conversation, and a new conversation has no
-        agent yet.
+        Whether a live background agent holds the conversation is decided
+        HERE rather than by the caller: an agent can start or finish inside the
+        panel's 30s poll window, so an answer read in the browser can be wrong
+        by the time the launch lands. A held conversation refuses ``--resume``,
+        so the agent is stopped first, mid-turn included, and the conversation
+        is resumed in the user's terminal under the same id. Attaching to the
+        agent would leave the conversation with it however long the user works
+        in that terminal (DEF-PROV-272). ``claude attach`` remains the answer
+        only when the stop fails, because the conversation is then still
+        reachable through the agent and through nothing else. Only a plain open
+        stops an agent - a fork is Claude's own documented escape from an
+        agent-owned conversation and leaves the agent running, and a new
+        conversation has no agent yet.
         """
         attach_id: str | None = None
         if session_id and not fork_session_id:
             attach_id = bg_agents(cli_path).get(session_id)
+            if attach_id and stop_bg_agent(cli_path, attach_id, session_id):
+                attach_id = None
 
         if session_id and not attach_id:
             # Makes the conversation SELECTABLE by `claude -c`, which a

@@ -34,6 +34,8 @@ const PANEL = `#${panelId('claude')}`;
 const MENU = '.lm-Menu.jp-AiAssistantsContextMenu';
 const WIDE_NAME =
   'a-deliberately-very-long-project-name-that-overflows-the-sidebar';
+const CLAUDE_ROUTES =
+  '/jupyterlab-ai-code-assistants-extension/providers/claude';
 
 /** Arm a launch mode through the settings registry, the way a user does. */
 async function setLaunchMode(
@@ -146,6 +148,48 @@ test('DEF-88 - the background-agent chip renders inside its row', async ({
   expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(
     rowBox!.x + rowBox!.width + 1
   );
+});
+
+test('ACC-CLAU-96 - opening a background agent stops it and resumes the conversation', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // The item names what the click does before it is made.
+  const menu = await openRowMenu(page, WIDE_NAME);
+  await expect(
+    menu.locator('.lm-Menu-itemLabel', {
+      hasText: /^Stop Background Agent and Resume$/
+    })
+  ).toBeVisible();
+  await expect(
+    menu.locator('.lm-Menu-itemLabel', {
+      hasText: /^Stop Background Agent and Resume \(Skip Permissions\)$/
+    })
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // The server's answer for that same open, read without opening a JupyterLab
+  // terminal. The stub obeys `stop bg-wide` only on a terminal, as Claude does,
+  // so `--resume` means the stop ran on one and succeeded; a failed stop
+  // answers `attach bg-wide`.
+  const listed = await page.request.get(`${CLAUDE_ROUTES}/sessions`);
+  expect(listed.ok()).toBe(true);
+  const row = ((await listed.json()).sessions as any[]).find(
+    s => s.session_id === 'wide-1'
+  );
+  expect(row?.bg_id).toBe('bg-wide');
+  const answer = await page.request.post(`${CLAUDE_ROUTES}/launch-argv`, {
+    data: {
+      project_path: row.project_path,
+      encoded_path: row.encoded_path,
+      session_id: row.session_id
+    }
+  });
+  expect(answer.ok()).toBe(true);
+  const argv = (await answer.json()).argv as string[];
+  expect(argv.slice(1)).toEqual(['--resume', 'wide-1']);
 });
 
 test('DEF-42 - submenus draw a caret', async ({ page }) => {

@@ -349,7 +349,8 @@ export interface ITabColourEvents {
  * shared panel. */
 export interface IProviderHooks {
   /** Label for the primary open action, when the provider distinguishes verbs
-   * (joining a live worker is not the same as resuming a dormant store entry). */
+   * (stopping a live worker before resuming is not the same as resuming a
+   * dormant store entry). */
   resumeLabel?: (session: ISession | null) => string;
   /** Extra lines for the row tooltip. */
   tooltipLines?: (session: ISession) => string[];

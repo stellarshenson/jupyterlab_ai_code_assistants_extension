@@ -835,20 +835,29 @@ Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. 
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
   - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
-- [x] `ACC-CLAU-96` **Background agents** - HIGH; a conversation held by a running background agent shows a `bg` chip and is attached to, never resumed
-  - evidence: panel.spec.ts asserts the bg chip appears only with bg_id and only on a provider declaring hasBgAgents; test_claude_a_background_agent_conversation_is_attached_not_resumed and test_claude_an_attach_carries_no_mode_and_no_name prove the open is an attach. Mutations: ungating the chip, and removing the attach branch, redden them
-  - test-tags: UNIT, FUNCTIONAL
-  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-CLAU-96 and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k attach
+- [x] `ACC-CLAU-96` **Background agents** - HIGH; a conversation held by a running background agent shows a `bg` chip; opening it stops the agent and resumes the same conversation id interactively in the terminal, mid-turn included; attach only when the stop fails
+  - evidence: test_claude_a_background_agent_is_stopped_and_its_conversation_resumed, test_claude_a_failed_stop_attaches_with_no_mode_and_no_name, two stop_bg_agent tests with a fake CLI that obeys stop only on a TTY; Galata ACC-CLAU-96 reads the menu label and gets --resume wide-1 from launch-argv; 5 pytest mutations each redden
+  - related: DEF-PROV-272 - the attach this criterion used to require
+  - test-tags: UNIT, E2E
+  - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-CLAU-96 and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k 'background_agent or failed_stop or stop_bg_agent' and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test -g ACC-CLAU-96
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
   - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
-- [x] `ACC-CLAU-97` **Launch verb resolved server-side** - HIGH; the server decides resume-versus-attach at launch time, so a stale panel cannot pick the wrong one
-  - evidence: test_claude_the_launch_verb_is_read_at_launch_time_not_carried_from_the_panel asks for the same conversation twice across a background agent exiting and gets attach then --resume, with nothing about the request changed. Mutation: removing the attach branch reddens it
+  - log: 2026-09-28T10:46:29Z @kj reopened: reopened by DEF-PROV-272: Star Colonel ruled an open must make the conversation interactive, never leave it with the agent; evidence retired: panel.spec.ts asserts the bg chip appears only with bg_id and only on a provider declaring hasBgAgents; test_claude_a_background_agent_conversation_is_attached_not_resumed and test_claude_an_attach_carries_no_mode_and_no_name prove the open is an attach. Mutations: ungating the chip, and removing the attach branch, redden them
+  - log: 2026-09-28T10:46:29Z @kj amended text "a conversation held by a running background agent shows a `bg` chip and is attached to, never resumed" -> "HIGH; a conversation held by a running background agent shows a `bg` chip; opening it stops the agent and resumes the same conversation id interactively in the terminal, mid-turn included; attach only when the stop fails"
+  - log: 2026-09-28T11:26:28Z @kj edited test "jlpm jest src/__tests__/panel.spec.ts -t ACC-CLAU-96 and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k attach" -> "PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k 'background_agent or failed_stop or stop_bg_agent' and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test -g ACC-CLAU-96"; test-tags "UNIT, FUNCTIONAL" -> "UNIT, E2E"
+  - log: 2026-09-28T11:26:29Z @kj closed
+  - log: 2026-09-28T11:45:36Z @kj edited test "PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k 'background_agent or failed_stop or stop_bg_agent' and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test -g ACC-CLAU-96" -> "jlpm jest src/__tests__/panel.spec.ts -t ACC-CLAU-96 and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k 'background_agent or failed_stop or stop_bg_agent' and cd ui-tests && JLAB_TEST_PORT=8931 jlpm playwright test -g ACC-CLAU-96"
+- [x] `ACC-CLAU-97` **Launch verb resolved server-side** - HIGH; the server decides at launch time whether a background agent holds the conversation and must be stopped first, so a stale panel cannot pick the wrong verb
+  - evidence: test_claude_the_launch_verb_is_read_at_launch_time_not_carried_from_the_panel: the same request stops the agent once while it is live and not after it exits; removing the stop call reddens it
   - test-tags: UNIT
   - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k launch_verb_is_read_at_launch_time
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
   - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-09-28T10:46:29Z @kj reopened: reopened by DEF-PROV-272: the launch-time decision is now stop-and-resume versus plain resume; evidence retired: test_claude_the_launch_verb_is_read_at_launch_time_not_carried_from_the_panel asks for the same conversation twice across a background agent exiting and gets attach then --resume, with nothing about the request changed. Mutation: removing the attach branch reddens it
+  - log: 2026-09-28T10:46:29Z @kj amended text "the server decides resume-versus-attach at launch time, so a stale panel cannot pick the wrong one" -> "HIGH; the server decides at launch time whether a background agent holds the conversation and must be stopped first, so a stale panel cannot pick the wrong verb"
+  - log: 2026-09-28T11:26:29Z @kj closed
 - [x] `ACC-CLAU-98` **Coloured tabs from `/color`** - HIGH; the terminal tab tint comes from the session's own colour, via `jupyterlab_colourful_tab_extension`, unless the user set a colour on the tab by hand (see Colour / Override precedence)
   - evidence: test_claude_default_colour_reads_the_conversation_not_the_row takes the tint from the conversation's own agentColor; test_colour_store.py test_a_hand_set_colour_beats_the_assistants_own and test_dropping_the_override_hands_a_native_conversation_back_to_the_assistant hold the precedence; ui-tests/tests/tab-colour-ownership.spec.ts and colour-override.spec.ts cover it in a running JupyterLab
   - test-tags: UNIT, E2E

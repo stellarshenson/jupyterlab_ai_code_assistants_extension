@@ -76,8 +76,8 @@ export const descriptor: IProviderDescriptor = {
 };
 
 export const hooks: IProviderHooks = {
-  // Joining a live agent and resuming a dormant conversation are different
-  // verbs, so the item says which one this row gets before the click.
+  // Opening a conversation a live agent holds stops the agent first, so the
+  // item says so before the click (DEF-PROV-272).
   resumeLabel: (session: ISession | null) =>
-    session?.bg_id ? 'Attach to Background Agent' : 'Resume'
+    session?.bg_id ? 'Stop Background Agent and Resume' : 'Resume'
 };

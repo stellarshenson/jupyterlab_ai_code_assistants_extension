@@ -41,7 +41,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 - **Favorites** - star projects you keep coming back to via the right-click menu; favourites from the standalone extensions are migrated on first run
 - **Remove and clean up** - drop a project's history or a project's extra parallel sessions from the right-click menu, confirmation dialog first; removed files honour JupyterLab's "move files to trash" setting
 - **Activity at a glance** - each row shows its last activity in an aligned column; rows active within the last minute light up, rows idle for over a week dim, and rows with parallel conversations show a branch icon with the count
-- **Remote control indicator and background agents** (Claude) - a green dot marks sessions actively under remote control, and a conversation held by a running background agent shows a `bg` chip; clicking attaches to the agent instead of copying it
+- **Remote control indicator and background agents** (Claude) - a green dot marks sessions actively under remote control, and a conversation held by a running background agent shows a `bg` chip; clicking stops the agent and resumes the same conversation in your terminal, so it becomes an ordinary interactive session
 - **Search** - fuzzy filter per panel, toggled by the funnel button
 - **Presentation modes** - label rows by session name or by path relative to the JupyterLab root
 - **Conflict-safe upgrade** - if a retired standalone extension is still installed, its panel wins and this extension stands down for that assistant instead of showing a duplicate

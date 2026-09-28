@@ -183,6 +183,7 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - log: 2026-08-26T00:00:00Z @kj narrowed: the attach LAUNCH path no longer repairs - `launch_argv` guards on `not attach_id`, since an attach resumes through the agent and never through `-c`. `ClaudeStore.switch` has no such guard and never consults `bg_agents` at all, so a switch to an agent-held conversation still relies entirely on the liveness gate; the switch submenu is built from every branch with no agent filter, so that path is reachable. Adding the guard there is declined for now: `bg_agents` spawns `claude agents --json` with a timeout, and `switch` currently pays no subprocess cost
   - log: 2026-08-26T00:00:00Z @kj CORRECTION, and it cuts against this entry: the round-1 claim that the attach path was already a no-op because 44 live `kind: "bg"` records carry `sessionId` is FALSE, retracted by the reviewer that made it and re-measured here. Census of `~/.claude/sessions/`: 3031 records, 2978 `interactive`, 44 `bg`, 9 unkinded - and 0 of the 44 have a live pid, so `_conversation_is_live` answers False for every one of them. Nothing prunes that directory (see the module's own note), so the count measured DEAD records. The guard above is therefore a real behaviour change, not a scope reduction, and the liveness gate is weaker cover than round 1 credited it with - which raises rather than lowers the value of settling the window below
   - log: 2026-08-27T14:55:15Z @kj rejected: measured against the real writer - Claude Code 2.1.247 opens the transcript per append burst and closes it (0 open .jsonl fds across 3718 samples, open at 2 of 21 write instants), and _conversation_is_live reads the same sessions/*.json records the CLI's own holder check reads; the remaining remedy is an mtime floor, which is timing code. Reopen if a /compact settling test shows the record naming the old id for a non-zero interval, or a background worker is observed holding a transcript fd beyond one burst (close-out campaign)
+  - log: 2026-09-28T11:45:36Z @kj same race class, found by DEF-PROV-272 review: make_continuable runs right after claude stop removes the worker record while the worker may still be exiting; only a compacted bg-held transcript is rewritten; unmeasured whether the exiting worker appends
 
 - [-] `DEF-PROV-130` **A symlinked transcript is replaced by a regular file and the real target keeps the broken content** - MINOR, logged not fixed, found by the round-1 bug-hunter; `jupyterlab_ai_code_assistants_extension/providers/claude.py`
   - log: 2026-08-26T00:00:00Z @kj reported: `with_name` builds the temp beside the LINK while `read_text` and `stat` follow it to the target, so `os.replace` puts a regular file where the link was. Measured `is symlink before: True` then `after: False`, with the real file still carrying `subtype: compact_boundary` - two divergent copies, and the repair reported success. A symlinked DIRECTORY is unaffected, because the sibling resolves inside the real directory; only per-file links break
@@ -259,6 +260,19 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - root-cause: 2026-09-19T21:14:51Z @kj the name lives in the file whose mtime means recency or, for Claude, carries the switch stamp; neither rename put the timestamp back
   - log: 2026-09-19T21:14:51Z @kj added
   - log: 2026-09-19T21:14:59Z @kj closed
+- [x] `DEF-PROV-272` **Panel open leaves a background agent's conversation an agent session** - MAJOR; opening a conversation held by a live background agent runs claude attach, so work typed in that terminal stays in the agent; the conversation never becomes an interactive session and claude -c skips it
+  - evidence: launch_argv stops a live agent with claude stop on a pty, then resumes the same id; measured live on CLI 2.1.283: kind interactive after resume; pytest 322, jest 273, Galata 50 at 1.2.36
+  - repro: start claude --bg in a project, open its row from the Claude panel, type a prompt; claude agents --json still lists the id as kind background
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T10:46:14Z @kj launch_argv answers a live agent with claude attach <short> (ACC-CLAU-96 rule); attach only connects the terminal to the daemon's worker, which keeps ownership
+  - log: 2026-09-28T10:46:14Z @kj added
+  - log: 2026-09-28T11:26:29Z @kj closed
+- [x] `DEF-PROV-275` **After a failed stop the attach terminal is reused** - MINOR; when the stop fails the launch attaches; while that attach terminal stays open, the terminal reuse ladder focuses it, so the stop is not retried and the row label promises a stop
+  - evidence: wontfix: MINOR, logged not fixed; reached only after a failed stop, the locked fallback; closing the attach terminal and opening again retries the stop
+  - repro: make claude stop fail, open the row, open it again; the second click focuses the attach terminal
+  - test-tags: UNIT
+  - log: 2026-09-28T11:45:36Z @kj added
+  - log: 2026-09-28T11:45:44Z @kj closed
 
 ## Frontend / server contract `FRONT`
 
@@ -916,6 +930,18 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - repro: light theme, a row with a live session, zoom into the dot's left edge
   - log: 2026-09-25T01:51:23Z @kj added
   - log: 2026-09-25T01:51:37Z @kj closed
+- [x] `DEF-PANE-274` **Branch surfaces do not say an open stops the background agent** - MINOR; Manage Sessions bg badge, its Open button title and the Open Branched Conversation (bg) marker show the agent but do not say the open stops it; none states anything false
+  - evidence: wontfix: MINOR, logged not fixed; each surface shows the bg marker and states nothing false; the row tooltip and both Resume items name the stop
+  - repro: right-click a row whose branch a live agent holds; the branch item reads '<name> (bg)'
+  - test-tags: E2E
+  - log: 2026-09-28T11:45:36Z @kj added
+  - log: 2026-09-28T11:45:44Z @kj closed
+- [x] `DEF-PANE-276` **resumeLabel hook docs name one item** - MINOR; src/core/types.ts documents resumeLabel as the primary open action's label and src/providers/claude.ts says 'the item'; since DEF-PROV-272 each launch-mode Resume variant uses the same verb with its mode appended
+  - evidence: wontfix: MINOR, logged not fixed; a doc gap for provider authors, no user-visible label is wrong; fixing it needs a rebuild for comment text
+  - repro: read src/core/types.ts IProviderHooks.resumeLabel and panel.ts resume-<mode> label
+  - test-tags: UNIT
+  - log: 2026-09-28T11:54:49Z @kj added
+  - log: 2026-09-28T11:54:49Z @kj closed
 
 ## Colour store `COLO`
 
@@ -1459,3 +1485,9 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - repro: panel-layout.spec.ts:42
   - log: 2026-09-25T01:51:23Z @kj added
   - log: 2026-09-25T01:51:38Z @kj closed
+- [x] `DEF-GUARD-273` **Non-zero exit of claude stop has no test** - MINOR; stop_bg_agent returns False on a non-zero exit; no test pins it, because the right answer for a stop of an agent that already finished is unmeasured
+  - evidence: wontfix: MINOR, logged not fixed; a test would lock in an unmeasured answer for a stop of an agent that finished on its own
+  - repro: remove the returncode clause in stop_bg_agent; pytest stays green
+  - test-tags: UNIT
+  - log: 2026-09-28T11:45:36Z @kj added
+  - log: 2026-09-28T11:45:44Z @kj closed

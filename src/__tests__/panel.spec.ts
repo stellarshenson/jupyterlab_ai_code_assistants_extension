@@ -645,13 +645,15 @@ describe('DEF-46 - the row tooltip names only a mode the row launches with', () 
     expect(tooltip([session()])).toContain('Launch mode: Skip Permissions');
   });
 
-  it('says nothing about a mode on a row a live worker already holds', () => {
+  it('names the mode on a row a live worker holds, which is resumed too', () => {
     panel.setModes({ skip: true });
-    // An attach is issued before the flag is appended, deliberately, so the
-    // tooltip would otherwise promise something the assistant never receives.
+    // The click stops the worker and resumes the conversation, and a resume
+    // carries the mode (DEF-PROV-272).
     const text = tooltip([session({ bg_id: 'abcd1234' })]);
-    expect(text).toContain('Background agent: abcd1234 (click attaches to it)');
-    expect(text).not.toContain('Launch mode');
+    expect(text).toContain(
+      'Background agent: abcd1234 (click stops it and resumes here)'
+    );
+    expect(text).toContain('Launch mode: Skip Permissions');
   });
 });
 

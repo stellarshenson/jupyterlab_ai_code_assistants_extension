@@ -49,8 +49,8 @@ STUBBED = ("claude", "codex", "kimi", "dsh")
 # rendered in a browser at all.
 #
 # It owns the WIDE project's newest conversation, seeded below under this id,
-# and deliberately not one of "branchy"'s: a conversation a live worker holds
-# is attached to rather than resumed, and every spec that clicks, launches or
+# and deliberately not one of "branchy"'s: opening a conversation a live worker
+# holds stops that worker first, and every spec that clicks, launches or
 # right-clicks works on "branchy", which stays unowned.
 _BG_SESSION_ID = "wide-1"
 _BG_AGENT_ID = "bg-wide"
@@ -102,7 +102,9 @@ os.environ["JUPYTERLAB_GALATA_ROOT_DIR"] = str(_root)
 # installed and a launch spawns a pty that stays open long enough to observe.
 # ``agents`` is answered because the Claude provider probes it on every
 # listing; left to the sleeping branch it would stall each poll for the
-# subprocess timeout.
+# subprocess timeout. ``stop`` succeeds only on a terminal and only for the
+# roster's agent, as Claude's own does: without a TTY the CLI never sees the
+# subcommand (DEF-PROV-272).
 #
 # The roster carries one live background agent. ``pid`` is this server's own
 # process: the provider trusts an entry only while it can verify the worker
@@ -111,18 +113,22 @@ os.environ["JUPYTERLAB_GALATA_ROOT_DIR"] = str(_root)
 _STUB = """#!/bin/sh
 case "$1" in
   agents) echo '%s'; exit 0 ;;
+  stop) [ -t 0 ] && [ -t 1 ] && [ "$2" = %s ] && exit 0; exit 3 ;;
 esac
 echo "stub $0 running"
 sleep 120
-""" % json.dumps(
-    [
-        {
-            "id": _BG_AGENT_ID,
-            "kind": "background",
-            "pid": os.getpid(),
-            "sessionId": _BG_SESSION_ID,
-        }
-    ]
+""" % (
+    json.dumps(
+        [
+            {
+                "id": _BG_AGENT_ID,
+                "kind": "background",
+                "pid": os.getpid(),
+                "sessionId": _BG_SESSION_ID,
+            }
+        ]
+    ),
+    _BG_AGENT_ID,
 )
 for _name in STUBBED:
     _path = _stub_bin / _name

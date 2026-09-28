@@ -57,6 +57,9 @@ def scratch_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(claude_provider, "bg_agents", lambda binary=None: {})
     monkeypatch.setattr(claude_provider, "_bg_agents_refresh", lambda binary=None: {})
     monkeypatch.setattr(claude_provider, "bg_agents_cached", lambda: {})
+    # A real ``claude stop`` would end a real agent; a test that needs the stop
+    # to succeed says so.
+    monkeypatch.setattr(claude_provider, "stop_bg_agent", lambda *_a: False)
     yield scratch
 
 

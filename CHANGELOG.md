@@ -4,6 +4,16 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.38] - 2026-09-28
+
+### Fixed
+
+- Opening a Claude conversation that a running background agent holds, from the panel or the Launcher tile, now stops the agent and resumes the same conversation in your terminal as an ordinary interactive session. Before, the panel attached the terminal to the agent, and the conversation stayed with the agent however long you worked in it. If the stop fails, the panel attaches as before
+
+### Changed
+
+- On a row that a background agent holds, the Resume items read "Stop Background Agent and Resume", the Skip Permissions item with its mode appended, and the row tooltip says the click stops the agent. The launch mode now applies to these rows too, because they are resumed rather than attached to
+
 ## [1.2.35] - 2026-09-25
 
 ### Changed

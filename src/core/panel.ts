@@ -1899,9 +1899,9 @@ export class AssistantSessionsPanel extends Widget {
       );
       name.appendChild(badge);
     }
-    // A live worker owns this conversation, so a click joins it rather than
-    // resuming a dormant one. Marked so the difference is visible before the
-    // click, not a surprise after it. No own title: a child title shadows the
+    // A live worker owns this conversation, so a click stops it before
+    // resuming. Marked so the difference is visible before the click, not a
+    // surprise after it. No own title: a child title shadows the
     // row's, which would hide the path behind a two-character chip.
     if (this._descriptor.hasBgAgents && session.bg_id) {
       const bg = document.createElement('span');
@@ -2086,15 +2086,12 @@ export class AssistantSessionsPanel extends Widget {
       lines.push('Status: active');
     }
     if (this._descriptor.hasBgAgents && s.bg_id) {
-      lines.push(`Background agent: ${s.bg_id} (click attaches to it)`);
+      lines.push(
+        `Background agent: ${s.bg_id} (click stops it and resumes here)`
+      );
     }
     lines.push(...(this._hooks.tooltipLines?.(s) ?? []));
-    // What THIS row's click resolves to, which is the attach-aware question:
-    // the line above may have just said the click joins a live worker, and an
-    // attach is issued before the mode is appended, so `_resolvedVariant`
-    // promised a flag the server discards - one tooltip naming both, a line
-    // apart (DEF-46).
-    const variant = this._resumeVariant(s);
+    const variant = this._resolvedVariant();
     if (variant) {
       // The row click launches with this, and the menu is the only other place
       // that says so.
@@ -2230,30 +2227,6 @@ export class AssistantSessionsPanel extends Widget {
     return resolved;
   }
 
-  /** The same mode as it applies to RESUME - of the active row by default, or
-   * of whichever conversation is named.
-   *
-   * An attach is not a launch: the server returns the argv before the flag is
-   * appended, deliberately, so promising the mode on a conversation a live
-   * worker already holds would name something the assistant never receives.
-   * That is true of resuming and of nothing else, so it is tested HERE rather
-   * than in `_resolvedVariant` - which is read by the `+` button and both
-   * new-session and branch items, none of which attach. Testing it there let
-   * one right-click on a background-agent row strip the mode's name off every
-   * one of those surfaces panel-wide, while their launches went on carrying it
-   * (DEF-37).
-   *
-   * The argument is what lets a surface that describes SOMEONE ELSE'S resume -
-   * a row tooltip built during a render, a branch item in the submenu - ask the
-   * question about that conversation rather than about the active row.
-   */
-  private _resumeVariant(
-    target: { bg_id?: string | null } | null = this._activeSession
-  ): IResolvedLaunchMode | null {
-    const joining = this._descriptor.hasBgAgents && !!target?.bg_id;
-    return joining ? null : this._resolvedVariant();
-  }
-
   /** The variant suffix a plain item wears while that mode is in force. */
   private _variantSuffix(): string {
     const resolved = this._resolvedVariant();
@@ -2302,15 +2275,14 @@ export class AssistantSessionsPanel extends Widget {
     });
 
     this._commands.addCommand(this._cmd('resume'), {
-      // Joining a live worker and resuming a dormant conversation are
-      // different verbs, so a provider that has both says which one this row
-      // gets.
+      // Resuming a conversation a live worker holds stops that worker first,
+      // so a provider that has workers says which of the two this row gets.
       label: () => {
-        const variant = this._resumeVariant();
+        const variant = this._resolvedVariant();
         const verb = this._hooks.resumeLabel?.(active()) ?? 'Resume';
         return variant ? `${verb} (${variant.label})` : verb;
       },
-      icon: () => (this._resumeVariant()?.unsafe ? shieldIcon : undefined),
+      icon: () => (this._resolvedVariant()?.unsafe ? shieldIcon : undefined),
       execute: () => {
         const s = active();
         if (s) {
@@ -2321,15 +2293,14 @@ export class AssistantSessionsPanel extends Widget {
 
     for (const mode of this._variantModes) {
       this._commands.addCommand(this._cmd(`resume-${mode.id}`), {
-        label: `Resume (${mode.menuLabel})`,
+        // The same verb as the plain item, so a row a live worker holds says
+        // here too that the worker is stopped first.
+        label: () =>
+          `${this._hooks.resumeLabel?.(active()) ?? 'Resume'} (${mode.menuLabel})`,
         icon: shieldIcon,
         // Absent while the plain item already resolves to this same mode - it
         // would be a second entry building an identical launch.
         isVisible: () => !this._buildsSameLaunch(mode),
-        // A conversation a live worker already holds was started in whatever
-        // mode that worker has; joining it cannot change that, so the variant
-        // is disabled rather than silently joining in the wrong mode.
-        isEnabled: () => !(this._descriptor.hasBgAgents && active()?.bg_id),
         execute: () => {
           const s = active();
           if (s) {
@@ -2502,14 +2473,10 @@ export class AssistantSessionsPanel extends Widget {
     this._commands.addCommand(this._cmd('open-branch'), {
       // Names the mode the launch carries, like Resume, `+` and Branch Session
       // do - this item opens a terminal, so the mode in force applies to it and
-      // this was the one launch surface that stayed silent about it. Attach-
-      // aware per conversation: the submenu passes `bg`, since a branch a live
-      // worker holds is attached to and takes no mode (DEF-46's rule).
+      // this was the one launch surface that stayed silent about it.
       label: args => {
         const base = String(args.label ?? '');
-        const variant = this._resumeVariant(
-          args.bg ? { bg_id: String(args.bg) } : null
-        );
+        const variant = this._resolvedVariant();
         return variant ? `${base} (${variant.label})` : base;
       },
       // Intent glyph, not row state - see switch-branch above.
@@ -2844,10 +2811,7 @@ export class AssistantSessionsPanel extends Widget {
         command: this._cmd('open-branch'),
         args: {
           session_id: b.session_id,
-          label: this._branchMenuLabel(b),
-          // The label reads this to tell an attach from a launch; the
-          // provider's own worker capability is tested where it is answered.
-          ...(b.bg_id ? { bg: b.bg_id } : {})
+          label: this._branchMenuLabel(b)
         }
       });
     }
@@ -2875,7 +2839,7 @@ export class AssistantSessionsPanel extends Widget {
       branchName: b => this._branchDisplayName(b),
       formatTime: ms => this._formatRelativeTime(ms),
       branchBadge: b => this._bgBadgeFor(b),
-      openTitle: id => this._openBranchTitle(session, id),
+      openTitle: () => this._openBranchTitle(session),
       onSwitch: id => void this._switchBranch(session, id),
       onOpen: id => void this._openSession(session, undefined, id),
       onDelete: ids => this._deleteBranches(session, ids),
@@ -2888,10 +2852,8 @@ export class AssistantSessionsPanel extends Widget {
 
   /** Tooltip for one Open button in the Manage Sessions popup. Same rule as the
    * Open Branched Conversation submenu: the button launches a terminal, so it
-   * names the mode that launch carries, and a conversation a live worker holds
-   * is attached to and carries none. The row's own conversation is not in
-   * `_lastBranches`, so it answers from the session. */
-  private _openBranchTitle(session: ISession, sessionId: string): string {
+   * names the mode that launch carries. */
+  private _openBranchTitle(session: ISession): string {
     // One terminal serves a project-scoped assistant, so the button focuses
     // or starts it, under the provider's own verb for that.
     if (this._descriptor.terminalScope === 'project') {
@@ -2900,11 +2862,7 @@ export class AssistantSessionsPanel extends Widget {
       );
     }
     const base = 'Open this conversation in its own terminal';
-    const target =
-      sessionId === session.session_id
-        ? session
-        : (this._lastBranches.find(b => b.session_id === sessionId) ?? null);
-    const variant = this._resumeVariant(target);
+    const variant = this._resolvedVariant();
     return variant ? `${base} (${variant.label})` : base;
   }
 

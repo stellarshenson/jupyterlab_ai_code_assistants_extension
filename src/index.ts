@@ -502,6 +502,39 @@ const plugin: JupyterFrontEndPlugin<void> = {
       }
     });
 
+    // Each JupyterLab window keeps its own copy of the settings and never
+    // reads them again, and every save writes that whole copy. So a window
+    // loaded before another window changed a setting put the old value back
+    // on its next save of any setting (DEF-PANE-282). A change in this window
+    // tells the other windows of this browser, and a window also checks when
+    // it gains focus, for a save from another browser or device. Either way
+    // it reloads only when the server's copy differs from its own: a reload
+    // replaces unsaved text in an open JSON settings editor, and the check
+    // also ends the echo, because the window that saved already holds the
+    // server's copy. Still open: another browser or device whose window saves
+    // without gaining focus first, or whose focusing click is itself the
+    // change - that needs a version check in JupyterLab's settings API
+    // (DEF-PANE-283).
+    if (settingRegistry && settings) {
+      const current = settings;
+      const channel = new BroadcastChannel(PLUGIN_ID);
+      const reload = async (): Promise<void> => {
+        try {
+          const fetched = await settingRegistry.connector.fetch(PLUGIN_ID);
+          if (fetched && fetched.raw !== current.raw) {
+            await settingRegistry.reload(PLUGIN_ID);
+          }
+        } catch (err) {
+          console.warn(`${LOG_PREFIX} could not reload settings.`, err);
+        }
+      };
+      window.addEventListener('focus', () => void reload());
+      channel.onmessage = () => void reload();
+      current.changed.connect(() => {
+        channel.postMessage('changed');
+      });
+    }
+
     console.log(
       `${LOG_PREFIX} ${live.size} of ${registry.ids.length} assistant panel(s) docked.`
     );

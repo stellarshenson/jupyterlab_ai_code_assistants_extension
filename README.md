@@ -27,7 +27,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 
 - **One install, every assistant** - Claude Code, Codex, Kimi, Gemini and DeepSeek from a single package, each with its own right-side panel wearing its official mark
 - **Provider registry** - assistant-specific behaviour lives in one module per assistant behind capability flags; no core file names an assistant, and adding one touches no core file
-- **Joint settings page** - one settings section covering all assistants, with a per-assistant toggle (all on by default); toggling takes effect live, no JupyterLab reload
+- **Joint settings page** - one settings section covering all assistants, with a per-assistant toggle (all on by default); toggling takes effect live, no JupyterLab reload, and a change reaches the other JupyterLab windows of the same browser
 - **Three-section side panel** - Favorites, Recent, and All projects, each scrolling independently
 - **One-click resume** - click a row to jump back into that session in a terminal; an open terminal for the project is reused instead of duplicated. Exception: a Codex or Kimi conversation started with `+`, and a Codex fork, run without an id until the CLI writes one, so a click on that row meanwhile opens a second terminal
 - **Launcher tiles** - every enabled assistant has a tile in an "AI Assistants" section of the JupyterLab Launcher (after Other, under the extension's own robot-head icon); a click opens the assistant in the file browser's current folder, resuming the folder's conversation when one exists and starting a new one otherwise, through the companion `jupyterlab_basic_terminal_extension` (installed automatically). Disable an assistant and its tile goes; disable them all and the section goes with them

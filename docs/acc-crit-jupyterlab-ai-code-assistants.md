@@ -164,6 +164,14 @@ Availability is two-dimensional - the user's setting and whether the CLI binary 
   - log: 2026-08-27T00:00:00Z @kj reworded - a failure never writes (DEF-132); the generation stamp is deleted, one of the two DEF-121 Galata tests with it (v1.0.33)
   - log: 2026-09-17T17:25:56Z @kj edited importance
   - log: 2026-09-19T23:10:40Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-PROV-184` **No toast for an absent CLI** - MEDIUM; an enabled assistant whose CLI is not on the Jupyter server's PATH gets no panel, no Launcher tile and no toast, whether its enable key is the default or saved; the reason goes to the browser console once per absence
+  - evidence: jest index.spec.ts DEF-PANE-277 and Galata panels.spec.ts 'an absent provider saved as enabled raises no toast' pass at 1.2.43; both fail on the toast build
+  - related: DEF-PANE-277, ACC-TEST-128 - the absent-CLI panel rule
+  - test: jlpm jest -t DEF-PANE-277; Galata panels.spec.ts 'an absent provider saved as enabled raises no toast'
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-09-29T13:21:34Z @kj reconcile() in src/index.ts writes one console.info line per absence and raises no Notification
+  - log: 2026-09-29T13:21:34Z @kj added
+  - log: 2026-09-29T13:21:41Z @kj closed
 
 ## Settings `SETT`
 
@@ -276,6 +284,17 @@ One settings section for all assistants, replacing the three separate sections. 
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
   - log: 2026-09-19T23:18:05Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-SETT-185` **An older window keeps newer settings** - HIGH; a setting of this extension saved in one window is not written back to its old value by a later save from another window of the same browser, or from another browser or device that gains focus before it saves, unless its focusing click is itself the change (DEF-PANE-283)
+  - evidence: jest index.spec.ts DEF-PANE-282 x3 and Galata panel-regressions.spec.ts DEF-PANE-282 x2 pass at 1.2.44; the same-browser case fails on 1.2.42; full Galata 53/53 twice
+  - related: DEF-PANE-282, DEF-PANE-283 - the other-device gap left to JupyterLab core
+  - test: jlpm jest -t DEF-PANE-282; Galata panel-regressions.spec.ts -g DEF-PANE-282
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-09-29T13:45:48Z @kj a change posts on a BroadcastChannel named after the plugin; on a message and on focus a window fetches the server's copy and reloads only when it differs from its own
+  - log: 2026-09-29T13:21:34Z @kj added
+  - log: 2026-09-29T13:21:41Z @kj closed
+  - log: 2026-09-29T13:45:48Z @kj edited text "a setting of this extension saved in one window is not written back to its old value by a later save from another window of the same browser, or from another browser or device that gains focus before it saves" -> "a setting of this extension saved in one window is not written back to its old value by a later save from another window of the same browser, or from another browser or device that gains focus before it saves, unless its focusing click is itself the change (DEF-PANE-283)"
+  - log: 2026-09-29T13:45:48Z @kj mechanism updated "2026-09-29T13:21:34Z @kj a change posts on a BroadcastChannel named after the plugin and the browser's other windows reload the settings; a window reloads on focus; a change a reload caused is not re-posted" -> "a change posts on a BroadcastChannel named after the plugin; on a message and on focus a window fetches the server's copy and reloads only when it differs from its own"
+  - log: 2026-09-29T13:51:39Z @kj edited evidence "jest index.spec.ts DEF-PANE-282 x2 and Galata panel-regressions.spec.ts DEF-PANE-282 x2 pass at 1.2.43; the same-browser case fails on 1.2.42" -> "jest index.spec.ts DEF-PANE-282 x3 and Galata panel-regressions.spec.ts DEF-PANE-282 x2 pass at 1.2.44; the same-browser case fails on 1.2.42; full Galata 53/53 twice"
 
 ## Panel `PANE`
 

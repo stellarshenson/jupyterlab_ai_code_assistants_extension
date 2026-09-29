@@ -959,6 +959,26 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: MANUAL
   - log: 2026-09-28T19:02:49Z @kj added
   - log: 2026-09-28T19:02:54Z @kj closed
+- [x] `DEF-PANE-282` **An older JupyterLab window reverts the extension's settings** - MAJOR; a save from a JupyterLab window that loaded its settings before another window changed them writes the whole old copy back, so Skip Permissions turns itself off (or back on); seen 2026-09-29 13:43:11
+  - evidence: src/index.ts: a change posts on a BroadcastChannel; on a message and on focus a window reloads only when the server's copy differs from its own. jest index.spec.ts DEF-PANE-282 x3, Galata panel-regressions.spec.ts DEF-PANE-282 x2 (same-browser case fails on 1.2.42)
+  - repro: window A open; turn providers.claude.dangerouslySkipPermissions on from window B; change any setting of this extension in A: the key is off again
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-09-29T11:53:49Z @kj each JupyterLab window caches settings and never reloads them; the Settings page saves JSON.stringify(formData) and registry.set saves the cached raw, both whole-file (JupyterLab 4.6 core); confirmed on the Galata server, logs/exp-stale-window.log
+  - log: 2026-09-29T11:53:49Z @kj added
+  - log: 2026-09-29T11:59:59Z @kj closed
+  - log: 2026-09-29T13:21:15Z @kj edited evidence "src/index.ts reloads the plugin's settings on window focus; jest index.spec.ts DEF-PANE-282 and Galata panel-regressions.spec.ts 'DEF-PANE-282 - a save made from another window' fail on 1.2.40 and pass on 1.2.42; jest 275, pytest 322" -> "src/index.ts: a change posts on a BroadcastChannel and the browser's other windows reload; a window reloads on focus; a change a reload caused is not re-posted. jest index.spec.ts DEF-PANE-282 x2, Galata panel-regressions.spec.ts DEF-PANE-282 x2 (same-browser case fails on 1.2.42); jest 276, pytest 322"
+  - log: 2026-09-29T13:21:15Z @kj review r1 (architect, bug-hunter): focus-only reload misses a save whose focusing click is the change, and a window that never loses focus; Star Colonel chose same-browser sync; v1.2.43
+  - log: 2026-09-29T13:45:48Z @kj edited evidence "src/index.ts: a change posts on a BroadcastChannel and the browser's other windows reload; a window reloads on focus; a change a reload caused is not re-posted. jest index.spec.ts DEF-PANE-282 x2, Galata panel-regressions.spec.ts DEF-PANE-282 x2 (same-browser case fails on 1.2.42); jest 276, pytest 322" -> "src/index.ts: a change posts on a BroadcastChannel; on a message and on focus a window reloads only when the server's copy differs from its own. jest index.spec.ts DEF-PANE-282 x3, Galata panel-regressions.spec.ts DEF-PANE-282 x2 (same-browser case fails on 1.2.42)"
+  - log: 2026-09-29T13:45:49Z @kj review r1 (architect, bug-hunter, ux-designer): an unconditional reload replaced unsaved text in an open JSON settings editor on every focus; reload now only when the server's copy differs, which also ends the echo
+  - log: 2026-09-29T14:06:03Z @kj review r2 MINOR logged, unproven: the echo makes the saving window fetch once after its own save; a GET answered after that window's next PUT could join its post-save fetch and load the copy from before the PUT; needs out-of-order responses and another edit within one round trip
+- [x] `DEF-PANE-283` **Another browser or device can still revert a setting** - MAJOR; a window in another browser or on another device that saves without gaining focus first, or whose focusing click is itself the change, still writes its old copy back; same-browser windows are covered by DEF-PANE-282
+  - evidence: wontfix: needs a version check in JupyterLab core's settings API, outside this extension; same-browser windows and a focus change are covered by DEF-PANE-282
+  - related: DEF-PANE-282 - the same-browser part is fixed there
+  - repro: device B left in front with JupyterLab open; turn Skip Permissions on in device A; change any setting of this extension on B without switching away: the key is off again
+  - test-tags: MANUAL
+  - root-cause: 2026-09-29T13:21:15Z @kj JupyterLab 4.6 settings API writes the whole file with no version check; the Settings page ignores a reload while its own change is pending
+  - log: 2026-09-29T13:21:15Z @kj added
+  - log: 2026-09-29T13:21:23Z @kj closed
 
 ## Colour store `COLO`
 
@@ -1521,8 +1541,20 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - log: 2026-09-28T19:02:49Z @kj added
   - log: 2026-09-28T19:02:54Z @kj closed
 - [x] `DEF-GUARD-281` **resume.spec terminal count can miss the new terminal** - MINOR; Galata 'clicking a seeded session row opens a terminal' failed once at 1.2.40 with before 10, after 10 although the terminal widget appeared; likely cause: an earlier test's terminal closed between the two /api/terminals reads; not reproduced in the full rerun
-  - evidence: wontfix: MINOR, one failure in two full runs, rerun 51/51 (logs/galata-def-pane-277-1.2.40-rerun.log); logged, not fixed under the house rule
+  - root-cause: 2026-09-29T13:21:23Z @kj the stub CLI slept 120 s, so terminal 1 (started 13:57:35.5) ended at 13:59:35.9 between resume.spec.ts's two /api/terminals counts; the new terminal reused its name and the count stayed 10 (logs/galata-def-pane-282.log)
+  - evidence: fixed: ui-tests/jupyter_server_test_config.py stub runs sleep infinity and ends when the server stops; full Galata runs 52/52 twice and 53/53 at 1.2.43, no stub process left after
   - repro: full Galata run at 1.2.40, logs/galata-def-pane-277-1.2.40.log: resume.spec.ts:40 Expected > 10, Received 10
   - test-tags: E2E
   - log: 2026-09-28T19:11:06Z @kj added
   - log: 2026-09-28T19:11:06Z @kj closed
+  - log: 2026-09-29T11:59:59Z @kj recurred 2026-09-29 at 1.2.42, before 10 after 10; now 2 failures in 4 full runs; not investigated
+  - log: 2026-09-29T13:21:24Z @kj edited evidence "wontfix: MINOR, one failure in two full runs, rerun 51/51 (logs/galata-def-pane-277-1.2.40-rerun.log); logged, not fixed under the house rule" -> "fixed: ui-tests/jupyter_server_test_config.py stub runs sleep infinity and ends when the server stops; full Galata runs 52/52 twice and 53/53 at 1.2.43, no stub process left after"
+  - log: 2026-09-29T13:21:24Z @kj root cause found and fixed; the count tests in deepseek.spec.ts, launcher-tiles.spec.ts and claude-regression.spec.ts had the same exposure
+  - log: 2026-09-29T13:52:22Z @kj review r1 MINOR logged: a stub call without a pty that reaches the sleeping branch and times out (codex archive/delete) leaves a sleep process running; no Galata test makes that call
+- [x] `DEF-GUARD-284` **DEF-115 test's Escape can miss the + menu** - MINOR; Galata 'DEF-115 - an armed launch mode leaves the + with no menu at all' failed once at 1.2.43: the + menu stayed open after page.keyboard.press('Escape'); 10/10 in isolation
+  - evidence: fixed: the test presses Escape on the menu locator, which focuses the menu first; DEF-115 10/10 repeated, full Galata 53/53 twice at 1.2.44 (logs/galata-1.2.44-run1.log, run2.log)
+  - repro: full Galata run under load average 23, logs/galata-1.2.43-run2.log: panel-regressions.spec.ts:267 toBeHidden, menu visible
+  - test-tags: E2E
+  - root-cause: 2026-09-29T13:26:54Z @kj likely cause: the menu did not hold keyboard focus when the page-level Escape was sent; a Lumino menu closes only on a keydown on its own node; a focus-triggered settings reload does not move that focus (logs/exp-escape-probe.log)
+  - log: 2026-09-29T13:26:54Z @kj added
+  - log: 2026-09-29T13:51:39Z @kj closed

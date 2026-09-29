@@ -61,6 +61,34 @@ async function flush(turns = 8): Promise<void> {
   }
 }
 
+/** jsdom has no BroadcastChannel. This one joins every window of the test
+ * process and delivers as a microtask, so `flush` settles it and, as in a
+ * browser, a sender never hears its own message. Two windows reloading each
+ * other would post forever and starve every timer, jest's own included, so
+ * past a cap no legitimate run reaches it throws instead of hanging. */
+class TestBroadcastChannel {
+  private static _open: TestBroadcastChannel[] = [];
+  private static _posted = 0;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+
+  constructor(readonly name: string) {
+    TestBroadcastChannel._open.push(this);
+  }
+
+  postMessage(data: unknown): void {
+    TestBroadcastChannel._posted += 1;
+    if (TestBroadcastChannel._posted > 1000) {
+      throw new Error('windows are reloading each other without end');
+    }
+    for (const other of TestBroadcastChannel._open) {
+      if (other !== this && other.name === this.name) {
+        queueMicrotask(() => other.onmessage?.({ data }));
+      }
+    }
+  }
+}
+(globalThis as any).BroadcastChannel = TestBroadcastChannel;
+
 describe('DEF-GUARD-139 - reconcile hands a late roster to a docked panel', () => {
   it('a panel docked before the first roster gains the root and the trash flag', async () => {
     let roster: unknown = null;
@@ -82,12 +110,16 @@ describe('DEF-GUARD-139 - reconcile hands a late roster to a docked panel', () =
       hasPlugin: () => false
     } as any;
     const settings = {
+      raw: '{}',
       composite: {},
       get: () => ({ composite: undefined, user: undefined }),
       set: async () => undefined,
       changed: new Signal<unknown, void>({})
     };
-    const settingRegistry = { load: async () => settings } as any;
+    const settingRegistry = {
+      connector: { fetch: async () => ({ raw: settings.raw }) },
+      load: async () => settings
+    } as any;
     const fileBrowser = { model: { path: 'data/raw' } } as any;
 
     await (plugin.activate as any)(
@@ -302,6 +334,10 @@ describe('ACC-LNCH-143..146 - the Launcher tile has the panel lifecycle', () => 
 });
 
 describe('ACC-PROV - the activation contract', () => {
+  /** The settings file on the server, shared by every window activated here. */
+  let serverRaw = '{}';
+  let saves = 0;
+
   /** A roster in which every assistant is present, or every one but `absent`. */
   const roster = (absent?: string): unknown => ({
     root_dir: '/srv/lab',
@@ -319,6 +355,11 @@ describe('ACC-PROV - the activation contract', () => {
     restored: [AssistantSessionsPanel, string][];
     /** How many times the status route has been asked. */
     probes: () => number;
+    /** Plugin ids passed to `ISettingRegistry.reload`, in order. */
+    reloaded: string[];
+    /** Save from this window: the server and this window hold the new copy,
+     * and `changed` fires. */
+    save: () => void;
   }
 
   interface IOptions {
@@ -377,17 +418,29 @@ describe('ACC-PROV - the activation contract', () => {
 
     const composite = options.composite;
     const userSet = new Set(options.userSet ?? Object.keys(composite ?? {}));
-    const settingRegistry = composite
+    const reloaded: string[] = [];
+    const changed = new Signal<unknown, void>({});
+    const loaded = composite && {
+      raw: serverRaw,
+      composite,
+      get: (key: string) => ({
+        composite: composite[key],
+        user: userSet.has(key) ? composite[key] : undefined
+      }),
+      set: async () => undefined,
+      changed
+    };
+    const settingRegistry = loaded
       ? ({
-          load: async () => ({
-            composite,
-            get: (key: string) => ({
-              composite: composite[key],
-              user: userSet.has(key) ? composite[key] : undefined
-            }),
-            set: async () => undefined,
-            changed: new Signal<unknown, void>({})
-          })
+          connector: { fetch: async () => ({ raw: serverRaw }) },
+          // JupyterLab's reload takes the server's copy and fires `changed`
+          // before it resolves.
+          reload: async (id: string) => {
+            reloaded.push(id);
+            loaded.raw = serverRaw;
+            changed.emit(undefined);
+          },
+          load: async () => loaded
         } as any)
       : null;
 
@@ -401,7 +454,21 @@ describe('ACC-PROV - the activation contract', () => {
       null
     );
     await flush();
-    return { app, docked, restored, probes: () => call };
+    return {
+      app,
+      docked,
+      restored,
+      probes: () => call,
+      reloaded,
+      save: () => {
+        saves += 1;
+        serverRaw = `{"saves": ${saves}}`;
+        if (loaded) {
+          loaded.raw = serverRaw;
+        }
+        changed.emit(undefined);
+      }
+    };
   }
 
   /** Every assistant, turned off. */
@@ -532,6 +599,50 @@ describe('ACC-PROV - the activation contract', () => {
     toasted.mockRestore();
     logged.mockRestore();
     live.docked.forEach(widget => widget.dispose());
+  });
+
+  it('DEF-PANE-282 - a focus with no newer save leaves the settings alone', async () => {
+    const live = await activate({ composite: {} });
+
+    // A reload fires `changed`, and an open JSON settings editor then drops
+    // its unsaved text - so a focus that brings nothing newer must not reload.
+    window.dispatchEvent(new Event('focus'));
+    await flush(32);
+    expect(live.reloaded).toEqual([]);
+
+    live.docked.forEach(widget => widget.dispose());
+  });
+
+  it('DEF-PANE-282 - a focus after another device saved reloads the settings', async () => {
+    const live = await activate({ composite: {} });
+
+    // Saved elsewhere since this window loaded; this window's next save
+    // would write the old copy back.
+    serverRaw = '{"savedElsewhere": true}';
+    window.dispatchEvent(new Event('focus'));
+    await flush(32);
+    expect(live.reloaded).toEqual([
+      'jupyterlab_ai_code_assistants_extension:plugin'
+    ]);
+
+    live.docked.forEach(widget => widget.dispose());
+  });
+
+  it('DEF-PANE-282 - a change in one window makes the other windows of the browser reload', async () => {
+    const one = await activate({ composite: {} });
+    const other = await activate({ composite: {} });
+
+    one.save();
+    await flush(32);
+    expect(other.reloaded).toEqual([
+      'jupyterlab_ai_code_assistants_extension:plugin'
+    ]);
+    // The other window's reload fires `changed` and posts in turn; the window
+    // that saved already holds the server's copy, so the echo stops there.
+    expect(one.reloaded).toEqual([]);
+
+    one.docked.forEach(widget => widget.dispose());
+    other.docked.forEach(widget => widget.dispose());
   });
 
   it('ACC-PROV-16 - a binary installed after start gains its panel on the next probe', async () => {
@@ -734,9 +845,11 @@ describe('ACC-SETT - settings drive the panels', () => {
         user: key in composite ? composite[key] : undefined
       }),
       set: async () => undefined,
-      changed
+      changed,
+      raw: '{}'
     };
     const settingRegistry = {
+      connector: { fetch: async () => ({ raw: settings.raw }) },
       load: async () => {
         if (options.loadThrows) {
           throw new Error('settings registry unavailable');

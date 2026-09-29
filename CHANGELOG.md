@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.45] - 2026-09-29
+
+### Fixed
+
+- A setting of this extension no longer goes back to an old value when you change any setting in another JupyterLab window that was opened earlier. A change now reaches the other windows of the same browser at once, and a window in another browser or on another device picks up newer settings when it gains focus. This is how the Claude Skip Permissions setting kept turning itself off
+
 ## [1.2.41] - 2026-09-28
 
 ### Fixed

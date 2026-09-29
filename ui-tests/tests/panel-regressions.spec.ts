@@ -263,7 +263,9 @@ test('DEF-115 - an armed launch mode leaves the + with no menu at all', async ({
   // assertion below able to fail rather than pass by construction.
   await newButton.click();
   await expect(page.locator(MENU)).toBeVisible();
-  await page.keyboard.press('Escape');
+  // On the menu itself: a Lumino menu closes on a keydown on its own node, and
+  // a page-level press reaches whatever holds focus (DEF-GUARD-284).
+  await page.locator(MENU).press('Escape');
   await expect(page.locator(MENU)).toBeHidden();
 
   await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', true);
@@ -619,4 +621,106 @@ test('DEF-125 - the PATH warning re-arms once the binary comes back', async ({
   // `reconcile` and the set still holds the id from the first absence, so the
   // last poll runs its full ten seconds at infos=1 - which is the user
   // silently losing the only signal that a panel went because its binary did.
+});
+
+test.describe('DEF-PANE-282 - a save made from another window', () => {
+  // The server's copy, not Galata's in-page mock: the defect is two windows
+  // sharing one settings file.
+  test.use({ mockSettings: false });
+
+  const SETTINGS_URL = `/lab/api/settings/${PLUGIN_ID}`;
+  const KEY = 'providers.claude.dangerouslySkipPermissions';
+
+  const raw = async (page: any): Promise<string> =>
+    (await (await page.request.get(SETTINGS_URL)).json()).raw ?? '';
+
+  const saved = async (page: any): Promise<string | undefined> =>
+    /"providers\.claude\.dangerouslySkipPermissions":\s*(true|false)/.exec(
+      await raw(page)
+    )?.[1];
+
+  /** The key as this window's own copy of the settings holds it. */
+  const held = (page: any): Promise<unknown> =>
+    page.evaluate(
+      async (args: { pluginId: string; key: string }) => {
+        const registry = await (window as any).galata.getPlugin(
+          '@jupyterlab/apputils-extension:settings'
+        );
+        return (await registry.get(args.pluginId, args.key)).composite;
+      },
+      { pluginId: PLUGIN_ID, key: KEY }
+    );
+
+  test('from another browser or device, survives this window focusing and saving another setting', async ({
+    page
+  }) => {
+    await page.goto();
+    const original = await raw(page);
+
+    try {
+      await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', false);
+      // The other device turns it on, with the same request its save sends.
+      const next = (await raw(page)).replace(
+        `"${KEY}": false`,
+        `"${KEY}": true`
+      );
+      await page.request.put(SETTINGS_URL, { data: { raw: next } });
+      expect(await saved(page)).toBe('true');
+
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect.poll(() => held(page)).toBe(true);
+
+      // This window saves an unrelated setting, which writes its whole copy.
+      await setProviderEnabled(page, 'gemini', true);
+      expect(await saved(page)).toBe('true');
+    } finally {
+      await page.request.put(SETTINGS_URL, { data: { raw: original } });
+    }
+  });
+
+  test('from another window of this browser, survives this window saving another setting', async ({
+    page
+  }) => {
+    await page.goto();
+    const original = await raw(page);
+    const other = await page.context().newPage();
+
+    try {
+      await setLaunchMode(page, 'claude', 'dangerouslySkipPermissions', false);
+
+      // Its own workspace: a second window on this one's is redirected to a
+      // new workspace while it loads, and a wait begun before the redirect
+      // never settles.
+      await other.goto(
+        new URL('/lab/workspaces/def-pane-282', page.url()).href
+      );
+      await expect
+        .poll(
+          () =>
+            other.evaluate(async () => {
+              const app = (window as any).jupyterapp;
+              if (typeof app !== 'object') {
+                return false;
+              }
+              await app.started;
+              // Galata's getPlugin reads the app this getter caches.
+              return !!(window as any).galata.app;
+            }),
+          { timeout: 60000 }
+        )
+        .toBe(true);
+      // An ordinary save in the other window; no focus event reaches this one.
+      await setLaunchMode(other, 'claude', 'dangerouslySkipPermissions', true);
+      expect(await saved(page)).toBe('true');
+
+      await expect.poll(() => held(page)).toBe(true);
+
+      // This window saves an unrelated setting, which writes its whole copy.
+      await setProviderEnabled(page, 'gemini', true);
+      expect(await saved(page)).toBe('true');
+    } finally {
+      await other.close();
+      await page.request.put(SETTINGS_URL, { data: { raw: original } });
+    }
+  });
 });

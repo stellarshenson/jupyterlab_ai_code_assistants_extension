@@ -99,7 +99,9 @@ os.environ["JUPYTERLAB_AI_CODE_ASSISTANTS_STATE_DIR"] = str(SCRATCH / "state")
 os.environ["JUPYTERLAB_GALATA_ROOT_DIR"] = str(_root)
 
 # Stub binaries, so the providers register without any real assistant CLI
-# installed and a launch spawns a pty that stays open long enough to observe.
+# installed and a launch spawns a pty that stays open until the server stops.
+# A stub that ended on its own after 120 s closed an earlier test's terminal
+# between a later test's two terminal counts (DEF-GUARD-281).
 # ``agents`` is answered because the Claude provider probes it on every
 # listing; left to the sleeping branch it would stall each poll for the
 # subprocess timeout. ``stop`` succeeds only on a terminal and only for the
@@ -116,7 +118,7 @@ case "$1" in
   stop) [ -t 0 ] && [ -t 1 ] && [ "$2" = %s ] && exit 0; exit 3 ;;
 esac
 echo "stub $0 running"
-sleep 120
+sleep infinity
 """ % (
     json.dumps(
         [

@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.47] - 2026-10-01
+
+### Added
+
+- `Open Callback` command, on the command palette under AI Assistants. When an assistant's login sends your browser to an `http://127.0.0.1:...` link that fails to load, because the login is waiting on the machine running JupyterLab, paste the link into the command's popup and the Jupyter server requests it for you. Only `http` links to that machine's own loopback are accepted, redirects are not followed, and the link is never logged
+
 ## [1.2.45] - 2026-09-29
 
 ### Fixed

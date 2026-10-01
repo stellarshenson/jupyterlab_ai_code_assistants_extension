@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import ipaddress
 import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import tornado
+import tornado.httpclient
 from jupyter_core.paths import jupyter_config_dir
 from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
@@ -1162,6 +1165,68 @@ class MigrateHandler(APIHandler):
         self.finish(json.dumps({"migrated": migrated}))
 
 
+#: Ceiling on the one request a pasted callback link gets. The login listener
+#: answers after it has exchanged the code with its provider, so this is not a
+#: local round trip.
+CALLBACK_TIMEOUT_S = 30.0
+
+
+def _is_loopback_http(url: str) -> bool:
+    """True for an ``http`` link whose host is this server's own loopback."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return False
+    if parts.scheme != "http" or not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+class CallbackHandler(_ProviderHandler):
+    """Deliver a pasted login callback link to the listener on this server.
+
+    A CLI login waits for its OAuth redirect on the server's own loopback, but
+    the browser that follows the redirect runs on the user's machine, where
+    that address is another host. The user pastes the link and the server makes
+    the request the browser could not.
+
+    Loopback ``http`` only: any other address would let a caller aim this
+    server at hosts only it can reach. One GET, redirects not followed - the
+    listener exchanges the code on that request, and its redirect leads to a
+    page meant for a browser. The link carries a one-time login code, so it is
+    never logged and never sent back.
+    """
+
+    @tornado.web.authenticated
+    async def post(self) -> None:
+        body = self.parse_body()
+        if body is None:
+            return
+        url = body.get("url")
+        if not isinstance(url, str) or not _is_loopback_http(url):
+            self.bad_request("callback_not_loopback")
+            return
+        try:
+            response = await tornado.httpclient.AsyncHTTPClient().fetch(
+                url,
+                follow_redirects=False,
+                raise_error=False,
+                request_timeout=CALLBACK_TIMEOUT_S,
+            )
+        except (OSError, tornado.httpclient.HTTPError):
+            # Nothing is listening, or it did not answer in time.
+            self.set_status(502)
+            self.finish(json.dumps({"error": "callback_unreachable"}))
+            return
+        self.finish(json.dumps({"status": response.code}))
+
+
 def setup_route_handlers(web_app) -> None:
     global _web_app
     _web_app = web_app
@@ -1177,6 +1242,7 @@ def setup_route_handlers(web_app) -> None:
     handlers = [
         (url_path_join(base_url, URL_PREFIX, "status"), StatusHandler),
         (url_path_join(base_url, URL_PREFIX, "migrate"), MigrateHandler),
+        (url_path_join(base_url, URL_PREFIX, "callback"), CallbackHandler),
         (
             url_path_join(base_url, URL_PREFIX, "providers", provider, "sessions"),
             SessionsHandler,

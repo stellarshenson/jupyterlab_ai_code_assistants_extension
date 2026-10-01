@@ -1520,3 +1520,28 @@ New provider - no standalone extension to port from. DeepSeek Harness (`@deepsee
   - log: 2026-09-19T20:19:48Z @kj the insert-a-title-event half was dropped: no DeepSeek log exists on this machine to confirm the event shape, so writing one would be a guess in the user data
   - log: 2026-09-19T20:30:47Z @kj closed
 
+## Login callback `LOGIN`
+
+The Open Callback command: a pasted OAuth callback link is delivered to the CLI login waiting on the Jupyter server's loopback
+
+- [x] `ACC-LOGIN-186` **Open Callback command** - HIGH; command open:callback, label Open Callback, is on the command palette under AI Assistants; with no url argument a popup asks for the link; the trimmed link is posted to the server; a cancelled or empty popup sends nothing
+  - evidence: jest callback.spec.ts 10 cases and index.spec.ts 'registers the Open Callback command at activation' pass; Galata callback.spec.ts finds the command on the palette, fills the popup and sees the delivered toast, at 1.2.46
+  - test: jlpm jest src/__tests__/callback.spec.ts; Galata callback.spec.ts
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-10-01T10:33:34Z @kj src/core/callback.ts registers the command and posts {url} to the callback route; src/index.ts wires it with the optional ICommandPalette
+  - log: 2026-10-01T10:33:34Z @kj added
+  - log: 2026-10-01T10:33:41Z @kj closed
+- [x] `ACC-LOGIN-187` **Loopback delivery only** - CRITICAL; the server requests the link once with GET and follows no redirect; only an http link to localhost or a loopback address is accepted, anything else is refused with 400 callback_not_loopback; no listener answers 502 callback_unreachable
+  - evidence: pytest test_callback.py 12 cases pass: one GET as pasted, redirect not followed, 9 non-loopback inputs refused with 400, a closed port answers 502; mutations (no loopback rule, redirects followed) fail them; Galata listener received exactly one request
+  - test: pytest jupyterlab_ai_code_assistants_extension/tests/test_callback.py
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-10-01T10:33:34Z @kj CallbackHandler in core/routes.py checks scheme and host with _is_loopback_http, then fetches with follow_redirects off
+  - log: 2026-10-01T10:33:34Z @kj added
+  - log: 2026-10-01T10:33:41Z @kj closed
+- [x] `ACC-LOGIN-188` **The link stays private** - HIGH; the pasted link carries a one-time login code: the server never logs it and never sends it back, and no message to the user repeats it
+  - evidence: pytest test_the_link_is_never_logged fails when the handler logs the link; jest 'without repeating the link' x3 fails when the message includes it
+  - test: pytest test_callback.py::test_the_link_is_never_logged; jlpm jest -t 'without repeating the link'
+  - test-tags: UNIT
+  - log: 2026-10-01T10:33:34Z @kj added
+  - log: 2026-10-01T10:33:41Z @kj closed
+

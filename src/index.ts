@@ -4,7 +4,7 @@ import {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
-import { Notification } from '@jupyterlab/apputils';
+import { ICommandPalette, Notification } from '@jupyterlab/apputils';
 import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
 import { ILauncher } from '@jupyterlab/launcher';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
@@ -13,6 +13,7 @@ import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
 import { IDisposable } from '@lumino/disposable';
 
+import { addCallbackCommand } from './core/callback';
 import { launcherTileIcon, providerIcon } from './core/icons';
 import { DEFAULT_RECENT_LIMIT } from './core/limits';
 import {
@@ -75,7 +76,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     IDefaultFileBrowser,
     IColourfulTabs,
     ILauncher,
-    ITranslator
+    ITranslator,
+    ICommandPalette
   ],
   activate: async (
     app: JupyterFrontEnd,
@@ -86,7 +88,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     fileBrowser: IDefaultFileBrowser | null,
     colourfulTabs: IColourfulTabs | null,
     launcher: ILauncher | null,
-    translator: ITranslator | null
+    translator: ITranslator | null,
+    palette: ICommandPalette | null
   ) => {
     console.log(
       'JupyterLab extension jupyterlab_ai_code_assistants_extension is activated!'
@@ -102,6 +105,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // A duplicate id throws here, at registration, rather than surfacing later
     // as two panels quietly fighting over one widget id.
     const registry = new ProviderRegistry(PROVIDERS);
+
+    addCallbackCommand(app, palette ?? null, LAUNCHER_CATEGORY, trans);
 
     const serverSettings = app.serviceManager.serverSettings;
     const live = new Map<string, ILivePanel>();

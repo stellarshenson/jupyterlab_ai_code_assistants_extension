@@ -480,6 +480,12 @@ describe('ACC-PROV - the activation contract', () => {
       ])
     );
 
+  it('registers the Open Callback command at activation', async () => {
+    const live = await activate();
+    expect(live.app.commands.hasCommand('open:callback')).toBe(true);
+    live.docked.forEach(widget => widget.dispose());
+  });
+
   it('ACC-PROV-10, ACC-PROV-11 - each panel carries its own widget id and registers it for restore', async () => {
     const live = await activate();
     // How this fails: pass a constant to `restorer.add` and two panels claim

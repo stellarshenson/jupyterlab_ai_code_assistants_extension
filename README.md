@@ -47,7 +47,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 - **Conflict-safe upgrade** - if a retired standalone extension is still installed, its panel wins and this extension stands down for that assistant instead of showing a duplicate
 - **DeepSeek in the browser** - the DeepSeek Harness has no terminal chat; its panel lists the projects under `~/.dsh/sessions` (or `$DSH_HOME`) and `Open Web UI` starts `dsh --profile web --no-open --port 0` in the project's terminal, which prints the URL to open. The conversation is then chosen in the harness's own browser UI; branching and deleting work from the panel as for every other assistant. The URL is on the machine running JupyterLab, so a remote server needs a port forward to reach it
 - **Auto-disabled when absent** - an assistant whose CLI is not on `PATH` does not show a panel
-- **Open Callback** - when an assistant's login sends your browser to an `http://127.0.0.1:...` link that fails to load, because the login is waiting on the machine running JupyterLab, run `Open Callback` from the command palette and paste the link; the Jupyter server requests it for you. Only `http` links to that machine's own loopback are accepted
+- **Open Callback** - when an assistant's login sends your browser to an `http://127.0.0.1:...` link that fails to load, because the login is waiting on the machine running JupyterLab, run `Open Callback` from the command palette and paste the link; the Jupyter server requests it for you, and the popup says whether the login accepted it. Only `http` links to that machine's own loopback are accepted
 
 ## Requirements
 

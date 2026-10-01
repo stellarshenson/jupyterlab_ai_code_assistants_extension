@@ -1,15 +1,144 @@
 import { JupyterFrontEnd } from '@jupyterlab/application';
-import {
-  ICommandPalette,
-  InputDialog,
-  Notification
-} from '@jupyterlab/apputils';
+import { Dialog, ICommandPalette, Notification } from '@jupyterlab/apputils';
 import { TranslationBundle } from '@jupyterlab/translation';
+import { Widget } from '@lumino/widgets';
 
 import { requestAPI } from './request';
 
 /** The command that delivers a pasted login callback link. */
 export const CALLBACK_COMMAND = 'open:callback';
+
+/** What a delivery came to, in words for the user. Never the link, which
+ * carries a login code, and never a status code. */
+interface IOutcome {
+  level: 'success' | 'warning' | 'error';
+  message: string;
+}
+
+async function deliver(
+  url: string,
+  app: JupyterFrontEnd,
+  trans: TranslationBundle
+): Promise<IOutcome> {
+  try {
+    const answer = await requestAPI<{ status: number }>(
+      'callback',
+      app.serviceManager.serverSettings,
+      { method: 'POST', body: JSON.stringify({ url }) }
+    );
+    return answer.status < 400
+      ? {
+          level: 'success',
+          message: trans.__(
+            'The login accepted the link. Check the terminal where the login is running.'
+          )
+        }
+      : {
+          level: 'warning',
+          message: trans.__(
+            'The login did not accept this link. Start the login again and paste the new link.'
+          )
+        };
+  } catch (err) {
+    const code = err instanceof Error ? err.message : '';
+    return {
+      level: 'error',
+      message:
+        code === 'callback_not_loopback'
+          ? trans.__(
+              'This link cannot be used. It must start with http://127.0.0.1 or http://localhost.'
+            )
+          : code === 'callback_unreachable'
+            ? trans.__(
+                'No login is waiting for this link. Start the login again and paste the new link.'
+              )
+            : trans.__(
+                'The link could not be sent to the Jupyter server. Try again.'
+              )
+    };
+  }
+}
+
+/** The popup's body: the link field and, below it, what the last send came
+ * to. */
+class CallbackForm extends Widget {
+  constructor(trans: TranslationBundle) {
+    super();
+    this.addClass('jp-AiAssistantsCallback');
+    const label = document.createElement('label');
+    label.textContent = trans.__('Callback link from the browser address bar');
+    this._input = document.createElement('input');
+    this._input.type = 'text';
+    this._input.className = 'jp-mod-styled';
+    this._input.placeholder = 'http://127.0.0.1:1455/auth/callback?code=...';
+    label.appendChild(this._input);
+    this._status = document.createElement('div');
+    this._status.className = 'jp-AiAssistantsCallback-status';
+    this._status.setAttribute('role', 'status');
+    this.node.append(label, this._status);
+  }
+
+  get url(): string {
+    return this._input.value.trim();
+  }
+
+  report(level: IOutcome['level'] | 'pending', message: string): void {
+    this._status.dataset.level = level;
+    this._status.textContent = message;
+  }
+
+  private _input: HTMLInputElement;
+  private _status: HTMLDivElement;
+}
+
+/** OK sends the link and leaves the window open, so the result is read - and
+ * a refused link replaced - in the same place. Close and Escape end it. */
+class CallbackDialog extends Dialog<void> {
+  constructor(
+    private _form: CallbackForm,
+    private _send: (url: string) => Promise<IOutcome>,
+    private _trans: TranslationBundle
+  ) {
+    super({
+      title: _trans.__('Open Callback'),
+      body: _form,
+      buttons: [
+        Dialog.cancelButton({ label: _trans.__('Close') }),
+        Dialog.okButton({ label: _trans.__('OK') })
+      ],
+      defaultButton: 1,
+      focusNodeSelector: 'input'
+    });
+  }
+
+  resolve(index?: number): void {
+    if (index === 0) {
+      super.resolve(index);
+      return;
+    }
+    void this._deliver();
+  }
+
+  private async _deliver(): Promise<void> {
+    const url = this._form.url;
+    if (this._sending) {
+      return;
+    }
+    if (!url) {
+      this._form.report('error', this._trans.__('Paste the link first.'));
+      return;
+    }
+    this._sending = true;
+    this._form.report('pending', this._trans.__('Sending the link...'));
+    const outcome = await this._send(url);
+    this._sending = false;
+    if (!this.isDisposed) {
+      this._form.report(outcome.level, outcome.message);
+    }
+  }
+
+  private _sending = false;
+}
 
 /**
  * Register the command that sends a pasted login callback link to the login
@@ -37,62 +166,23 @@ export function addCallbackCommand(
         properties: {
           url: {
             type: 'string',
-            description: 'The callback link. Asked for in a dialog when absent.'
+            description: 'The callback link. Asked for in a popup when absent.'
           }
         }
       }
     },
     execute: async args => {
-      let url = typeof args.url === 'string' ? args.url.trim() : '';
-      if (!url) {
-        const asked = await InputDialog.getText({
-          title: trans.__('Open Callback'),
-          label: trans.__('Callback link from the browser address bar'),
-          placeholder: 'http://127.0.0.1:1455/auth/callback?code=...'
+      const send = (url: string): Promise<IOutcome> => deliver(url, app, trans);
+      const given = typeof args.url === 'string' ? args.url.trim() : '';
+      if (given) {
+        // No popup to write into, so the result is a toast.
+        const outcome = await send(given);
+        Notification[outcome.level](outcome.message, {
+          autoClose: outcome.level === 'success' ? 4000 : 8000
         });
-        url = asked.button.accept ? (asked.value ?? '').trim() : '';
-        if (!url) {
-          return;
-        }
+        return;
       }
-      try {
-        const answer = await requestAPI<{ status: number }>(
-          'callback',
-          app.serviceManager.serverSettings,
-          { method: 'POST', body: JSON.stringify({ url }) }
-        );
-        if (answer.status < 400) {
-          Notification.success(
-            trans.__(
-              'Callback delivered - the login answered HTTP %1.',
-              answer.status
-            ),
-            { autoClose: 4000 }
-          );
-        } else {
-          Notification.warning(
-            trans.__(
-              'The login refused the callback (HTTP %1). Start the login again and paste the new link.',
-              answer.status
-            ),
-            { autoClose: 8000 }
-          );
-        }
-      } catch (err) {
-        // The server's own codes, never the link: it carries a login code.
-        const code = err instanceof Error ? err.message : String(err);
-        const message =
-          code === 'callback_not_loopback'
-            ? trans.__(
-                'Only an http link to 127.0.0.1 or localhost can be opened.'
-              )
-            : code === 'callback_unreachable'
-              ? trans.__(
-                  'No login is waiting at that address. Start the login again and paste the new link.'
-                )
-              : trans.__('Could not open the callback: %1', code);
-        Notification.error(message, { autoClose: 8000 });
-      }
+      await new CallbackDialog(new CallbackForm(trans), send, trans).launch();
     }
   });
   palette?.addItem({ command: CALLBACK_COMMAND, category });

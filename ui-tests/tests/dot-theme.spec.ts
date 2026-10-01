@@ -50,6 +50,15 @@ test('the dot keeps its green glow on a dark theme and takes a mint ring on a li
   const dot = row.locator(DOT).first();
   await expect(dot).toBeVisible({ timeout: 30000 });
 
+  // A 6px light over the 8px disc that casts the halo, so the halo keeps the
+  // size it had when the light itself was 8px.
+  const size = async (selector: string): Promise<number[]> => {
+    const box = (await dot.locator(selector).boundingBox())!;
+    return [box.width, box.height];
+  };
+  expect(await size('.jp-AiAssistantsPanel-dotGlyph')).toEqual([6, 6]);
+  expect(await size('.jp-AiAssistantsPanel-dotHalo')).toEqual([8, 8]);
+
   const read = async () =>
     await dot.evaluate(el => ({
       isLight: document.body.getAttribute('data-jp-theme-light'),

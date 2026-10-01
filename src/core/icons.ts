@@ -126,15 +126,16 @@ export const filterIcon = new LabIcon({
   svgstr: filterSvgStr
 });
 
-// Row status mark - one filled circle, drawn for a conversation that is live
-// or under remote control. An SVG rather than a rounded span so its colour is
-// a CSS `fill` on the circle itself, the way every other glyph here is
-// recoloured through its class (DEF-PANE-174). The circle carries no `fill`
-// attribute: the stylesheet is the single source of that colour, and a
-// presentation attribute here would be a second one to keep in step
-// (DEF-PANE-179).
+// Row status mark - a light, drawn for a conversation that is live or under
+// remote control: a 6px circle over the 8px disc that casts its halo. An SVG
+// rather than a rounded span so each colour is a CSS `fill` on the circle
+// itself, the way every other glyph here is recoloured through its class
+// (DEF-PANE-174). The circles carry no `fill` attribute: the stylesheet is the
+// single source of those colours, and a presentation attribute here would be
+// a second one to keep in step (DEF-PANE-179).
 const statusDotSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <circle class="jp-AiAssistantsPanel-dotGlyph" cx="8" cy="8" r="8"/>
+  <circle class="jp-AiAssistantsPanel-dotHalo" cx="8" cy="8" r="8"/>
+  <circle class="jp-AiAssistantsPanel-dotGlyph" cx="8" cy="8" r="6"/>
 </svg>`;
 
 export const statusDotIcon = new LabIcon({

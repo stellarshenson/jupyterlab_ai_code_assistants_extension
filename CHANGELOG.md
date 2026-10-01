@@ -4,6 +4,13 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.50] - 2026-10-01
+
+### Changed
+
+- The `Open Callback` popup has a wide link field, and OK or Enter no longer closes it: the link is sent and the result appears under the field in plain words, for example "The login accepted the link. Check the terminal where the login is running." A refused link can be replaced and sent again in the same popup; Close ends it
+- The green status dot on a session row is smaller: its bright centre is 6px where it was 8px, inside the same halo as before. Row names keep their position
+
 ## [1.2.47] - 2026-10-01
 
 ### Added

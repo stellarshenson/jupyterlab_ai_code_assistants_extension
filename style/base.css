@@ -394,6 +394,15 @@
   fill: var(--jp-success-color1);
 }
 
+/* The 8px disc behind the 6px light. It is what casts the halo, so the halo
+   keeps the size it had when the light itself was 8px; fully opaque for that
+   reason, since a shadow is cast by alpha. The 1px of it that shows around the
+   light is painted as the halo looks at that point - the glow colour, dimmed -
+   so it reads as the halo's inner edge and not as a second dot. */
+.jp-AiAssistantsPanel-dotHalo {
+  fill: color-mix(in srgb, var(--jp-success-color1) 65%, black);
+}
+
 /* Light themes take a different dot, because both halves of the one above stop
    working there. JupyterLab stamps the theme's own `isLight` onto the body, so
    the switch is CSS and no TypeScript sees it.
@@ -424,6 +433,12 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dot {
 
 body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotGlyph {
   fill: var(--md-green-500);
+}
+
+/* The mint ring's own colour: three passes saturate the ring at the disc's
+   edge, so undimmed mint is what the halo looks like there. */
+body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
+  fill: var(--md-green-200);
 }
 
 .jp-AiAssistantsPanel-dotPlaceholder {
@@ -1000,4 +1015,41 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotGlyph {
    panel's least legible text was also its most common. */
 .jp-AiAssistantsPanel-row.jp-mod-stale .jp-AiAssistantsPanel-name {
   opacity: 0.65;
+}
+
+/* The Open Callback popup. A callback link runs to about 250 characters, so
+   the field takes the width a normal window can give it. */
+.jp-AiAssistantsCallback {
+  width: min(640px, 80vw);
+}
+
+.jp-AiAssistantsCallback label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jp-AiAssistantsCallback input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* What the last send came to. The height is reserved, so the buttons do not
+   move when the text arrives. */
+.jp-AiAssistantsCallback-status {
+  min-height: 1.5em;
+  margin-top: 8px;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-AiAssistantsCallback-status[data-level='success'] {
+  color: var(--jp-success-color1);
+}
+
+.jp-AiAssistantsCallback-status[data-level='warning'] {
+  color: var(--jp-warn-color1);
+}
+
+.jp-AiAssistantsCallback-status[data-level='error'] {
+  color: var(--jp-error-color1);
 }

@@ -979,6 +979,15 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-09-29T13:21:15Z @kj JupyterLab 4.6 settings API writes the whole file with no version check; the Settings page ignores a reload while its own change is pending
   - log: 2026-09-29T13:21:15Z @kj added
   - log: 2026-09-29T13:21:23Z @kj closed
+- [x] `DEF-PANE-285` **Panel title starts left of the labels and names below it** - MINOR; the panel title starts at the 4px inset while the section labels and the row names start at 18px, so the header reads as misaligned with everything under it
+  - related: ACC-PANE-183 - the inset criterion this changes
+  - evidence: style/base.css title margin-left 14px, the caret column's width; panel-layout.spec.ts ACC-PANE-183 fails on 1.2.49 (title 14px left of the label) and passes on 1.2.51; header screenshot inspected
+  - repro: open any assistant panel: 'CLAUDE CODE SESSIONS' starts 14px left of 'FAVORITES' and of the first row name (paste-20261001-232154.png)
+  - test-tags: E2E
+  - root-cause: 2026-10-01T21:23:19Z @kj ACC-PANE-183 put the title on the shared inset; section labels follow the 14px caret column and names follow the 8px dot column plus a 6px gap
+  - log: 2026-10-01T21:23:19Z @kj added
+  - log: 2026-10-01T21:29:10Z @kj closed
+  - log: 2026-10-01T21:29:10Z @kj side effect: in DejaVu Sans at the default 250px panel 'Claude Code Sessions' needs 160px and has 156px, so it wraps to two lines; it had 170px before; narrower fonts and the other titles fit
 
 ## Colour store `COLO`
 

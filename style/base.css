@@ -15,8 +15,8 @@
 
   /* Single source for the gap between the panel border and its content, on
      both sides: the header, search field, error line, section headers and rows
-     all read it, so the title, the search field, the caret column and the
-     status-dot column keep one left edge. 4px, not 8px: the lists reserve a
+     all read it, so the search field, the caret column and the status-dot
+     column keep one left edge. 4px, not 8px: the lists reserve a
      scrollbar gutter as well, so 8px put the time column 23px from the right
      border where the file browser's sits 12px from it. */
   --aica-inset: 4px;
@@ -43,9 +43,13 @@
 }
 
 /* The panel title and section headers mirror the file browser's headers so the
-   sidebar reads uniformly: 600 weight, uppercase, ui-font-size0, 1px tracking. */
+   sidebar reads uniformly: 600 weight, uppercase, ui-font-size0, 1px tracking.
+   The margin is the caret column's width: the title starts where the section
+   labels and the row names start, not on the inset the carets and the status
+   dots stand on (DEF-PANE-285). */
 .jp-AiAssistantsPanel-title {
   flex: 1 1 auto;
+  margin-left: 14px;
   font-weight: 600;
   letter-spacing: 1px;
   text-transform: uppercase;

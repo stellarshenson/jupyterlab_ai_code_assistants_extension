@@ -118,10 +118,22 @@ test('ACC-PANE-183 - content stands 4px from the panel border on both sides', as
   const left = box.x;
   const right = box.x + box.width;
 
+  // The title is text, so it starts with the text under it - the section
+  // labels and the row names - and not on the inset the carets and the status
+  // dots stand on (DEF-PANE-285).
   const title = (await panel
     .locator('.jp-AiAssistantsPanel-title')
     .boundingBox())!;
-  expect(title.x - left).toBeCloseTo(INSET, 0);
+  const label = (await page
+    .locator(`${ALL} .jp-AiAssistantsPanel-sectionLabel`)
+    .boundingBox())!;
+  const name = (await page
+    .locator(`${ALL} .jp-AiAssistantsPanel-name`)
+    .first()
+    .boundingBox())!;
+  expect(title.x).toBeCloseTo(label.x, 0);
+  expect(title.x).toBeCloseTo(name.x, 0);
+  expect(title.x - left).toBeGreaterThan(INSET);
 
   const buttons = panel.locator(
     '.jp-AiAssistantsPanel-header .jp-AiAssistantsPanel-iconButton'

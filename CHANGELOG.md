@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.52] - 2026-10-01
+
+### Fixed
+
+- The title in a panel's header starts on the same left edge as the section labels and the row names, 14px further right than before. It stood on the panel's inset, left of everything below it. In a wide font at the default panel width, "Claude Code Sessions" can now take two lines
+
 ## [1.2.50] - 2026-10-01
 
 ### Changed

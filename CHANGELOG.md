@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.56] - 2026-10-02
+
+### Changed
+
+- The browser tests for `Open Callback` now run against a fake OpenAI Codex login: a listener that issues a link with a state and a one-time code, redirects the callback to its `/success` address and closes after that request. Four tests deliver links through the popup: the full handshake, the same link sent again, a link from an older login attempt, and a link that is not loopback. The extension itself is unchanged
+
 ## [1.2.55] - 2026-10-02
 
 ### Changed

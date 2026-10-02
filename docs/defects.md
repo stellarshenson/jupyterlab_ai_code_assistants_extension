@@ -138,6 +138,7 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - root-cause: 2026-10-02T10:57:14Z @kj CallbackHandler fetched with follow_redirects off and stopped at the 302, as ACC-LOGIN-187 required; reported by Claude session workspace from a live codex-cli 0.160.0 login on 2026-10-02
   - log: 2026-10-02T10:57:14Z @kj added
   - log: 2026-10-02T10:57:21Z @kj closed
+  - log: 2026-10-02T11:21:11Z @kj Galata callback.spec.ts now delivers a link issued by a fake Codex login (ui-tests/tests/fake-codex-login.ts) and checks both requests; 3 of 4 cases fail on a route that follows no redirect
 
 ## Providers `PROV`
 

@@ -4,6 +4,17 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.55] - 2026-10-02
+
+### Changed
+
+- The `Open Callback` popup closes by itself 3 seconds after it has shown the result, after a success and after a failure alike. Close still ends it at once
+- One popup sends one link: a second OK in the same popup sends nothing. The login code in a callback link works once, and a second send of the same link fails a login that the first send completed
+
+### Fixed
+
+- `Open Callback` now completes an OpenAI Codex login. Codex saves its tokens on the callback request but ends the login only on the request for the `/success` address it redirects to, so its screen kept waiting. The Jupyter server now follows a redirect when its target is an `http` loopback address, at most 5, and requests no address twice. A redirect to any other address is still not followed, and neither the link nor the redirect address is logged
+
 ## [1.2.52] - 2026-10-01
 
 ### Fixed

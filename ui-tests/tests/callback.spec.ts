@@ -21,10 +21,17 @@ const shotPath = (name: string): string =>
 test('Open Callback delivers a pasted link to the login waiting on the server', async ({
   page
 }) => {
+  // Shaped like the Codex listener: the callback redirects to the closing
+  // page, and the request for that page is what ends the login.
   const seen: string[] = [];
   const listener = http.createServer((request, response) => {
-    seen.push(request.url ?? '');
-    response.writeHead(302, { Location: '/success' });
+    const url = request.url ?? '';
+    seen.push(url);
+    if (url.startsWith('/auth/callback')) {
+      response.writeHead(302, { Location: '/success' });
+    } else {
+      response.writeHead(200);
+    }
     response.end();
   });
   await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
@@ -34,17 +41,20 @@ test('Open Callback delivers a pasted link to the login waiting on the server', 
   try {
     await page.goto();
 
-    // Found by its name on the command palette.
-    await page.keyboard.press('Control+Shift+C');
-    await page.locator('.lm-CommandPalette-input').fill('Open Callback');
-    const item = page.locator('.lm-CommandPalette-item', {
-      hasText: 'Open Callback'
-    });
-    await expect(item).toHaveCount(1);
-    await item.click();
-
     const dialog = page.locator('.jp-Dialog');
-    await expect(dialog).toBeVisible();
+    // Found by its name on the command palette.
+    const openPopup = async (): Promise<void> => {
+      await page.keyboard.press('Control+Shift+C');
+      await page.locator('.lm-CommandPalette-input').fill('Open Callback');
+      const item = page.locator('.lm-CommandPalette-item', {
+        hasText: 'Open Callback'
+      });
+      await expect(item).toHaveCount(1);
+      await item.click();
+      await expect(dialog).toBeVisible();
+    };
+
+    await openPopup();
     const field = dialog.locator('.jp-AiAssistantsCallback input');
     const status = dialog.locator('.jp-AiAssistantsCallback-status');
     const ok = dialog.locator('.jp-mod-accept');
@@ -53,7 +63,7 @@ test('Open Callback delivers a pasted link to the login waiting on the server', 
     expect((await field.boundingBox())!.width).toBeGreaterThanOrEqual(600);
 
     // A link the server refuses. The reason is written under the field, in
-    // words, and the popup stays open for another try.
+    // words, and the popup then closes by itself, 3 s later.
     await field.fill('http://listener.invalid/auth/callback?code=one-time');
     await ok.click();
     await expect(status).toHaveText(
@@ -62,7 +72,9 @@ test('Open Callback delivers a pasted link to the login waiting on the server', 
     await expect(dialog).toBeVisible();
     expect(seen).toEqual([]);
     await page.screenshot({ path: shotPath('callback-refused') });
+    await expect(dialog).toHaveCount(0, { timeout: 10000 });
 
+    await openPopup();
     await field.fill(link);
     await ok.click();
     await expect(status).toHaveText(
@@ -72,12 +84,12 @@ test('Open Callback delivers a pasted link to the login waiting on the server', 
     // Told in the popup, which is still open, and not in a toast.
     await expect(dialog).toBeVisible();
     await expect(page.locator('.Toastify__toast')).toHaveCount(0);
-    // One request, as pasted, and the redirect to /success not followed.
-    expect(seen).toEqual(['/auth/callback?code=one-time&state=s']);
+    // The link as pasted, then the closing page it redirects to. Each once.
+    expect(seen).toEqual(['/auth/callback?code=one-time&state=s', '/success']);
     await page.screenshot({ path: shotPath('callback-accepted') });
 
-    await dialog.locator('.jp-mod-reject').click();
-    await expect(dialog).toHaveCount(0);
+    // Nobody clicks Close: the popup ends itself.
+    await expect(dialog).toHaveCount(0, { timeout: 10000 });
   } finally {
     await new Promise(resolve => listener.close(resolve));
   }

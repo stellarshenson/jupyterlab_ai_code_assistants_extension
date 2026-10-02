@@ -8,6 +8,9 @@ import { requestAPI } from './request';
 /** The command that delivers a pasted login callback link. */
 export const CALLBACK_COMMAND = 'open:callback';
 
+/** How long the popup stays open after it has shown what a send came to. */
+const CLOSE_DELAY_MS = 3000;
+
 /** What a delivery came to, in words for the user. Never the link, which
  * carries a login code, and never a status code. */
 interface IOutcome {
@@ -91,8 +94,11 @@ class CallbackForm extends Widget {
   private _status: HTMLDivElement;
 }
 
-/** OK sends the link and leaves the window open, so the result is read - and
- * a refused link replaced - in the same place. Close and Escape end it. */
+/** OK sends the link and leaves the window open, so the result is read in the
+ * same place. The window then closes by itself after `CLOSE_DELAY_MS`. One
+ * window sends one link: the login code in it works once, and a second send
+ * of the same link fails a login the first send completed. Close and Escape
+ * end the window at once. */
 class CallbackDialog extends Dialog<void> {
   constructor(
     private _form: CallbackForm,
@@ -121,23 +127,24 @@ class CallbackDialog extends Dialog<void> {
 
   private async _deliver(): Promise<void> {
     const url = this._form.url;
-    if (this._sending) {
+    if (this._sent) {
       return;
     }
     if (!url) {
       this._form.report('error', this._trans.__('Paste the link first.'));
       return;
     }
-    this._sending = true;
+    this._sent = true;
     this._form.report('pending', this._trans.__('Sending the link...'));
     const outcome = await this._send(url);
-    this._sending = false;
     if (!this.isDisposed) {
       this._form.report(outcome.level, outcome.message);
+      // A no-op when Close has already ended the window.
+      window.setTimeout(() => this.reject(), CLOSE_DELAY_MS);
     }
   }
 
-  private _sending = false;
+  private _sent = false;
 }
 
 /**

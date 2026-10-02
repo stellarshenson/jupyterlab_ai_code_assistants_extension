@@ -28,9 +28,10 @@ import { requestAPI } from '../core/request';
 const request = requestAPI as jest.Mock;
 const LINK = 'http://127.0.0.1:1455/auth/callback?code=one-time&state=s';
 
-/** One macrotask: `Dialog.launch` attaches the popup after its own awaits. */
-const settle = (): Promise<void> =>
-  new Promise(resolve => setTimeout(resolve, 0));
+/** One macrotask: `Dialog.launch` attaches the popup after its own awaits.
+ * The timers are jest's, so that the popup's 3 s close is stepped, not waited
+ * for. */
+const settle = (): Promise<void> => jest.advanceTimersByTimeAsync(0);
 
 function setup(): {
   commands: CommandRegistry;
@@ -88,6 +89,7 @@ describe('the Open Callback command', () => {
   let error: jest.SpyInstance;
 
   beforeEach(() => {
+    jest.useFakeTimers();
     request.mockReset();
     success = jest.spyOn(Notification, 'success').mockReturnValue('' as any);
     error = jest.spyOn(Notification, 'error').mockReturnValue('' as any);
@@ -100,6 +102,7 @@ describe('the Open Callback command', () => {
     )?.click();
     await settle();
     jest.restoreAllMocks();
+    jest.useRealTimers();
   });
 
   it('is on the command palette under the assistants category', () => {
@@ -122,7 +125,7 @@ describe('the Open Callback command', () => {
     expect(commands.hasCommand(CALLBACK_COMMAND)).toBe(true);
   });
 
-  it('OK sends the trimmed link and writes the result under the field, window still open', async () => {
+  it('OK sends the trimmed link, writes the result under the field and the window closes 3 s later', async () => {
     const { commands, serverSettings } = setup();
     request.mockResolvedValue({ status: 302 });
     const popup = await openPopup(commands);
@@ -140,9 +143,10 @@ describe('the Open Callback command', () => {
     expectPlainWords(popup.status.textContent ?? '');
     // Read in the popup, not in a toast, and the popup is still there.
     expect(success).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(2999);
     expect(document.querySelector('.jp-Dialog')).not.toBeNull();
 
-    popup.close.click();
+    await jest.advanceTimersByTimeAsync(1);
     await popup.closed;
     expect(document.querySelector('.jp-Dialog')).toBeNull();
   });
@@ -162,11 +166,9 @@ describe('the Open Callback command', () => {
     expect(popup.status.dataset.level).toBe('success');
   });
 
-  it('a refused link is replaced and sent again in the same window', async () => {
+  it('a refused link also closes the window 3 s after it is reported', async () => {
     const { commands } = setup();
-    request
-      .mockRejectedValueOnce(new Error('callback_unreachable'))
-      .mockResolvedValueOnce({ status: 302 });
+    request.mockRejectedValue(new Error('callback_unreachable'));
     const popup = await openPopup(commands);
 
     popup.input.value = LINK;
@@ -174,10 +176,23 @@ describe('the Open Callback command', () => {
     await settle();
     expect(popup.status.dataset.level).toBe('error');
 
-    popup.input.value = LINK.replace('one-time', 'second');
+    await jest.advanceTimersByTimeAsync(3000);
+    await popup.closed;
+    expect(document.querySelector('.jp-Dialog')).toBeNull();
+  });
+
+  it('a second OK in the same window sends nothing: the login code works once', async () => {
+    const { commands } = setup();
+    request.mockResolvedValue({ status: 200 });
+    const popup = await openPopup(commands);
+
+    popup.input.value = LINK;
     popup.ok.click();
     await settle();
-    expect(request).toHaveBeenCalledTimes(2);
+    popup.ok.click();
+    await settle();
+
+    expect(request).toHaveBeenCalledTimes(1);
     expect(popup.status.dataset.level).toBe('success');
   });
 
@@ -191,6 +206,9 @@ describe('the Open Callback command', () => {
 
     expect(request).not.toHaveBeenCalled();
     expect(popup.status.textContent).toBe('Paste the link first.');
+    // Nothing was sent, so there is no result to close after.
+    await jest.advanceTimersByTimeAsync(3000);
+    expect(document.querySelector('.jp-Dialog')).not.toBeNull();
   });
 
   it('Close sends nothing', async () => {

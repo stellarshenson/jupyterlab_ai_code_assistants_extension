@@ -15,7 +15,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import tornado
 import tornado.httpclient
@@ -1165,10 +1165,16 @@ class MigrateHandler(APIHandler):
         self.finish(json.dumps({"migrated": migrated}))
 
 
-#: Ceiling on the one request a pasted callback link gets. The login listener
+#: Ceiling on each request a pasted callback link leads to. The login listener
 #: answers after it has exchanged the code with its provider, so this is not a
 #: local round trip.
 CALLBACK_TIMEOUT_S = 30.0
+
+#: How many redirects are followed from a pasted callback link. A login needs
+#: one, from the callback to its own closing page.
+CALLBACK_MAX_REDIRECTS = 5
+
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 
 
 def _is_loopback_http(url: str) -> bool:
@@ -1197,10 +1203,13 @@ class CallbackHandler(_ProviderHandler):
     the request the browser could not.
 
     Loopback ``http`` only: any other address would let a caller aim this
-    server at hosts only it can reach. One GET, redirects not followed - the
-    listener exchanges the code on that request, and its redirect leads to a
-    page meant for a browser. The link carries a one-time login code, so it is
-    never logged and never sent back.
+    server at hosts only it can reach. The same rule decides each redirect: one
+    that stays on the loopback is followed, because a listener can exchange
+    the code on the callback request and end the login only on the request for
+    the page it redirects to (Codex does); one that leaves the loopback leads
+    to a page meant for a browser and is not followed. No request is sent
+    twice. The link carries a one-time login code and a redirect can carry a
+    token, so neither is logged or sent back.
     """
 
     @tornado.web.authenticated
@@ -1212,19 +1221,32 @@ class CallbackHandler(_ProviderHandler):
         if not isinstance(url, str) or not _is_loopback_http(url):
             self.bad_request("callback_not_loopback")
             return
-        try:
-            response = await tornado.httpclient.AsyncHTTPClient().fetch(
-                url,
-                follow_redirects=False,
-                raise_error=False,
-                request_timeout=CALLBACK_TIMEOUT_S,
-            )
-        except (OSError, tornado.httpclient.HTTPError):
-            # Nothing is listening, or it did not answer in time.
+        client = tornado.httpclient.AsyncHTTPClient()
+        status = None
+        for _ in range(1 + CALLBACK_MAX_REDIRECTS):
+            try:
+                response = await client.fetch(
+                    url,
+                    follow_redirects=False,
+                    raise_error=False,
+                    request_timeout=CALLBACK_TIMEOUT_S,
+                )
+            except (OSError, tornado.httpclient.HTTPError):
+                # Nothing is listening, or it did not answer in time. After a
+                # redirect, the listener's answer to the link itself stands.
+                break
+            status = response.code
+            location = response.headers.get("Location")
+            if status not in _REDIRECT_STATUSES or not location:
+                break
+            url = urljoin(url, location)
+            if not _is_loopback_http(url):
+                break
+        if status is None:
             self.set_status(502)
             self.finish(json.dumps({"error": "callback_unreachable"}))
             return
-        self.finish(json.dumps({"status": response.code}))
+        self.finish(json.dumps({"status": status}))
 
 
 def setup_route_handlers(web_app) -> None:

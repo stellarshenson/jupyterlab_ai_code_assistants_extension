@@ -130,6 +130,14 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - repro: grep -rn delete_project jupyterlab_ai_code_assistants_extension src; read claude.py owns_pid docstring against its any() predicate
   - log: 2026-09-18T21:27:13Z @kj added
   - log: 2026-09-18T21:27:13Z @kj closed
+- [x] `DEF-SERV-286` **Open Callback leaves a Codex login waiting** - MAJOR; route sent the pasted link once and followed no redirect; Codex saves its tokens on /auth/callback but ends the login only on the request for /success, so its screen kept waiting; a second send of the same link then failed with 400
+  - related: ACC-LOGIN-187 - the criterion this changed
+  - evidence: pytest test_callback.py 17 pass and 5 route mutations each fail their test; Galata callback.spec.ts listener got the link then /success, each once, at 1.2.54; no live Codex login was run with the fix
+  - repro: codex login, paste the callback link into Open Callback at 1.2.52: popup says accepted, codex screen keeps waiting
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-10-02T10:57:14Z @kj CallbackHandler fetched with follow_redirects off and stopped at the 302, as ACC-LOGIN-187 required; reported by Claude session workspace from a live codex-cli 0.160.0 login on 2026-10-02
+  - log: 2026-10-02T10:57:14Z @kj added
+  - log: 2026-10-02T10:57:21Z @kj closed
 
 ## Providers `PROV`
 

@@ -19,7 +19,9 @@ import { DEFAULT_RECENT_LIMIT } from './core/limits';
 import {
   AssistantSessionsPanel,
   DEFAULT_PRESENTATION_MODE,
+  MOVE_PANELS_COMMAND,
   PresentationMode,
+  SYNC_FILE_BROWSER_COMMAND,
   commandId,
   panelWidgetId
 } from './core/panel';
@@ -36,6 +38,9 @@ import { PROVIDERS } from './providers';
 const DEFAULT_SIDEBAR = 'right';
 
 const PLUGIN_ID = 'jupyterlab_ai_code_assistants_extension:plugin';
+/** JupyterLab's own plugin, whose `layout` setting stores the sidebar a user
+ * chose for a widget with "Switch Sidebar Side". */
+const SHELL_PLUGIN_ID = '@jupyterlab/application-extension:shell';
 /** Sidebar rank, shared by every panel so they dock together. */
 const PANEL_RANK = 600;
 /** How often the server is re-asked which assistants are available, so a CLI
@@ -147,6 +152,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
     let status: IStatusResponse | null = null;
     let settings: ISettingRegistry.ISettings | null = null;
     let sidebar: Sidebar = DEFAULT_SIDEBAR;
+    /** The id of the panel whose header menu last asked for a move, until a
+     * move is applied. */
+    let moveAskedBy: string | null = null;
 
     /** Ask the server which providers exist and which of their binaries are on
      * PATH.
@@ -218,6 +226,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
       }
       // Defaults ON, so only an explicit `false` turns it off.
       panel.setColouredTabs(setting<boolean>('colouredTabs', true) !== false);
+      // Defaults ON as well: an absent key reads as on.
+      panel.setSyncFileBrowser(
+        setting<boolean>('syncFileBrowser', true) !== false
+      );
       panel.setModes(modesFor(panel.descriptor.id));
     };
 
@@ -454,7 +466,53 @@ const plugin: JupyterFrontEndPlugin<void> = {
       const next = setting<string>('sidebar', DEFAULT_SIDEBAR);
       if ((next === 'left' || next === 'right') && next !== sidebar) {
         sidebar = next;
+        // Re-docking hides a panel, so a panel on screen before the move is
+        // activated again after it. Two can be on screen, one in each
+        // sidebar: the one whose header menu asked for the move is the one
+        // activated, else the first of them in `live`.
+        const onScreen = Array.from(live.values()).filter(
+          entry => entry.panel.isVisible
+        );
+        const shown =
+          onScreen.find(entry => entry.panel.id === moveAskedBy) ?? onScreen[0];
+        moveAskedBy = null;
         live.forEach(entry => dock(entry.panel));
+        // A panel the user placed with JupyterLab's own "Switch Sidebar Side"
+        // carries a placement that `add` obeys, so it is still in the other
+        // sidebar. This change is the newer decision: it replaces that
+        // placement, the way JupyterLab's own command does, and JupyterLab's
+        // layout setting is saved so that the new side holds after a reload.
+        const elsewhere = new Set(
+          labShell.widgets(sidebar === 'left' ? 'right' : 'left')
+        );
+        let layout: ReturnType<ILabShell['move']> | null = null;
+        for (const entry of live.values()) {
+          if (elsewhere.has(entry.panel)) {
+            layout = labShell.move(entry.panel, sidebar);
+          }
+        }
+        if (layout && settingRegistry) {
+          settingRegistry
+            .set(
+              SHELL_PLUGIN_ID,
+              'layout',
+              JSON.parse(
+                JSON.stringify({
+                  single: layout['single-document'],
+                  multiple: layout['multiple-document']
+                })
+              )
+            )
+            .catch(err => {
+              console.warn(
+                `${LOG_PREFIX} could not save the panel placement.`,
+                err
+              );
+            });
+        }
+        if (shown) {
+          labShell.activateById(shown.panel.id);
+        }
       }
     };
 
@@ -480,6 +538,66 @@ const plugin: JupyterFrontEndPlugin<void> = {
         settings = null;
       }
     }
+
+    /** Save one shared setting from a panel header's context menu. The
+     * `changed` handler above applies a saved value. A failed save does not
+     * change the composite value the menu reads, so the menu keeps showing
+     * the previous state. */
+    const saveSetting = async (
+      key: string,
+      value: boolean | Sidebar
+    ): Promise<void> => {
+      try {
+        await settings?.set(key, value);
+      } catch (err) {
+        console.warn(`${LOG_PREFIX} could not save setting "${key}".`, err);
+        Notification.error(trans.__('The setting was not saved. Try again.'), {
+          autoClose: 4000
+        });
+      }
+    };
+
+    // The two items of every panel header's context menu. Registered once,
+    // here, because the settings they write are shared by every panel, and
+    // before the first panel exists.
+    app.commands.addCommand(SYNC_FILE_BROWSER_COMMAND, {
+      label: trans.__('Sync File Browser'),
+      // Takes no arguments, which is what `null` says here.
+      describedBy: { args: null },
+      isEnabled: () => settings !== null,
+      isToggled: () => setting<boolean>('syncFileBrowser', true) !== false,
+      execute: () =>
+        saveSetting(
+          'syncFileBrowser',
+          setting<boolean>('syncFileBrowser', true) === false
+        )
+    });
+    app.commands.addCommand(MOVE_PANELS_COMMAND, {
+      // Names the sidebar the panels are not in.
+      label: () =>
+        sidebar === 'right'
+          ? trans.__('Move Panel Left')
+          : trans.__('Move Panel Right'),
+      describedBy: {
+        args: {
+          type: 'object',
+          properties: {
+            panel: {
+              type: 'string',
+              description: 'Id of the panel whose header menu ran the command.'
+            }
+          }
+        }
+      },
+      isEnabled: () => settings !== null,
+      execute: args => {
+        // `applySidebar` reads this when the change arrives. After a save
+        // that fails it stays set: the sidebar can then only change to the
+        // side this menu asked for.
+        moveAskedBy = typeof args.panel === 'string' ? args.panel : null;
+        return saveSetting('sidebar', sidebar === 'right' ? 'left' : 'right');
+      }
+    });
 
     await migrate();
 

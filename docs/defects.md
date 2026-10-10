@@ -997,6 +997,96 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-10-01T21:23:19Z @kj added
   - log: 2026-10-01T21:29:10Z @kj closed
   - log: 2026-10-01T21:29:10Z @kj side effect: in DejaVu Sans at the default 250px panel 'Claude Code Sessions' needs 160px and has 156px, so it wraps to two lines; it had 170px before; narrower fonts and the other titles fit
+- [-] `DEF-PANE-288` **A rejected setting save is written by the next successful save** - MINOR; after a failed save from the header menu, the next successful save of any setting of this plugin also writes the rejected value, so Sync File Browser can change when the user clicks Move Panel
+  - repro: reject one settings PUT, click Sync File Browser, restore the server, click Move Panel Left
+  - test-tags: MANUAL
+  - root-cause: 2026-10-09T10:21:14Z @kj JupyterLab settingregistry 4.6.4 set() writes the plugin's raw text before the save runs and a rejected save does not restore it; every settings.set caller has this
+  - log: 2026-10-09T10:21:14Z @kj added
+  - log: 2026-10-09T10:21:27Z @kj closed
+  - log: 2026-10-09T11:03:33Z @kj rejected: not a defect of this product: the cause is JupyterLab's setting registry, which keeps a rejected value in memory for every caller; the header menu shows one error notification and keeps its state; evidence retired: wontfix: MINOR; the cause is inside JupyterLab's setting registry and a remedy needs a new mechanism; one error notification is shown and a retry sends the intended value; adversarial review round 1, 2026-10-09
+  - log: 2026-10-09T13:01:47Z @kj user decision 2026-10-09: leave it; the menu changes the setting, and a save that failed is not handled further
+- [x] `DEF-PANE-289` **Move Panel leaves a panel that has a JupyterLab side override** - MINOR; a panel the user moved with JupyterLab's own Switch Sidebar Side stays where it is; the header item saves the setting and its label changes
+  - evidence: applySidebar moves a placed panel with labShell.move and saves the returned layout to JupyterLab's shell plugin; criterion ACC-PANE-199; Galata test 7 passes with the real Switch Sidebar Side and a page reload at 1.2.65
+  - repro: right-click a panel's sidebar tab, Switch Sidebar Side, then Move Panel Left from the header menu
+  - test-tags: MANUAL
+  - root-cause: 2026-10-09T11:03:33Z @kj verified in a browser at 1.2.60: after shell.move, the call JupyterLab's Switch Sidebar Side makes, that panel stayed left while the other three followed sidebar=right; JupyterLab gives its own per-panel placement precedence in LabShell.add
+  - root-cause: 2026-10-09T10:21:14Z @kj LabShell.add replaces the caller's area with the user layout entry; the settings page route has the same limit at HEAD
+  - log: 2026-10-09T10:21:14Z @kj added
+  - log: 2026-10-09T10:21:27Z @kj closed
+  - log: 2026-10-09T11:03:33Z @kj rejected: not a defect: JupyterLab's own per-panel placement has precedence by its design; the limit is now stated in the sidebar setting description and in README; evidence retired: wontfix: MINOR; a limit of the sidebar setting that exists at HEAD for the settings page route; adversarial review round 1, 2026-10-09
+  - log: 2026-10-09T13:01:48Z @kj reopened: user decision 2026-10-09: the extension's placement decision must win and persist, so this is a defect to fix
+  - log: 2026-10-09T13:50:01Z @kj closed: fixed
+  - log: 2026-10-10T02:49:46Z @kj user confirmed 2026-10-10: Move Panel also moves a panel placed with JupyterLab's Switch Sidebar Side, and the new side holds after a page reload; that is what the decision of 2026-10-09 meant
+- [x] `DEF-PANE-290` **Header menu and a pending row menu can both open** - MINOR; a row right-click followed by a header right-click within 800 ms leaves two menus on screen; both work and a click in one closes the other
+  - evidence: fixed: _openHeaderMenu increments _menuGeneration and clears the row highlight, so a row menu that is still loading stands down; panel.spec.ts DEF-PANE-290 right-clicks the row and the header, and fails when either statement is removed; jest 326 at 1.2.63
+  - repro: right-click a row that has branches, then right-click the header before the row menu opens
+  - test-tags: MANUAL
+  - root-cause: 2026-10-09T10:21:14Z @kj _openHeaderMenu does not increment _menuGeneration, so the pending row open is not superseded
+  - log: 2026-10-09T10:21:14Z @kj added
+  - log: 2026-10-09T10:21:27Z @kj closed
+  - log: 2026-10-09T11:03:33Z @kj edited evidence "wontfix: MINOR; needs two right-clicks within 800 ms and harms nobody; known remedy: one statement that increments _menuGeneration in _openHeaderMenu; adversarial review round 1, 2026-10-09" -> "fixed: _openHeaderMenu increments _menuGeneration, so a row menu that is still loading stands down; panel.spec.ts DEF-PANE-290 passes and fails when the increment is removed; jest 326 at 1.2.62"
+  - log: 2026-10-09T11:23:38Z @kj edited evidence "fixed: _openHeaderMenu increments _menuGeneration, so a row menu that is still loading stands down; panel.spec.ts DEF-PANE-290 passes and fails when the increment is removed; jest 326 at 1.2.62" -> "fixed: _openHeaderMenu increments _menuGeneration and clears the row highlight, so a row menu that is still loading stands down; panel.spec.ts DEF-PANE-290 right-clicks the row and the header, and fails when either statement is removed; jest 326 at 1.2.63"
+- [-] `DEF-PANE-291` **Sync changes the folder the + button and Launcher tiles start in** - MINOR; with syncFileBrowser on, opening a session moves the file browser, so the + button and the Launcher tiles then start in that session's folder
+  - repro: open a session in folder A with sync on, then click +
+  - test-tags: MANUAL
+  - root-cause: 2026-10-09T10:21:15Z @kj by design: + and the tiles start in the file browser's folder, and the sync moves the file browser
+  - log: 2026-10-09T10:21:15Z @kj added
+  - log: 2026-10-09T10:21:28Z @kj closed
+  - log: 2026-10-09T11:03:19Z @kj rejected: not a defect: by design, the sync moves the file browser and + starts in the file browser's folder; README now states it; evidence retired: wontfix: by design, the sync moves the file browser and + starts in the file browser's folder; adversarial review round 1, 2026-10-09
+  - log: 2026-10-09T13:01:47Z @kj user decision 2026-10-09: by design; sync applies only when an existing session is opened from the panel, and a new session starts in the folder it is started in
+- [x] `DEF-PANE-293` **Move Panel hides the panel it was used on** - MINOR; with one assistant panel on screen in each sidebar, Move Panel from the header of the later provider leaves that panel behind the first provider's tab in the new sidebar
+  - evidence: the Move item passes its panel id and applySidebar activates the panel that asked; at 1.2.64 the Codex panel was hidden after the move, at 1.2.66 it is on screen (Galata test 8, screenshot move-keeps-own-panel.png)
+  - related: ACC-PANE-200
+  - repro: Switch Sidebar Side on the Claude panel tab, open the Claude and Codex panels, right-click the Codex header, Move Panel Left
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-10-09T13:34:38Z @kj reproduced in a browser at 1.2.64: applySidebar activates the first panel in live that was on screen; the command does not know which panel's menu ran it
+  - log: 2026-10-09T13:34:38Z @kj added
+  - log: 2026-10-09T13:50:01Z @kj closed: fixed
+  - log: 2026-10-09T14:40:29Z @kj edited evidence "the Move item passes its panel id and the command activates it after the save; at 1.2.64 the Codex panel was hidden after the move, at 1.2.65 it is on screen (Galata test 8, screenshot move-keeps-own-panel.png)" -> "the Move item passes its panel id and applySidebar activates the panel that asked; at 1.2.64 the Codex panel was hidden after the move, at 1.2.66 it is on screen (Galata test 8, screenshot move-keeps-own-panel.png)"
+- [x] `DEF-PANE-294` **Move Panel acts on the shell after its save** - MINOR; the command activated its panel after the awaited save: also after a save that failed, and not when a later save of these settings was queued behind it
+  - evidence: the command stores the panel that asked and applySidebar activates it; index.spec.ts ACC-PANE-200 3 cases: a failed save activates nothing, a move applied later keeps that panel; red under source mutations I2, I3, I4, I16; Galata test 8 red under M11, M13, M14 at 1.2.70
+  - related: ACC-PANE-200, DEF-PANE-293
+  - repro: Move Panel from a header menu with a save that fails, then with a second settings save queued inside the same round trip
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-10-09T14:33:39Z @kj the activation ran in the command after the save promise, not where the move is applied; found by review rounds 7 and 8 at 1.2.65
+  - log: 2026-10-09T14:33:39Z @kj added
+  - log: 2026-10-09T14:40:28Z @kj closed: fixed
+  - log: 2026-10-10T01:19:52Z @kj edited evidence "the command stores the panel that asked and applySidebar activates it; index.spec.ts ACC-PANE-200 3 cases: a failed save activates nothing, a move applied later keeps that panel; red under mutations N1 to N4; Galata test 8 red under M11, M13, M14 at 1.2.66" -> "the command stores the panel that asked and applySidebar activates it; index.spec.ts ACC-PANE-200 3 cases: a failed save activates nothing, a move applied later keeps that panel; red under source mutations I2, I3, I4, I16; Galata test 8 red under M11, M13, M14 at 1.2.69"
+  - log: 2026-10-10T02:29:37Z @kj edited evidence "the command stores the panel that asked and applySidebar activates it; index.spec.ts ACC-PANE-200 3 cases: a failed save activates nothing, a move applied later keeps that panel; red under source mutations I2, I3, I4, I16; Galata test 8 red under M11, M13, M14 at 1.2.69" -> "the command stores the panel that asked and applySidebar activates it; index.spec.ts ACC-PANE-200 3 cases: a failed save activates nothing, a move applied later keeps that panel; red under source mutations I2, I3, I4, I16; Galata test 8 red under M11, M13, M14 at 1.2.70"
+- [-] `DEF-PANE-296` **A following window writes JupyterLab's shell settings** - MINOR; a window that follows a Move Panel made in another window also saved JupyterLab's layout, from its own older copy of the shell settings, with no user action in that window
+  - related: ACC-PANE-199, DEF-PANE-282 - the same class for this extension's own settings
+  - repro: two windows that both hold a Switch Sidebar Side placement of an assistant panel; Move Panel Left then Right in one; the other sends a PUT of the shell settings
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-10-09T15:30:41Z @kj applySidebar saved the layout for every applied change, also one that arrived through the cross-window reload; found by the bug-hunter architecture assessment at 1.2.66, read from source
+  - log: 2026-10-09T15:30:41Z @kj added
+  - log: 2026-10-09T15:49:23Z @kj closed: fixed
+  - log: 2026-10-10T00:41:42Z @kj rejected: user decision 2026-10-10: every window that moves a placed panel saves JupyterLab's layout; the flag that stopped a following window from writing left a move unsaved in two other cases and is removed; evidence retired: a window sets a flag while it loads another window's save and applySidebar then moves without saving; index.spec.ts DEF-PANE-296 red under mutations P1 to P3; two-window Galata test 9 red under bundle mutations M15 and M16c; full suite 66 of 66 twice at 1.2.68
+- [x] `DEF-PANE-297` **A sidebar change before the shell is restored throws** - MINOR; a sidebar change that arrives after the first dock and before JupyterLab restored its layout called labShell.move, which throws there; the throw skipped the reconcile of that change
+  - evidence: applySidebar moves only a panel that sits in the other sidebar, so a panel the shell has only queued is not moved; index.spec.ts DEF-PANE-297 red under source mutations I14 and I20 at 1.2.70
+  - related: ACC-PANE-199
+  - repro: unit: index.spec.ts DEF-PANE-297 with a shell double that only queues an added panel
+  - test-tags: UNIT
+  - root-cause: 2026-10-09T15:30:41Z @kj every panel not in the wanted sidebar was moved, and a panel the shell has only queued is in no sidebar; found by the bug-hunter architecture assessment at 1.2.66, read from source
+  - log: 2026-10-09T15:30:41Z @kj added
+  - log: 2026-10-09T15:49:23Z @kj closed: fixed
+  - log: 2026-10-10T00:41:42Z @kj edited evidence "applySidebar moves only a panel that sits in the other sidebar, so a panel the shell has only queued is not moved; index.spec.ts DEF-PANE-297 red under mutation P4; Galata tests 7 and 9 still red under M9c at 1.2.68" -> "applySidebar moves only a panel that sits in the other sidebar, so a panel the shell has only queued is not moved; index.spec.ts DEF-PANE-297 red under mutation P4"
+  - log: 2026-10-10T01:19:52Z @kj edited evidence "applySidebar moves only a panel that sits in the other sidebar, so a panel the shell has only queued is not moved; index.spec.ts DEF-PANE-297 red under mutation P4" -> "applySidebar moves only a panel that sits in the other sidebar, so a panel the shell has only queued is not moved; index.spec.ts DEF-PANE-297 red under source mutations I14 and I20 at 1.2.69"
+  - log: 2026-10-10T02:29:38Z @kj edited evidence "applySidebar moves only a panel that sits in the other sidebar, so a panel the shell has only queued is not moved; index.spec.ts DEF-PANE-297 red under source mutations I14 and I20 at 1.2.69" -> "applySidebar moves only a panel that sits in the other sidebar, so a panel the shell has only queued is not moved; index.spec.ts DEF-PANE-297 red under source mutations I14 and I20 at 1.2.70"
+- [x] `DEF-PANE-298` **Two overlapping opens can leave the file browser on the earlier folder** - MINOR; two session opens that finish within one request round trip each run filebrowser:go-to-path; the folder of the open that finished first can be applied last, so the file browser shows the earlier session's folder until the next open
+  - evidence: file browser moves of every panel run one after another (panel.ts fileBrowserMoves); panel.spec.ts DEF-PANE-298 red with no queue and with one queue per panel; browser probe with the first answer held: 1.2.69 ends on the first session's folder 2 of 2, 1.2.70 on the last 3 of 3
+  - test-tags: UNIT
+  - repro: browser probe tmp/adv-review/sync-header/probes/def298-probe.spec.ts: hold the server answer to the first move's contents.get, open a second session from another panel, release the answer
+  - root-cause: 2026-10-10T01:15:07Z @kj JupyterLab's go-to-path awaits contents.get(path) before model.cd, so two overlapping calls reach cd in the order the answers return; panel.ts _openSession starts one call per finished open and does not queue them
+  - log: 2026-10-10T01:15:07Z @kj added
+  - log: 2026-10-10T01:15:11Z @kj rejected: not a defect of this product: the order is lost inside JupyterLab's go-to-path command; it needs two opens ready within milliseconds and server answers in reverse order; the next open corrects the folder; a queue of moves would stop every later sync when one answer never arrives
+  - log: 2026-10-10T01:40:52Z @kj user decision 2026-10-10: leave it; asked whether the goal's root-cause clause or the rule that MINOR edge cases are logged and not fixed applies, the user chose to leave it and change no code
+  - log: 2026-10-10T01:41:14Z @kj user's reason 2026-10-10, verbatim: 'humans click it'; my reading: sessions are opened by human clicks, which do not arrive milliseconds apart, so the input does not occur
+  - log: 2026-10-10T01:43:20Z @kj reopened: reopened only to record the rejection reason as the user's decision
+  - log: 2026-10-10T01:43:20Z @kj rejected: user decision 2026-10-10: leave it, change no code; the user's reason, verbatim: 'humans click it' - sessions are opened by human clicks, which do not arrive milliseconds apart, so the input does not occur
+  - log: 2026-10-10T01:58:09Z @kj reopened: user decision 2026-10-10, second answer: queue the moves after all; asked which yields, the decision to leave it or the goal check that wants the root cause fixed
+  - log: 2026-10-10T02:11:29Z @kj edited repro "traced from source, not run: of two overlapping filebrowser:go-to-path calls, delay the server answer to the first call's contents.get" -> "browser probe tmp/adv-review/sync-header/probes/def298-probe.spec.ts: hold the server answer to the first move's contents.get, open a second session from another panel, release the answer"; test-tags added "UNIT"
+  - log: 2026-10-10T02:11:29Z @kj closed: fixed
+  - log: 2026-10-10T02:36:57Z @kj review note, no change: the queue runs only while _moveFileBrowserTo never rejects; a non-string project_path is the only way, and the type and all five providers exclude it; with the catch rethrowing, the ACC-SESS-192 rejected-move test and DEF-PANE-298 both fail
 
 ## Colour store `COLO`
 
@@ -1576,3 +1666,29 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - root-cause: 2026-09-29T13:26:54Z @kj likely cause: the menu did not hold keyboard focus when the page-level Escape was sent; a Lumino menu closes only on a keydown on its own node; a focus-triggered settings reload does not move that focus (logs/exp-escape-probe.log)
   - log: 2026-09-29T13:26:54Z @kj added
   - log: 2026-09-29T13:51:39Z @kj closed
+- [x] `DEF-GUARD-287` **Open Callback browser test failed once in 19 runs** - MINOR; callback.spec.ts 'the same link sent again': after the popup closed itself, Control+Shift+C did not show the command palette and the test ran out of time; 1 failure in 19 runs at 1.2.59, not reproduced in 18 repeats
+  - evidence: fixed: openPopup opens the palette again when it was closed; experiment: one command run 40 ms after the palette opens fails the old helper with the same error, and the new helper opens the popup on attempt 2
+  - repro: run the full Galata suite with --trace retain-on-failure and copy test-results before the next run
+  - test-tags: E2E
+  - root-cause: 2026-10-09T11:03:33Z @kj JupyterLab's modal command palette hides when any application command runs, and the helper then waited on the hidden input; JupyterLab runs router:tree and launcher:create 0.6 to 0.7 s after the helper's first key press (14 runs); which command ran in the failing run was not captured
+  - root-cause: 2026-10-09T09:48:24Z @kj cause unknown; the failing run's video and error context were overwritten by the next run
+  - log: 2026-10-09T09:48:24Z @kj added
+  - log: 2026-10-09T10:42:19Z @kj closed
+  - log: 2026-10-09T11:03:33Z @kj edited evidence "wontfix: MINOR; 1 failure in 22 runs of the test, not reproduced in 21 later runs (18 repeats at 1.2.59, 3 full suites of 63 at 1.2.60 with traces kept on failure); cause unknown" -> "fixed: openPopup opens the palette again when it was closed; experiment: one command run 40 ms after the palette opens fails the old helper with the same error, and the new helper opens the popup on attempt 2"
+- [x] `DEF-GUARD-292` **Header menu tests left their menus on screen** - MINOR; the ACC-PANE-193 block of panel.spec.ts closed its menu with a mousedown event, which does nothing; each test's menu stayed in the document for the next test, and the comment said it was closed
+  - evidence: fixed: the block's afterEach dispatches pointerdown; the DEF-PANE-290 test in that block counts the menus on screen and failed with 3 menus while the cleanup dispatched mousedown; jest 326 at 1.2.62
+  - repro: run the ACC-PANE-193 block and count .lm-Menu nodes at the start of its third test
+  - test-tags: UNIT
+  - root-cause: 2026-10-09T11:03:33Z @kj this Lumino version closes a menu on pointerdown, not mousedown
+  - log: 2026-10-09T11:03:33Z @kj added
+  - log: 2026-10-09T11:03:40Z @kj closed
+- [x] `DEF-GUARD-295` **ACC-PANE-199 browser test reloads before the workspace write** - MEDIUM; the test reloaded the page before JupyterLab wrote its workspace; 4 of 6 runs failed at 1.2.66 with the placed panel back on the left
+  - evidence: the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); with the stale workspace write forced to land first, 3 of 3 pass with the wait and 3 of 3 fail without it; full browser suite 65 of 65 twice at 1.2.70
+  - related: ACC-PANE-199
+  - repro: run test 7 of ui-tests/tests/file-browser-sync.spec.ts six times at 1.2.66
+  - test-tags: E2E
+  - root-cause: 2026-10-09T14:33:39Z @kj JupyterLab 4.6.4 SideBarHandler.rehydrate re-adds each widget listed in the saved workspace, which is written about 0.5 s after a sidebar change; JupyterLab's own Switch Sidebar Side alone shows it, 3 of 3 runs
+  - log: 2026-10-09T14:33:39Z @kj added
+  - log: 2026-10-09T14:40:28Z @kj closed: fixed
+  - log: 2026-10-10T01:19:52Z @kj edited evidence "the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); 12 of 12 with --repeat-each 12, 4 of 6 failed before; full browser suite 65 of 65 twice at 1.2.66" -> "the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); with the stale workspace write forced to land first, 3 of 3 pass with the wait and 3 of 3 fail without it; full browser suite 65 of 65 twice at 1.2.69"
+  - log: 2026-10-10T02:29:37Z @kj edited evidence "the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); with the stale workspace write forced to land first, 3 of 3 pass with the wait and 3 of 3 fail without it; full browser suite 65 of 65 twice at 1.2.69" -> "the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); with the stale workspace write forced to land first, 3 of 3 pass with the wait and 3 of 3 fail without it; full browser suite 65 of 65 twice at 1.2.70"

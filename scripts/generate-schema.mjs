@@ -56,6 +56,13 @@ const SHARED = {
       'Which JupyterLab sidebar to dock the assistant panels to. `right` (default) keeps them clear of the file browser. `left` puts them next to it.',
     enum: ['left', 'right'],
     default: 'right'
+  },
+  syncFileBrowser: {
+    type: 'boolean',
+    title: 'Sync file browser with opened session',
+    description:
+      "When enabled (default), opening a session moves the JupyterLab file browser to that session's project folder. A project folder outside the JupyterLab root leaves the file browser where it is. The context menu of each panel header also toggles this.",
+    default: true
   }
 };
 

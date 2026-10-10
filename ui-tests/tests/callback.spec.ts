@@ -45,17 +45,26 @@ test.afterEach(async () => {
   await login.stop();
 });
 
-/** Open the popup from the command palette, by the command's name. */
+/** Open the popup from the command palette, by the command's name.
+ *
+ * JupyterLab's modal palette closes when any application command runs, and
+ * JupyterLab runs commands of its own after the page is ready: `router:tree`
+ * and `launcher:create` were measured 0.6 to 0.7 s after this function's
+ * first key press. A palette closed under the helper is opened again
+ * (DEF-GUARD-287). */
 async function openPopup(page: any): Promise<any> {
-  await page.keyboard.press('Control+Shift+C');
-  await page.locator('.lm-CommandPalette-input').fill('Open Callback');
-  const item = page.locator('.lm-CommandPalette-item', {
-    hasText: 'Open Callback'
-  });
-  await expect(item).toHaveCount(1);
-  await item.click();
   const dialog = page.locator('.jp-Dialog');
-  await expect(dialog).toBeVisible();
+  const step = { timeout: 3000 };
+  await expect(async () => {
+    await page.keyboard.press('Control+Shift+C');
+    await page.locator('.lm-CommandPalette-input').fill('Open Callback', step);
+    const item = page.locator('.lm-CommandPalette-item', {
+      hasText: 'Open Callback'
+    });
+    await expect(item).toHaveCount(1, step);
+    await item.click(step);
+    await expect(dialog).toBeVisible(step);
+  }).toPass({ timeout: 30000 });
   return dialog;
 }
 

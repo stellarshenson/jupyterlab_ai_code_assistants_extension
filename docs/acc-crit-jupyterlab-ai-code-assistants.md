@@ -295,6 +295,13 @@ One settings section for all assistants, replacing the three separate sections. 
   - log: 2026-09-29T13:45:48Z @kj edited text "a setting of this extension saved in one window is not written back to its old value by a later save from another window of the same browser, or from another browser or device that gains focus before it saves" -> "a setting of this extension saved in one window is not written back to its old value by a later save from another window of the same browser, or from another browser or device that gains focus before it saves, unless its focusing click is itself the change (DEF-PANE-283)"
   - log: 2026-09-29T13:45:48Z @kj mechanism updated "2026-09-29T13:21:34Z @kj a change posts on a BroadcastChannel named after the plugin and the browser's other windows reload the settings; a window reloads on focus; a change a reload caused is not re-posted" -> "a change posts on a BroadcastChannel named after the plugin; on a message and on focus a window fetches the server's copy and reloads only when it differs from its own"
   - log: 2026-09-29T13:51:39Z @kj edited evidence "jest index.spec.ts DEF-PANE-282 x2 and Galata panel-regressions.spec.ts DEF-PANE-282 x2 pass at 1.2.43; the same-browser case fails on 1.2.42" -> "jest index.spec.ts DEF-PANE-282 x3 and Galata panel-regressions.spec.ts DEF-PANE-282 x2 pass at 1.2.44; the same-browser case fails on 1.2.42; full Galata 53/53 twice"
+- [x] `ACC-SETT-189` **File browser sync setting** - HIGH; setting syncFileBrowser, boolean, default true, on the shared settings page; an absent key reads as on; a change applies to every docked panel with no reload
+  - evidence: pytest: key is boolean, default true, red when the generator default is false; index.spec.ts 3 cases pass, each red under a mutation by its author and by an independent verifier; jest 325, pytest 340 at 1.2.60
+  - mechanism: 2026-10-09T10:30:30Z @kj scripts/generate-schema.mjs SHARED.syncFileBrowser; index.ts applySharedSettings passes setting('syncFileBrowser', true) !== false to each panel through setSyncFileBrowser
+  - test: pytest test_settings_schema.py; jlpm jest src/__tests__/index.spec.ts
+  - test-tags: UNIT
+  - log: 2026-10-09T07:48:21Z @kj added
+  - log: 2026-10-09T10:30:30Z @kj closed
 
 ## Panel `PANE`
 
@@ -456,6 +463,70 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - log: 2026-10-01T21:29:10Z @kj edited evidence "panel-layout.spec.ts ACC-PANE-183: title, last header button, search field, caret and every dot box 4px from the panel edge, every time box 4px short of the list content edge; Galata 49 at 1.2.33. Mutations: --aica-inset 8px and row padding 8px each redden it" -> "panel-layout.spec.ts ACC-PANE-183: title left edge equals the section label's and the row name's, last header button, search field, caret and every dot box 4px from the panel edge, every time box 4px short of the list content edge; Galata 54 at 1.2.51"
   - log: 2026-10-01T21:29:10Z @kj title moved off the inset to the text edge at the Star Colonel's request (DEF-PANE-285)
   - log: 2026-10-01T21:29:21Z @kj edited text "panel content stands 4px from the panel border on both sides: title, header buttons, search field, error line, section headers and rows; the caret column and the status-dot column share that left edge; the time column ends 4px short of the list's content edge, before its reserved scrollbar gutter" -> "panel content stands 4px from the panel border on both sides: header buttons, search field, error line, section headers and rows; the caret and status-dot columns share that left edge; the title starts with the section labels and row names; the time column ends 4px short of the list edge"
+- [x] `ACC-PANE-193` **Header context menu** - HIGH; right-click on a panel header opens a menu with two items, in order: Sync File Browser, then Move Panel Left or Move Panel Right; the browser menu and the row menu do not open
+  - evidence: panel.spec.ts 2 cases red under mutation; Galata test 4: items Sync File Browser then Move Panel Left, one menu on screen; fails when the header opens no menu; screenshot header-menu.png inspected
+  - mechanism: 2026-10-09T10:30:30Z @kj panel.ts: a contextmenu listener on the header calls _openHeaderMenu, which builds one MenuSvg on app.commands at first use with the two shared command ids; index.ts registers both commands once
+  - test: jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T09:33:52Z @kj edited text "right-click on a panel header opens a menu with two items, in order: Sync File Browser with Opened Session, then Move Panels to Left Sidebar or Move Panels to Right Sidebar; the browser menu and the row menu do not open" -> "right-click on a panel header opens a menu with two items, in order: Sync File Browser, then Move Panels Left or Move Panels Right; the browser menu and the row menu do not open"
+  - log: 2026-10-09T09:35:12Z @kj edited text "right-click on a panel header opens a menu with two items, in order: Sync File Browser, then Move Panels Left or Move Panels Right; the browser menu and the row menu do not open" -> "right-click on a panel header opens a menu with two items, in order: Sync File Browser, then Move Panel Left or Move Panel Right; the browser menu and the row menu do not open"
+  - log: 2026-10-09T09:35:53Z @kj edited test "jlpm jest src/__tests__/panel.spec.ts; Galata header-menu.spec.ts" -> "jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts"
+  - log: 2026-10-09T10:30:31Z @kj closed
+- [x] `ACC-PANE-194` **Header menu: Sync File Browser** - HIGH; the Sync File Browser item is checked while syncFileBrowser is on; a click saves the opposite value; the next open follows the saved value
+  - evidence: index.spec.ts 3 cases red under mutation; Galata tests 4 and 5 pass and fail when the bundle inverts the check mark or saves the same value; screenshots header-menu.png and header-menu-sync-off.png inspected
+  - test: jlpm jest src/__tests__/index.spec.ts; Galata file-browser-sync.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T09:35:53Z @kj edited title "Header menu: sync toggle" -> "Header menu: Sync File Browser"; text "the Sync item is checked while syncFileBrowser is on; a click saves the opposite value; the next open follows the saved value" -> "the Sync File Browser item is checked while syncFileBrowser is on; a click saves the opposite value; the next open follows the saved value"; test "jlpm jest src/__tests__/index.spec.ts; Galata header-menu.spec.ts" -> "jlpm jest src/__tests__/index.spec.ts; Galata file-browser-sync.spec.ts"
+  - log: 2026-10-09T10:30:31Z @kj closed
+- [x] `ACC-PANE-195` **Header menu: Move Panel** - HIGH; the item reads Move Panel Left while the panels are in the right sidebar and Move Panel Right while they are in the left; a click saves that side to sidebar; every assistant panel re-docks there
+  - evidence: index.spec.ts 3 cases red under mutation; Galata test 6: every panel moves left, the item reads Move Panel Right, then back; fails when the bundle saves the same side; screenshot panels-moved-left.png inspected
+  - test: jlpm jest src/__tests__/index.spec.ts; Galata file-browser-sync.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T09:35:53Z @kj edited title "Header menu: move panels" -> "Header menu: Move Panel"; text "the Move item names the sidebar the panels are not in; a click saves that side to sidebar; every assistant panel re-docks there; the item then names the other side" -> "the item reads Move Panel Left while the panels are in the right sidebar and Move Panel Right while they are in the left; a click saves that side to sidebar; every assistant panel re-docks there"; test "jlpm jest src/__tests__/index.spec.ts; Galata header-menu.spec.ts" -> "jlpm jest src/__tests__/index.spec.ts; Galata file-browser-sync.spec.ts"
+  - log: 2026-10-09T10:30:31Z @kj closed
+- [x] `ACC-PANE-196` **A move keeps the open panel open** - MEDIUM; an assistant panel on screen before sidebar changed is on screen in the new sidebar after the change, from the header menu and from the settings page alike
+  - evidence: index.spec.ts 3 cases pass with a shell double that hides a widget on add, red when the re-dock runs before the lookup; Galata test 6 fails when the bundle skips activateById
+  - mechanism: 2026-10-09T10:30:30Z @kj index.ts applySidebar finds the panel whose isVisible is true before the re-dock loop and calls labShell.activateById on it after the loop
+  - test: jlpm jest src/__tests__/index.spec.ts; Galata file-browser-sync.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T09:35:53Z @kj edited test "jlpm jest src/__tests__/index.spec.ts; Galata header-menu.spec.ts" -> "jlpm jest src/__tests__/index.spec.ts; Galata file-browser-sync.spec.ts"
+  - log: 2026-10-09T10:30:31Z @kj closed
+- [x] `ACC-PANE-197` **Edge: header menu without settings** - LOW; with no settings registry both header menu items are disabled
+  - evidence: index.spec.ts: both commands report isEnabled false with a null settings registry and true with one; red under mutation by author and verifier
+  - test: jlpm jest src/__tests__/index.spec.ts
+  - test-tags: UNIT
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T10:30:31Z @kj closed
+- [x] `ACC-PANE-198` **Edge: setting not saved** - MEDIUM; when saving from the header menu fails, one error notification says the setting was not saved, and the item keeps its previous state
+  - evidence: index.spec.ts 2 cases: a rejected settings.set raises exactly one Notification.error and the check mark or the docking is unchanged; red under mutation by author and verifier
+  - test: jlpm jest src/__tests__/index.spec.ts
+  - test-tags: UNIT
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T10:30:31Z @kj closed
+- [x] `ACC-PANE-199` **Move Panel overrides a JupyterLab placement** - HIGH; a change of sidebar, from Move Panel or the settings page, also moves a panel placed with JupyterLab's own Switch Sidebar Side; JupyterLab's layout setting is saved with the new side, so it holds after a page reload; with no such placement JupyterLab's layout is not written
+  - evidence: index.spec.ts 4 cases red under source mutations I5, I6, I7, I20; Galata test 7 uses the real Switch Sidebar Side, Move Panel and a page reload after JupyterLab's workspace write, red under bundle mutations M9c and M10d; full browser suite 65 of 65 twice at 1.2.70
+  - test: jlpm jest src/__tests__/index.spec.ts; Galata file-browser-sync.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T13:01:48Z @kj added
+  - log: 2026-10-09T13:50:00Z @kj closed
+  - log: 2026-10-09T14:40:29Z @kj edited evidence "index.spec.ts 4 cases pass, each red under its own mutation; Galata test 7 uses the real Switch Sidebar Side, Move Panel and a page reload, red under bundle mutations M9 and M10; full browser suite 65 of 65 twice at 1.2.65" -> "index.spec.ts 4 cases pass, each red under its own mutation; Galata test 7 uses the real Switch Sidebar Side, Move Panel and a page reload after JupyterLab's workspace write, red under bundle mutations M9b and M10b; full browser suite 65 of 65 twice at 1.2.66"
+  - log: 2026-10-10T01:19:52Z @kj edited evidence "index.spec.ts 4 cases pass, each red under its own mutation; Galata test 7 uses the real Switch Sidebar Side, Move Panel and a page reload after JupyterLab's workspace write, red under bundle mutations M9b and M10b; full browser suite 65 of 65 twice at 1.2.66" -> "index.spec.ts 4 cases red under source mutations I5, I6, I7, I20; Galata test 7 uses the real Switch Sidebar Side, Move Panel and a page reload after JupyterLab's workspace write, red under bundle mutations M9c and M10d; full browser suite 65 of 65 twice at 1.2.69"
+  - log: 2026-10-10T02:29:37Z @kj edited evidence "index.spec.ts 4 cases red under source mutations I5, I6, I7, I20; Galata test 7 uses the real Switch Sidebar Side, Move Panel and a page reload after JupyterLab's workspace write, red under bundle mutations M9c and M10d; full browser suite 65 of 65 twice at 1.2.69" -> "index.spec.ts 4 cases red under source mutations I5, I6, I7, I20; Galata test 7 uses the real Switch Sidebar Side, Move Panel and a page reload after JupyterLab's workspace write, red under bundle mutations M9c and M10d; full browser suite 65 of 65 twice at 1.2.70"
+- [x] `ACC-PANE-200` **Move Panel keeps its own panel on screen** - MEDIUM; with one assistant panel on screen in each sidebar, Move Panel leaves the panel whose header menu was used on screen in the new sidebar
+  - evidence: panel.spec.ts 1 case red under source mutation P10, index.spec.ts 3 cases red under I2, I3, I4; Galata test 8 passes at 1.2.70, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen
+  - mechanism: 2026-10-09T14:33:55Z @kj panel.ts header menu item passes args {panel: this.id}; index.ts command stores that id in moveAskedBy and saves; applySidebar activates the on-screen panel with that id, else the first on screen, and clears moveAskedBy
+  - mechanism: 2026-10-09T13:43:39Z @kj panel.ts header menu item passes args {panel: this.id}; index.ts command awaits the save, by which time the registry has emitted the change and applySidebar has run, then calls labShell.activateById on that id
+  - test: jlpm jest src/__tests__/panel.spec.ts src/__tests__/index.spec.ts; Galata file-browser-sync.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T13:34:38Z @kj added
+  - log: 2026-10-09T13:50:01Z @kj closed
+  - log: 2026-10-09T14:40:28Z @kj edited evidence "panel.spec.ts and index.spec.ts ACC-PANE-200 cases pass, red under 3 source mutations; Galata test 8 passes at 1.2.65, red under bundle mutations M11 and M12; screenshot move-keeps-own-panel.png shows the Codex panel on screen" -> "panel.spec.ts 1 case and index.spec.ts 3 cases pass, red under source mutations U1 and N1 to N4; Galata test 8 passes at 1.2.66, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen"
+  - log: 2026-10-10T01:19:52Z @kj edited evidence "panel.spec.ts 1 case and index.spec.ts 3 cases pass, red under source mutations U1 and N1 to N4; Galata test 8 passes at 1.2.66, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen" -> "panel.spec.ts 1 case red under source mutation P10, index.spec.ts 3 cases red under I2, I3, I4; Galata test 8 passes at 1.2.69, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen"
+  - log: 2026-10-10T02:29:37Z @kj edited evidence "panel.spec.ts 1 case red under source mutation P10, index.spec.ts 3 cases red under I2, I3, I4; Galata test 8 passes at 1.2.69, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen" -> "panel.spec.ts 1 case red under source mutation P10, index.spec.ts 3 cases red under I2, I3, I4; Galata test 8 passes at 1.2.70, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen"
 
 ## Sessions `SESS`
 
@@ -601,6 +672,27 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - mechanism: 2026-09-19T20:11:40Z @kj the trimmed value is tested before the request, and the server rejects an empty or over-long name as well
   - log: 2026-09-19T20:11:40Z @kj added
   - log: 2026-09-19T20:30:47Z @kj closed
+- [x] `ACC-SESS-190` **Open moves the file browser** - HIGH; with syncFileBrowser on, opening a session moves the file browser to its project folder; open means a row click, Enter or Space on a row, Resume, an Open Branched Conversation item, or the Manage Sessions Open button; a reused terminal counts
+  - evidence: panel.spec.ts: 7 route cases plus root path, order and reuse cases pass, each red under two independent mutations; Galata tests 1 and 3 pass at 1.2.60 and fail when the built bundle syncs only with the setting off
+  - mechanism: 2026-10-09T10:30:30Z @kj panel.ts _openSession calls _moveFileBrowserTo after the awaited open; it runs filebrowser:go-to-path with the folder relative to the server root and dontShowBrowser true; every open route goes through _openSession
+  - test: jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T10:30:30Z @kj closed
+- [x] `ACC-SESS-191` **Sync leaves the sidebar and the focus** - MEDIUM; the sync does not activate the file browser tab, so an assistant panel in the same sidebar stays on screen; keyboard focus stays in the terminal the open focused
+  - evidence: panel.spec.ts case red when dontShowBrowser is false; Galata tests 1 and 2 pass (left sidebar stays shut; panel on screen, focus in the terminal) and fail when the bundle sends false; screenshot sync-panels-left.png inspected
+  - test: jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts with the panels in the left sidebar
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T10:20:44Z @kj edited test "Galata file-browser-sync.spec.ts with the panels in the left sidebar" -> "jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts with the panels in the left sidebar"
+  - log: 2026-10-09T10:30:30Z @kj closed
+- [x] `ACC-SESS-192` **Edge: sync with nowhere to go** - MEDIUM; file browser stays where it is and no notification appears when syncFileBrowser is off, the project folder is outside the server root, the server root is unknown, or the open failed
+  - evidence: panel.spec.ts 5 cases pass (off, outside root, unknown root, failed open, rejected move), each red under mutation; Galata test 5: with sync off the open leaves the file browser at the root
+  - test: jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-09T07:48:22Z @kj added
+  - log: 2026-10-09T10:20:44Z @kj edited test "jlpm jest src/__tests__/panel.spec.ts" -> "jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts"
+  - log: 2026-10-09T10:30:30Z @kj closed
 
 ## Colour `COLO`
 

@@ -24,7 +24,13 @@ from jupyterlab_ai_code_assistants_extension.core import registry
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schema" / "plugin.json"
 
 #: Keys that apply to every panel from one value, rather than per provider.
-SHARED_KEYS = {"presentationMode", "recentLimit", "sidebar", "colouredTabs"}
+SHARED_KEYS = {
+    "presentationMode",
+    "recentLimit",
+    "sidebar",
+    "colouredTabs",
+    "syncFileBrowser",
+}
 
 
 @pytest.fixture(scope="module")
@@ -108,6 +114,15 @@ def test_the_shared_keys_are_present_and_not_per_provider(properties):
     assert properties["presentationMode"]["default"] == "name"
     assert properties["sidebar"]["default"] == "right"
     assert properties["recentLimit"]["type"] == "integer"
+
+
+def test_acc_sett_189_the_file_browser_sync_key_is_a_boolean_that_defaults_on(properties):
+    """ACC-SETT-189 - one shared switch, on unless the user turns it off."""
+    # Under its own name, so one value serves every panel.
+    entry = properties["syncFileBrowser"]
+    assert entry["type"] == "boolean"
+    # Absent reads as on, and the default says so where the user looks.
+    assert entry["default"] is True
 
 
 def test_the_recent_limit_default_sits_inside_its_own_bounds(properties):

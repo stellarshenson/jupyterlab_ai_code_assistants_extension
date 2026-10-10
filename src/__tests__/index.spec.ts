@@ -40,10 +40,13 @@ jest.mock('../core/request', () => ({
 import { Notification } from '@jupyterlab/apputils';
 import { CommandRegistry } from '@lumino/commands';
 import { Signal } from '@lumino/signaling';
+import { Widget } from '@lumino/widgets';
 
 import { providerIcon } from '../core/icons';
 import {
   AssistantSessionsPanel,
+  MOVE_PANELS_COMMAND,
+  SYNC_FILE_BROWSER_COMMAND,
   commandId,
   panelWidgetId
 } from '../core/panel';
@@ -817,12 +820,38 @@ describe('ACC-SETT - settings drive the panels', () => {
     /** Write a settings value and fire `changed`, as the settings editor does. */
     set: (key: string, value: unknown) => void;
     terminal: { disposed: boolean; closed: boolean };
+    /** Every value the plugin saved through `settings.set`, as `[key, value]`. */
+    saved: [string, unknown][];
+    /** Every `labShell.activateById` call, with the number of `labShell.add`
+     * calls made before it. */
+    activated: { id: string; afterDocks: number }[];
+    /** The arguments of every `filebrowser:go-to-path` a panel ran. */
+    moves: unknown[];
+    /** The sidebar each live panel is in, by provider id. */
+    areas: () => Record<string, string>;
+    /** Place one panel as JupyterLab's own "Switch Sidebar Side" does: the
+     * panel goes to that sidebar, and `labShell.add` obeys the placement from
+     * then on. */
+    placeWithJupyterLab: (providerId: string, area: string) => void;
+    /** Every `labShell.move` call, as `[provider id, area]`. */
+    shellMoves: [string, string][];
+    /** Every save to another plugin's settings, as `[plugin, key, value]`. */
+    layoutSaves: [string, string, unknown][];
+    /** The `labShell` calls in order: `add:<id>`, `move:<id>`, `activate:<id>`. */
+    sequence: string[];
   }
 
-  /** Activate against a settings registry whose values can be changed live. */
+  /** Activate against a settings registry whose values can be changed live,
+   * against no registry, or against a registry that rejects every save. */
   async function activate(
     composite: Record<string, unknown> = {},
-    options: { loadThrows?: boolean } = {}
+    options: {
+      loadThrows?: boolean;
+      noRegistry?: boolean;
+      saveRejects?: boolean;
+      layoutSaveRejects?: boolean;
+      shellNotRestored?: boolean;
+    } = {}
   ): Promise<ISettingsHarness> {
     const serverSettings = {};
     request.mockImplementation((path: string, settings: unknown) =>
@@ -832,37 +861,111 @@ describe('ACC-SETT - settings drive the panels', () => {
     );
 
     const docks: [AssistantSessionsPanel, string][] = [];
+    const activated: { id: string; afterDocks: number }[] = [];
+    const areaOf = new Map<AssistantSessionsPanel, string>();
+    const placements = new Map<AssistantSessionsPanel, string>();
+    const shellMoves: [string, string][] = [];
+    const sequence: string[] = [];
     const labShell = {
+      // As the real sidebar does: a widget is hidden when it is added, and a
+      // placement the user made with JupyterLab's own command overrides the
+      // area the caller asks for.
       add: (widget: AssistantSessionsPanel, area: string) => {
         docks.push([widget, area]);
+        sequence.push(`add:${widget.descriptor.id}`);
+        // Before JupyterLab has restored its layout the shell only queues the
+        // widget: it is in no area yet.
+        if (options.shellNotRestored) {
+          return;
+        }
+        areaOf.set(widget, placements.get(widget) ?? area);
+        widget.hide();
+      },
+      widgets: (area: string) =>
+        Array.from(areaOf)
+          .filter(([widget, at]) => at === area && !widget.isDisposed)
+          .map(([widget]) => widget)
+          [Symbol.iterator](),
+      // As the real shell does: the placement is replaced, the widget goes to
+      // the area, and the whole placement record is returned.
+      move: (widget: AssistantSessionsPanel, area: string) => {
+        shellMoves.push([widget.descriptor.id, area]);
+        sequence.push(`move:${widget.descriptor.id}`);
+        if (options.shellNotRestored) {
+          // As the real shell: its placement record does not exist yet.
+          throw new TypeError('Cannot read properties of undefined');
+        }
+        placements.set(widget, area);
+        areaOf.set(widget, area);
+        widget.hide();
+        const record = Object.fromEntries(
+          Array.from(placements).map(([placed, at]) => [
+            placed.id,
+            { area: at }
+          ])
+        );
+        return { 'single-document': record, 'multiple-document': record };
+      },
+      activateById: (id: string) => {
+        activated.push({ id, afterDocks: docks.length });
+        sequence.push(`activate:${id}`);
       }
     } as any;
+    // A recorder in place of the file browser's own command. The tests below
+    // read the arguments the panels passed to it.
+    const moves: unknown[] = [];
+    const commands = new CommandRegistry();
+    commands.addCommand('filebrowser:go-to-path', {
+      execute: args => {
+        moves.push(args);
+      }
+    });
     const app = {
       serviceManager: { serverSettings },
-      commands: new CommandRegistry(),
+      commands,
       hasPlugin: () => false
     } as any;
 
     const changed = new Signal<unknown, void>({});
+    const saved: [string, unknown][] = [];
     const settings = {
       composite,
       get: (key: string) => ({
         composite: composite[key],
         user: key in composite ? composite[key] : undefined
       }),
-      set: async () => undefined,
+      // As the real registry does: a successful save changes the value and
+      // emits `changed`; a failed save does neither.
+      set: async (key: string, value: unknown) => {
+        if (options.saveRejects) {
+          throw new Error('the settings were not written');
+        }
+        saved.push([key, value]);
+        composite[key] = value;
+        changed.emit(undefined);
+      },
       changed,
       raw: '{}'
     };
-    const settingRegistry = {
-      connector: { fetch: async () => ({ raw: settings.raw }) },
-      load: async () => {
-        if (options.loadThrows) {
-          throw new Error('settings registry unavailable');
-        }
-        return settings;
-      }
-    } as any;
+    const layoutSaves: [string, string, unknown][] = [];
+    const settingRegistry = options.noRegistry
+      ? null
+      : ({
+          connector: { fetch: async () => ({ raw: settings.raw }) },
+          // A save to another plugin's settings, by plugin id.
+          set: async (pluginId: string, key: string, value: unknown) => {
+            if (options.layoutSaveRejects) {
+              throw new Error('the layout was not written');
+            }
+            layoutSaves.push([pluginId, key, value]);
+          },
+          load: async () => {
+            if (options.loadThrows) {
+              throw new Error('settings registry unavailable');
+            }
+            return settings;
+          }
+        } as any);
 
     // A running terminal, to prove a disable never reaches it. Both ways of
     // ending a terminal are wired to a flag, so the assertion is on the panel
@@ -910,12 +1013,56 @@ describe('ACC-SETT - settings drive the panels', () => {
         composite[key] = value;
         changed.emit(undefined);
       },
-      terminal
+      terminal,
+      saved,
+      activated,
+      moves,
+      areas: () =>
+        Object.fromEntries(
+          Array.from(areaOf)
+            .filter(([widget]) => !widget.isDisposed)
+            .map(([widget, at]) => [widget.descriptor.id, at])
+        ),
+      placeWithJupyterLab: (providerId: string, area: string) => {
+        const widget = Array.from(areaOf.keys()).find(
+          w => w.descriptor.id === providerId && !w.isDisposed
+        )!;
+        placements.set(widget, area);
+        areaOf.set(widget, area);
+      },
+      shellMoves,
+      layoutSaves,
+      sequence
     };
   }
 
   const dispose = (live: ISettingsHarness): void =>
     live.docks.forEach(([widget]) => widget.dispose());
+
+  /** Open one conversation whose project folder is `proj` under the roster's
+   * root, from a docked panel, and return the file browser moves that open
+   * made. The terminal open is replaced, so no launch request is sent. */
+  async function movesOnOpen(
+    live: ISettingsHarness,
+    panel: AssistantSessionsPanel
+  ): Promise<unknown[]> {
+    (panel as any)._terminals.openSession = jest.fn(() => Promise.resolve());
+    const before = live.moves.length;
+    await (panel as any)._openSession({
+      project_path: '/srv/lab/proj',
+      encoded_path: 'enc-proj',
+      session_id: 'sid-proj',
+      name: 'proj',
+      name_source: 'basename',
+      message_count: 1,
+      file_mtime: 1,
+      git_branch: null,
+      favourite: false,
+      extra_sessions: 0
+    });
+    await flush();
+    return live.moves.slice(before);
+  }
 
   it('ACC-SETT-22, ACC-SETT-23 - no saved settings enables every assistant whose CLI is present', async () => {
     const live = await activate({});
@@ -1078,6 +1225,475 @@ describe('ACC-SETT - settings drive the panels', () => {
     ).toBe(true);
     warned.mockRestore();
     dispose(live);
+  });
+
+  // ------------------------------------------------------- ACC-SETT-189
+
+  const MOVE_TO_PROJ = { path: 'proj', dontShowBrowser: true };
+
+  it('ACC-SETT-189 - with the key absent, an open from every panel moves the file browser', async () => {
+    const live = await activate({});
+    expect(live.docks).toHaveLength(PROVIDERS.length);
+    for (const [panel] of live.docks) {
+      expect(await movesOnOpen(live, panel)).toEqual([MOVE_TO_PROJ]);
+    }
+    dispose(live);
+  });
+
+  it('ACC-SETT-189 - a saved false leaves the file browser where it is, for every panel', async () => {
+    const live = await activate({ syncFileBrowser: false });
+    expect(live.docks).toHaveLength(PROVIDERS.length);
+    for (const [panel] of live.docks) {
+      expect(await movesOnOpen(live, panel)).toEqual([]);
+    }
+    dispose(live);
+  });
+
+  it('ACC-SETT-189 - a change reaches every docked panel, with no reload and no new panel', async () => {
+    const live = await activate({});
+    const panels = live.docks.map(([widget]) => widget);
+    expect(panels).toHaveLength(PROVIDERS.length);
+
+    live.set('syncFileBrowser', false);
+    await flush();
+    for (const panel of panels) {
+      expect(await movesOnOpen(live, panel)).toEqual([]);
+    }
+
+    live.set('syncFileBrowser', true);
+    await flush();
+    for (const panel of panels) {
+      expect(await movesOnOpen(live, panel)).toEqual([MOVE_TO_PROJ]);
+    }
+
+    // The same panels from start to end: none was docked again, none replaced.
+    expect(live.docks).toHaveLength(PROVIDERS.length);
+    expect(panels.every(panel => !panel.isDisposed)).toBe(true);
+    dispose(live);
+  });
+
+  // -------------------------------------------------- ACC-PANE-194..198
+
+  it('ACC-PANE-194 - the Sync item is checked while the setting is on or absent, and not while it is off', async () => {
+    const live = await activate({});
+    const checked = (): boolean =>
+      live.app.commands.isToggled(SYNC_FILE_BROWSER_COMMAND);
+
+    // Absent.
+    expect(checked()).toBe(true);
+    live.set('syncFileBrowser', false);
+    expect(checked()).toBe(false);
+    live.set('syncFileBrowser', true);
+    expect(checked()).toBe(true);
+    dispose(live);
+  });
+
+  it('ACC-PANE-194 - a click on the Sync item saves the opposite value, once', async () => {
+    const live = await activate({});
+
+    await live.app.commands.execute(SYNC_FILE_BROWSER_COMMAND);
+    expect(live.saved).toEqual([['syncFileBrowser', false]]);
+
+    await live.app.commands.execute(SYNC_FILE_BROWSER_COMMAND);
+    expect(live.saved).toEqual([
+      ['syncFileBrowser', false],
+      ['syncFileBrowser', true]
+    ]);
+    dispose(live);
+  });
+
+  it('ACC-PANE-194 - the next open follows the value the Sync item saved', async () => {
+    const live = await activate({});
+    const [panel] = live.docks[0];
+
+    await live.app.commands.execute(SYNC_FILE_BROWSER_COMMAND);
+    await flush();
+    expect(await movesOnOpen(live, panel)).toEqual([]);
+
+    await live.app.commands.execute(SYNC_FILE_BROWSER_COMMAND);
+    await flush();
+    expect(await movesOnOpen(live, panel)).toEqual([MOVE_TO_PROJ]);
+    dispose(live);
+  });
+
+  it('ACC-PANE-195 - the Move item names the sidebar the panels are not in', async () => {
+    // With no saved value the panels dock on the right.
+    const right = await activate({});
+    expect(right.docks.every(([, area]) => area === 'right')).toBe(true);
+    expect(right.app.commands.label(MOVE_PANELS_COMMAND)).toBe(
+      'Move Panel Left'
+    );
+    dispose(right);
+
+    const left = await activate({ sidebar: 'left' });
+    expect(left.docks.every(([, area]) => area === 'left')).toBe(true);
+    expect(left.app.commands.label(MOVE_PANELS_COMMAND)).toBe(
+      'Move Panel Right'
+    );
+    dispose(left);
+  });
+
+  it('ACC-PANE-195 - a click on the Move item saves the other side, once', async () => {
+    const live = await activate({ sidebar: 'right' });
+
+    await live.app.commands.execute(MOVE_PANELS_COMMAND);
+    await flush();
+    expect(live.saved).toEqual([['sidebar', 'left']]);
+
+    await live.app.commands.execute(MOVE_PANELS_COMMAND);
+    await flush();
+    expect(live.saved).toEqual([
+      ['sidebar', 'left'],
+      ['sidebar', 'right']
+    ]);
+    dispose(live);
+  });
+
+  it('ACC-PANE-195 - after the click every panel is docked on that side and the item names the first side', async () => {
+    const live = await activate({ sidebar: 'right' });
+    const panels = live.docks.map(([widget]) => widget);
+    const first = live.docks.length;
+
+    await live.app.commands.execute(MOVE_PANELS_COMMAND);
+    await flush();
+
+    const moved = live.docks.slice(first);
+    expect(moved.map(([, area]) => area)).toEqual(panels.map(() => 'left'));
+    // Each panel once, and they are the panels that were already docked.
+    expect(new Set(moved.map(([widget]) => widget))).toEqual(new Set(panels));
+    expect(live.app.commands.label(MOVE_PANELS_COMMAND)).toBe(
+      'Move Panel Right'
+    );
+    dispose(live);
+  });
+
+  it.each<[string, (live: ISettingsHarness) => unknown]>([
+    ['the settings page', live => live.set('sidebar', 'left')],
+    ['the header menu', live => live.app.commands.execute(MOVE_PANELS_COMMAND)]
+  ])(
+    'ACC-PANE-196 - a panel on screen is activated again after a move from %s',
+    async (_from, move) => {
+      const live = await activate({ sidebar: 'right' });
+      // Shown and attached, so `isVisible` is true without a spy. It is not
+      // the first panel, so code that activates the first panel fails.
+      const shown = live.docks[live.docks.length - 1][0];
+      shown.show();
+      Widget.attach(shown, document.body);
+      expect(shown.isVisible).toBe(true);
+      const first = live.docks.length;
+
+      await move(live);
+      await flush();
+
+      // Once, by id, and only after every panel was docked again, because
+      // docking a panel again hides it.
+      expect(live.activated).toEqual([
+        { id: shown.id, afterDocks: first + PROVIDERS.length }
+      ]);
+      dispose(live);
+    }
+  );
+
+  it('ACC-PANE-196 - with no panel on screen a move activates nothing', async () => {
+    const live = await activate({ sidebar: 'right' });
+    const first = live.docks.length;
+
+    live.set('sidebar', 'left');
+    await flush();
+
+    // Every panel was docked again, so the sidebar change did run.
+    expect(live.docks.slice(first)).toHaveLength(PROVIDERS.length);
+    expect(live.activated).toEqual([]);
+    dispose(live);
+  });
+
+  describe('ACC-PANE-199 - a sidebar change overrides a JupyterLab placement', () => {
+    const SHELL_PLUGIN = '@jupyterlab/application-extension:shell';
+    const placed = PROVIDERS[0].descriptor.id;
+    const everyArea = (live: ISettingsHarness): string[] =>
+      Array.from(new Set(Object.values(live.areas())));
+
+    it('ACC-PANE-199 - a panel placed with Switch Sidebar Side moves with the others, and the new side is saved', async () => {
+      const live = await activate({ sidebar: 'right' });
+      live.placeWithJupyterLab(placed, 'left');
+      expect(live.areas()[placed]).toBe('left');
+
+      live.set('sidebar', 'left');
+      await flush();
+      // The placed panel was on the left already, so nothing was overridden.
+      expect(everyArea(live)).toEqual(['left']);
+      expect(live.shellMoves).toEqual([]);
+      expect(live.layoutSaves).toEqual([]);
+
+      live.set('sidebar', 'right');
+      await flush();
+      // `add` left the placed panel on the left. The move took it along.
+      expect(everyArea(live)).toEqual(['right']);
+      expect(live.shellMoves).toEqual([[placed, 'right']]);
+      const record = { [panelWidgetId(placed)]: { area: 'right' } };
+      expect(live.layoutSaves).toEqual([
+        [SHELL_PLUGIN, 'layout', { single: record, multiple: record }]
+      ]);
+      dispose(live);
+    });
+
+    it('ACC-PANE-199 - with no JupyterLab placement the layout of JupyterLab is not written', async () => {
+      const live = await activate({ sidebar: 'right' });
+
+      live.set('sidebar', 'left');
+      await flush();
+
+      expect(everyArea(live)).toEqual(['left']);
+      expect(live.shellMoves).toEqual([]);
+      expect(live.layoutSaves).toEqual([]);
+      dispose(live);
+    });
+
+    it('ACC-PANE-199 - a placed panel that was on screen is activated after it was moved', async () => {
+      const live = await activate({ sidebar: 'left' });
+      live.placeWithJupyterLab(placed, 'right');
+      const shown = live.docks.find(
+        ([widget]) => widget.descriptor.id === placed
+      )![0];
+      shown.show();
+      Widget.attach(shown, document.body);
+      expect(shown.isVisible).toBe(true);
+      // The setting says left and the panel is on the right, where JupyterLab
+      // put it. A change to right and back to left must bring it along.
+      live.set('sidebar', 'right');
+      await flush();
+      shown.show();
+      const before = live.sequence.length;
+
+      live.set('sidebar', 'left');
+      await flush();
+
+      expect(live.areas()[placed]).toBe('left');
+      expect(live.sequence.slice(before + PROVIDERS.length)).toEqual([
+        `move:${placed}`,
+        `activate:${shown.id}`
+      ]);
+      dispose(live);
+    });
+
+    it('ACC-PANE-199 - a placement that cannot be saved is one console line, and the panel still moves', async () => {
+      const live = await activate(
+        { sidebar: 'right' },
+        { layoutSaveRejects: true }
+      );
+      live.placeWithJupyterLab(placed, 'left');
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      live.set('sidebar', 'left');
+      live.set('sidebar', 'right');
+      await flush();
+
+      expect(everyArea(live)).toEqual(['right']);
+      expect(live.layoutSaves).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain(
+        'could not save the panel placement'
+      );
+      dispose(live);
+    });
+
+    it('DEF-PANE-297 - a sidebar change before JupyterLab restored its layout moves no panel', async () => {
+      const live = await activate(
+        { sidebar: 'right' },
+        { shellNotRestored: true }
+      );
+      const first = live.docks.length;
+
+      live.set('sidebar', 'left');
+      await flush();
+
+      // Every panel was handed to the shell again for the new side, and no
+      // panel was moved: the shell holds them in no sidebar yet.
+      expect(live.docks.slice(first).map(([, area]) => area)).toEqual(
+        PROVIDERS.map(() => 'left')
+      );
+      expect(live.shellMoves).toEqual([]);
+      expect(live.layoutSaves).toEqual([]);
+      expect(live.app.commands.label(MOVE_PANELS_COMMAND)).toBe(
+        'Move Panel Right'
+      );
+      dispose(live);
+    });
+  });
+
+  describe('ACC-PANE-200 - Move Panel keeps its own panel on screen', () => {
+    /** The first two panels, one on screen in each sidebar: the first where
+     * JupyterLab's own command put it, the other where the setting says. */
+    const onePerSidebar = (
+      live: ISettingsHarness,
+      setting: string
+    ): AssistantSessionsPanel[] => {
+      const [first, later] = PROVIDERS.slice(0, 2).map(
+        provider =>
+          live.docks.find(
+            ([widget]) => widget.descriptor.id === provider.descriptor.id
+          )![0]
+      );
+      live.placeWithJupyterLab(
+        first.descriptor.id,
+        setting === 'right' ? 'left' : 'right'
+      );
+      for (const panel of [first, later]) {
+        panel.show();
+        if (!panel.isAttached) {
+          Widget.attach(panel, document.body);
+        }
+      }
+      expect([first.isVisible, later.isVisible]).toEqual([true, true]);
+      return [first, later];
+    };
+    const activations = (live: ISettingsHarness): string[] =>
+      live.activated.map(entry => entry.id);
+
+    it('ACC-PANE-200 - with a panel on screen in each sidebar, the one whose header menu ran the move is activated', async () => {
+      const live = await activate({ sidebar: 'right' });
+      const [, later] = onePerSidebar(live, 'right');
+
+      await live.app.commands.execute(MOVE_PANELS_COMMAND, { panel: later.id });
+
+      expect(Array.from(new Set(Object.values(live.areas())))).toEqual([
+        'left'
+      ]);
+      expect(activations(live)).toEqual([later.id]);
+      dispose(live);
+    });
+
+    it('ACC-PANE-200 - the next move from the settings page activates the first panel on screen again', async () => {
+      const live = await activate({ sidebar: 'right' });
+      const [first, later] = onePerSidebar(live, 'right');
+      await live.app.commands.execute(MOVE_PANELS_COMMAND, { panel: later.id });
+      expect(activations(live)).toEqual([later.id]);
+
+      // Both are on the left now. One per sidebar again, then a change that
+      // no header menu asked for.
+      onePerSidebar(live, 'left');
+      live.set('sidebar', 'right');
+      await flush();
+
+      expect(activations(live)).toEqual([later.id, first.id]);
+      dispose(live);
+    });
+
+    it('ACC-PANE-200 - a failed Move save activates nothing, and the move that arrives later keeps that panel on screen', async () => {
+      const warned = jest
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      const errored = jest
+        .spyOn(Notification, 'error')
+        .mockImplementation(() => '');
+      try {
+        const live = await activate(
+          { sidebar: 'right' },
+          { saveRejects: true }
+        );
+        const [, later] = onePerSidebar(live, 'right');
+
+        await live.app.commands.execute(MOVE_PANELS_COMMAND, {
+          panel: later.id
+        });
+        await flush();
+        expect(errored).toHaveBeenCalledTimes(1);
+        expect(activations(live)).toEqual([]);
+
+        // The same change, applied later by another route.
+        live.set('sidebar', 'left');
+        await flush();
+
+        expect(activations(live)).toEqual([later.id]);
+        dispose(live);
+      } finally {
+        errored.mockRestore();
+        warned.mockRestore();
+      }
+    });
+  });
+
+  it('ACC-PANE-197 - both header menu items are disabled with no settings registry, and enabled with one', async () => {
+    const without = await activate({}, { noRegistry: true });
+    // Both are registered. This is checked first because an unregistered
+    // command also reports that it is not enabled.
+    expect(without.app.commands.hasCommand(SYNC_FILE_BROWSER_COMMAND)).toBe(
+      true
+    );
+    expect(without.app.commands.hasCommand(MOVE_PANELS_COMMAND)).toBe(true);
+    expect(without.app.commands.isEnabled(SYNC_FILE_BROWSER_COMMAND)).toBe(
+      false
+    );
+    expect(without.app.commands.isEnabled(MOVE_PANELS_COMMAND)).toBe(false);
+    dispose(without);
+
+    const withOne = await activate({});
+    expect(withOne.app.commands.isEnabled(SYNC_FILE_BROWSER_COMMAND)).toBe(
+      true
+    );
+    expect(withOne.app.commands.isEnabled(MOVE_PANELS_COMMAND)).toBe(true);
+    dispose(withOne);
+  });
+
+  it('ACC-PANE-198 - a failed Sync save raises one error notification, and the item keeps its state', async () => {
+    const warned = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const errored = jest
+      .spyOn(Notification, 'error')
+      .mockImplementation(() => '');
+    // The spies are restored even when an assertion fails. Otherwise the next
+    // test would count the calls this test made.
+    try {
+      const live = await activate({}, { saveRejects: true });
+      const [panel] = live.docks[0];
+
+      await live.app.commands.execute(SYNC_FILE_BROWSER_COMMAND);
+      await flush();
+
+      expect(errored).toHaveBeenCalledTimes(1);
+      expect(String(errored.mock.calls[0][0])).toContain(
+        'The setting was not saved'
+      );
+      // Still checked, and the next open still moves the file browser.
+      expect(live.app.commands.isToggled(SYNC_FILE_BROWSER_COMMAND)).toBe(true);
+      expect(await movesOnOpen(live, panel)).toEqual([MOVE_TO_PROJ]);
+      dispose(live);
+    } finally {
+      errored.mockRestore();
+      warned.mockRestore();
+    }
+  });
+
+  it('ACC-PANE-198 - a failed Move save raises one error notification, and the panels stay where they are', async () => {
+    const warned = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const errored = jest
+      .spyOn(Notification, 'error')
+      .mockImplementation(() => '');
+    try {
+      const live = await activate({ sidebar: 'right' }, { saveRejects: true });
+      const first = live.docks.length;
+
+      await live.app.commands.execute(MOVE_PANELS_COMMAND);
+      await flush();
+
+      expect(errored).toHaveBeenCalledTimes(1);
+      expect(String(errored.mock.calls[0][0])).toContain(
+        'The setting was not saved'
+      );
+      // The item still names the side the panels are not in, and no panel
+      // moved.
+      expect(live.app.commands.label(MOVE_PANELS_COMMAND)).toBe(
+        'Move Panel Left'
+      );
+      expect(live.docks).toHaveLength(first);
+      dispose(live);
+    } finally {
+      errored.mockRestore();
+      warned.mockRestore();
+    }
   });
 });
 

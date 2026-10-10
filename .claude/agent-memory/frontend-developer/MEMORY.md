@@ -1,0 +1,2 @@
+- [make build side effects](make-build-side-effects.md) — make build uninstalls the installed extension and may pip-install tools; report it when make install is not allowed
+- [mutation restore keeps mtime](mutation-restore-keeps-mtime.md) — restore mutated src/ files with cp -p so the pytest lib guard needs no rebuild; schema test mutates through the generator

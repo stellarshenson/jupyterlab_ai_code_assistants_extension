@@ -14,3 +14,7 @@ graphify-out
 # test file was being silently corrupted (DEF-GUARD-166).
 docs/defects.md
 docs/acc-crit-jupyterlab-ai-code-assistants.md
+# Owned by the journal plugin, gated by `journal-tools check`, not by prettier.
+# Prettier wants a five-space indent under a three-digit entry number, and the
+# journal format has four.
+.claude

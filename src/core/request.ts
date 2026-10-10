@@ -10,21 +10,21 @@ export const API_NAMESPACE = 'jupyterlab-ai-code-assistants-extension';
 /**
  * DEF-72: how long a single server call may run before the client gives up.
  *
- * The number is not free to pick. `providers/codex.py` caps ONE `codex
- * archive` / `codex delete` invocation at `_CLI_TIMEOUT_S = 30`, so a Codex
- * disposal or fork can legitimately hold the server for thirty seconds. A
- * client ceiling at or below that would cut Codex silently on exactly the slow
- * path the server number was tuned for, so this sits a full CLI timeout above
- * it. Do not tune it down to the fast path.
+ * The number is not free to pick. The provider module that defines
+ * `_CLI_TIMEOUT_S = 30` caps ONE archive or delete CLI invocation at it, so a
+ * disposal or fork of that provider can legitimately hold the server for
+ * thirty seconds. A client ceiling at or below that would cut that provider
+ * silently on exactly the slow path the server number was tuned for, so this
+ * sits a full CLI timeout above it. Do not tune it down to the fast path.
  *
  * It bounds SINGLE-shot routes. Two server paths scale with N and can exceed
  * it honestly: a project DELETE runs one CLI invocation per conversation
- * (`CodexStore._dispose`, ~0.7s each measured, 30s each worst case), and a
- * sessions listing runs one `git` per project root capped at
+ * (that provider's `_dispose`, ~0.7s each measured, 30s each worst case), and
+ * a sessions listing runs one `git` per project root capped at
  * `GIT_BRANCH_TIMEOUT_S = 2`. The `signal` hatch waives the ceiling for such a
  * caller, but no caller in `src/` passes one today - only `request.spec.ts`
  * exercises it. Measured, a project DELETE has to hold 86 conversations in one
- * project to breach at ~0.7s per Codex CLI invocation, or 858 at ~70ms, and a
+ * project to breach at ~0.7s per CLI invocation, or 858 at ~70ms, and a
  * breach costs a spurious toast rather than data: the server thread runs to
  * completion and the retry is idempotent.
  */

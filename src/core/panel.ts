@@ -137,6 +137,20 @@ export function commandId(providerId: string, action: string): string {
   return `ai-code-assistants:${providerId}:${action}`;
 }
 
+/** Command ids of the two items in a panel header's context menu. The plugin
+ * registers them once, on the application registry, because the settings they
+ * write are shared by every panel. */
+export const SYNC_FILE_BROWSER_COMMAND =
+  'ai-code-assistants:toggle-file-browser-sync';
+export const MOVE_PANELS_COMMAND = 'ai-code-assistants:move-panels';
+
+/** The file browser moves of every panel, one after another in the order
+ * their opens finished. JupyterLab's command asks the server about a folder
+ * before it changes to it, so two moves that overlapped were applied in the
+ * order the answers arrived, and the file browser could end on the session
+ * opened first. */
+let fileBrowserMoves: Promise<void> = Promise.resolve();
+
 function loadExpanded(storageKey: string): Record<SectionKey, boolean> {
   try {
     const raw = window.localStorage.getItem(storageKey);
@@ -295,6 +309,11 @@ export class AssistantSessionsPanel extends Widget {
     this._terminals.setColouredTabs(on);
   }
 
+  /** Whether opening a session moves the file browser to its project folder. */
+  setSyncFileBrowser(on: boolean): void {
+    this._syncFileBrowser = on;
+  }
+
   protected onAfterShow(_msg: Message): void {
     this.refresh();
     this._startPolling();
@@ -322,6 +341,12 @@ export class AssistantSessionsPanel extends Widget {
     title.className = 'jp-AiAssistantsPanel-title';
     title.textContent = this._descriptor.panelTitle;
     header.appendChild(title);
+    // The header has a context menu of its own, for the settings every panel
+    // shares. It replaces the browser's menu here.
+    header.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      this._openHeaderMenu(e.clientX, e.clientY);
+    });
 
     const newBtn = document.createElement('button');
     newBtn.className = 'jp-AiAssistantsPanel-iconButton';
@@ -870,6 +895,10 @@ export class AssistantSessionsPanel extends Widget {
         this._launchMode(force),
         sessionId
       );
+      // Not awaited: the open has succeeded, and the sync is not part of it.
+      fileBrowserMoves = fileBrowserMoves.then(() =>
+        this._moveFileBrowserTo(session)
+      );
     } catch (err) {
       if (isResponseStatus(err, 404)) {
         Notification.error(
@@ -883,6 +912,37 @@ export class AssistantSessionsPanel extends Widget {
       // Reuse or fresh launch, either way the picture changed. Pull fresh
       // state; a poll tick retries if this one fails.
       void this._fetch().catch(() => undefined);
+    }
+  }
+
+  /** Move the file browser to an opened session's project folder, when the
+   * setting is on and the folder is under the server root. A folder the file
+   * browser cannot address is left alone without a notification.
+   *
+   * `dontShowBrowser` stops JupyterLab activating the file browser tab, which
+   * would hide an assistant panel docked in the same sidebar. A failed move
+   * is one console line and never a failed open: JupyterLab's command logs a
+   * folder it cannot reach, and the catch below logs a command that is
+   * missing or rejects. */
+  private async _moveFileBrowserTo(session: ISession): Promise<void> {
+    if (!this._syncFileBrowser) {
+      return;
+    }
+    const rel = this._pathUnderRoot(session.project_path);
+    if (rel === null) {
+      return;
+    }
+    try {
+      await this._app.commands.execute('filebrowser:go-to-path', {
+        path: rel,
+        dontShowBrowser: true
+      });
+    } catch (err) {
+      this._logError(
+        `The file browser did not move to the project folder: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
     }
   }
 
@@ -2609,7 +2669,7 @@ export class AssistantSessionsPanel extends Widget {
     });
   }
 
-  private _menu(): Menu {
+  private _menu(commands: CommandRegistry = this._commands): Menu {
     // MenuSvg, not a plain Lumino Menu. Lumino's default renderer emits
     // `div.lm-Menu-itemSubmenuIcon` EMPTY, so every submenu here drew no caret
     // and `Branch Session`, which opens on hover, read exactly like the items
@@ -2617,9 +2677,30 @@ export class AssistantSessionsPanel extends Widget {
     // own menus use: it fills that div with the caret glyph, and otherwise
     // differs only in adding the stock menu-item icon sizing our items already
     // get from `base.css`.
-    const menu = new MenuSvg({ commands: this._commands });
+    const menu = new MenuSvg({ commands });
     menu.addClass('jp-AiAssistantsContextMenu');
     return menu;
+  }
+
+  /** Open the header's context menu at the pointer. Its two commands are on
+   * the application registry, where the plugin registers them once for every
+   * panel. The menu is built on its first open and not with the menus above:
+   * Lumino draws the items of a menu once they are added, and these two are
+   * drawn from that registry. */
+  private _openHeaderMenu(x: number, y: number): void {
+    // A row menu that is still loading stands down, as it does for a newer
+    // row menu, and its row loses the highlight.
+    this._menuGeneration += 1;
+    this._setActiveRow(null);
+    if (!this._headerMenu) {
+      this._headerMenu = this._menu(this._app.commands);
+      this._headerMenu.addItem({ command: SYNC_FILE_BROWSER_COMMAND });
+      this._headerMenu.addItem({
+        command: MOVE_PANELS_COMMAND,
+        args: { panel: this.id }
+      });
+    }
+    this._headerMenu.open(x, y);
   }
 
   /** Rebuild the context menu's items. Lumino submenu items have no
@@ -2944,11 +3025,13 @@ export class AssistantSessionsPanel extends Widget {
   private _openBranchSubmenu!: Menu;
   private _branchSessionMenu!: Menu;
   private _newSessionMenu!: Menu;
+  private _headerMenu: Menu | null = null;
   /** Re-writes the `+` button's title. Set once the shell exists. */
   private _renameNewButton: (() => void) | null = null;
   private _lastBranches: IBranch[] = [];
   private _lastBranchesCurrent = '';
   private _colouredTabs = true;
+  private _syncFileBrowser = true;
   private _resettableColours: string[] = [];
   /** Bumped per context-menu open, so a slow one that has been superseded
    * knows to touch nothing. */

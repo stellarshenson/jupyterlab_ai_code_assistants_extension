@@ -51,9 +51,15 @@ jest.mock('../core/request', () => ({
 }));
 
 import { Clipboard, Notification } from '@jupyterlab/apputils';
+import { CommandRegistry } from '@lumino/commands';
 import { TAB_COLOUR_IDS, fnv1aColour } from '../core/colour';
 import { addIcon, branchIcon, cleanupIcon, shieldIcon } from '../core/icons';
-import { AssistantSessionsPanel, commandId } from '../core/panel';
+import {
+  AssistantSessionsPanel,
+  MOVE_PANELS_COMMAND,
+  SYNC_FILE_BROWSER_COMMAND,
+  commandId
+} from '../core/panel';
 import { showManageSessionsPopup } from '../core/popup';
 import { requestProvider } from '../core/request';
 import { IBranch, IProviderDescriptor, ISession } from '../core/types';
@@ -1680,5 +1686,480 @@ describe('ACC-PANE-46, ACC-PANE-48 - the header menu when unarmed, and a panel t
     expect(
       panel.node.querySelector('.jp-AiAssistantsPanel-error')?.textContent ?? ''
     ).toEqual('');
+  });
+});
+
+// ------------------------------------------------------- ACC-SESS-190..192
+
+describe('ACC-SESS-190..192 - opening a session moves the file browser', () => {
+  const GO_TO_PATH = 'filebrowser:go-to-path';
+
+  /** A project two folders under the panel's root, so the path the file
+   * browser is given can only be the one relative to that root. */
+  const nested = (): ISession =>
+    session({
+      name: 'ledger-tools',
+      project_path: '/home/user/work/ledger-tools'
+    });
+  const MOVE_TO_NESTED = [
+    GO_TO_PATH,
+    { path: 'work/ledger-tools', dontShowBrowser: true }
+  ];
+
+  /** Every command a panel ran on the application registry. */
+  const appCalls = (p: AssistantSessionsPanel): unknown[][] =>
+    ((p as any)._app.commands.execute as jest.Mock).mock.calls;
+
+  /** The calls among them that move the file browser. */
+  const moves = (p: AssistantSessionsPanel): unknown[][] =>
+    appCalls(p).filter(([id]) => id === GO_TO_PATH);
+
+  /** Replace the terminal open, which is not under test here. The open
+   * resolves or rejects as the test decides, and no launch request is sent. */
+  const stubOpen = (
+    p: AssistantSessionsPanel,
+    outcome: () => Promise<void> = () => Promise.resolve()
+  ): jest.Mock => {
+    const open = jest.fn(outcome);
+    (p as any)._terminals.openSession = open;
+    return open;
+  };
+
+  const rowEl = (p: AssistantSessionsPanel): HTMLElement =>
+    p.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!;
+
+  /** The messages of the notifications on screen. Read from the notification
+   * manager, so a notification of any type is included. */
+  const notified = (): string[] =>
+    Notification.manager.notifications.map(n => n.message);
+
+  beforeEach(() => {
+    Notification.manager.dismiss();
+  });
+
+  afterEach(() => {
+    Notification.manager.dismiss();
+  });
+
+  /** Each way a user opens a session, started from the control the user
+   * uses for it. */
+  const routes: Array<
+    [string, (p: AssistantSessionsPanel, row: ISession) => void]
+  > = [
+    ['a row click', p => rowEl(p).click()],
+    [
+      'Enter on a row',
+      p =>
+        rowEl(p).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+    ],
+    [
+      'Space on a row',
+      p => rowEl(p).dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }))
+    ],
+    [
+      'Resume',
+      (p, row) => {
+        (p as any)._activeSession = row;
+        (p as any)._commands.execute(commandId('testbed', 'resume'));
+      }
+    ],
+    [
+      'Resume in a launch mode',
+      (p, row) => {
+        (p as any)._activeSession = row;
+        (p as any)._commands.execute(commandId('testbed', 'resume-skip'));
+      }
+    ],
+    [
+      'an Open Branched Conversation item',
+      (p, row) => {
+        (p as any)._activeSession = row;
+        (p as any)._fillBranchSubmenus([
+          { session_id: 'sid-branch', label: 'Second thoughts', file_mtime: 1 }
+        ]);
+        const item = (p as any)._openBranchSubmenu.items[0];
+        (p as any)._commands.execute(item.command, item.args);
+      }
+    ],
+    [
+      'the Manage Sessions Open button',
+      (p, row) => {
+        (p as any)._activeSession = row;
+        (p as any)._openManagePopup();
+        const calls = (showManageSessionsPopup as jest.Mock).mock.calls;
+        calls[calls.length - 1][0].onOpen('sid-branch');
+      }
+    ]
+  ];
+
+  it.each(routes)(
+    'ACC-SESS-190 - %s moves the file browser to the row folder under the root',
+    async (_route, open) => {
+      const opened = stubOpen(panel);
+      const row = nested();
+      render(panel, [row]);
+
+      open(panel, row);
+      await flush();
+
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect(moves(panel)).toEqual([MOVE_TO_NESTED]);
+    }
+  );
+
+  it('ACC-SESS-190 - a project at the root itself gives the empty path', async () => {
+    stubOpen(panel);
+    render(panel, [session({ project_path: '/home/user' })]);
+
+    rowEl(panel).click();
+    await flush();
+
+    expect(moves(panel)).toEqual([
+      [GO_TO_PATH, { path: '', dontShowBrowser: true }]
+    ]);
+  });
+
+  it('ACC-SESS-190 - the file browser moves only once the open has resolved', async () => {
+    let finishOpen!: () => void;
+    stubOpen(
+      panel,
+      () =>
+        new Promise<void>(resolve => {
+          finishOpen = resolve;
+        })
+    );
+    render(panel, [nested()]);
+
+    rowEl(panel).click();
+    await flush();
+    // The open has not resolved yet, so no session is open.
+    expect(moves(panel)).toEqual([]);
+
+    finishOpen();
+    await flush();
+    expect(moves(panel)).toEqual([MOVE_TO_NESTED]);
+  });
+
+  it('ACC-SESS-190 - an open that reuses the running terminal moves the file browser again', async () => {
+    // This test alone uses the real terminal manager: the first open launches
+    // a terminal, and the second open finds that terminal and focuses it.
+    const p = new AssistantSessionsPanel({
+      app: {
+        serviceManager: { serverSettings: {} },
+        shell: { activateById: jest.fn() },
+        commands: {
+          execute: jest.fn(async (id: string) =>
+            id === 'terminal:open'
+              ? { id: 'terminal-1', isDisposed: false }
+              : undefined
+          )
+        }
+      } as any,
+      descriptor: { ...DESCRIPTOR, iconName: 'testbed-reuse-panel-spec' },
+      rootDir: '/home/user'
+    });
+    try {
+      await flush();
+      request.mockClear();
+      request.mockImplementation((_id: string, route: string) =>
+        Promise.resolve(route === 'launch' ? { terminal_name: 'term-1' } : {})
+      );
+      const row = nested();
+
+      await (p as any)._openSession(row);
+      await flush();
+      await (p as any)._openSession(row);
+      await flush();
+
+      // One launch for two opens, so the second open reused the terminal.
+      expect(
+        request.mock.calls.filter(([, route]) => route === 'launch')
+      ).toHaveLength(1);
+      expect(moves(p)).toEqual([MOVE_TO_NESTED, MOVE_TO_NESTED]);
+    } finally {
+      // Restore the default answer, as the DEF-31 block does.
+      request.mockImplementation(() => Promise.resolve({}));
+      p.dispose();
+    }
+  });
+
+  it('ACC-SESS-191 - the move carries dontShowBrowser: true and is the only application command', async () => {
+    stubOpen(panel);
+    render(panel, [nested()]);
+
+    rowEl(panel).click();
+    await flush();
+
+    // Without the flag JupyterLab activates the file browser tab, which hides
+    // an assistant panel docked in the same sidebar.
+    expect(moves(panel)).toHaveLength(1);
+    expect((moves(panel)[0][1] as any).dontShowBrowser).toBe(true);
+    // The move is also the only application command the open ran, so no
+    // second command activates the file browser.
+    expect(appCalls(panel)).toHaveLength(1);
+  });
+
+  it('ACC-SESS-192 - with the setting off nothing moves and no notification appears', async () => {
+    const opened = stubOpen(panel);
+    panel.setSyncFileBrowser(false);
+    render(panel, [nested()]);
+
+    rowEl(panel).click();
+    await flush();
+
+    // The session was opened. Only the file browser move was skipped.
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(moves(panel)).toEqual([]);
+    expect(notified()).toEqual([]);
+  });
+
+  it('ACC-SESS-192 - a project folder outside the server root moves nothing and no notification appears', async () => {
+    const opened = stubOpen(panel);
+    render(panel, [session({ project_path: '/elsewhere/proj' })]);
+
+    rowEl(panel).click();
+    await flush();
+
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(moves(panel)).toEqual([]);
+    expect(notified()).toEqual([]);
+  });
+
+  it('ACC-SESS-192 - an unknown server root moves nothing and no notification appears', async () => {
+    // A panel docked before the first status roster has no root yet.
+    const p = new AssistantSessionsPanel({
+      app: {
+        serviceManager: { serverSettings: {} },
+        commands: { execute: jest.fn() }
+      } as any,
+      descriptor: { ...DESCRIPTOR, iconName: 'testbed-rootless-sync-spec' },
+      rootDir: ''
+    });
+    try {
+      await flush();
+      const opened = stubOpen(p);
+      render(p, [nested()]);
+
+      rowEl(p).click();
+      await flush();
+
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect(moves(p)).toEqual([]);
+      expect(notified()).toEqual([]);
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it('ACC-SESS-192 - a failed open moves nothing, and the only notification is the failed open', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const opened = stubOpen(panel, () =>
+      Promise.reject(new Error('launch refused'))
+    );
+    render(panel, [nested()]);
+
+    rowEl(panel).click();
+    await flush();
+
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(moves(panel)).toEqual([]);
+    // One notification, and it is the one the failed open raises itself.
+    expect(notified()).toHaveLength(1);
+    expect(notified()[0]).toContain('Could not open that conversation');
+  });
+
+  it('ACC-SESS-192 - a rejected file browser move is never reported as a failed open', async () => {
+    const logged = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const opened = stubOpen(panel);
+    ((panel as any)._app.commands.execute as jest.Mock).mockRejectedValue(
+      new Error('no such folder')
+    );
+    render(panel, [nested()]);
+
+    rowEl(panel).click();
+    await flush();
+
+    // The session was opened and the move was requested.
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(moves(panel)).toHaveLength(1);
+    // The rejection is one console line and no notification.
+    expect(notified()).toEqual([]);
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged.mock.calls[0].join(' ')).toContain('no such folder');
+  });
+
+  it('DEF-PANE-298 - a move waits for the move of an earlier open, also one of another panel', async () => {
+    // The first panel's move stays unfinished until the test finishes it.
+    let finishFirstMove: () => void = () => undefined;
+    ((panel as any)._app.commands.execute as jest.Mock).mockImplementation(
+      () =>
+        new Promise<void>(resolve => {
+          finishFirstMove = resolve;
+        })
+    );
+    stubOpen(panel);
+    render(panel, [nested()]);
+    const other = makePanel();
+    await flush();
+    try {
+      stubOpen(other);
+      render(other, [session({ name: 'notes' })]);
+
+      rowEl(panel).click();
+      await flush();
+      rowEl(other).click();
+      await flush();
+      // Both opens are done. The second move has not started.
+      expect(moves(panel)).toEqual([MOVE_TO_NESTED]);
+      expect(moves(other)).toEqual([]);
+
+      finishFirstMove();
+      await flush();
+      expect(moves(other)).toEqual([
+        [GO_TO_PATH, { path: 'notes', dontShowBrowser: true }]
+      ]);
+    } finally {
+      // An unfinished move would hold back the moves of every later test.
+      finishFirstMove();
+      await flush();
+      other.dispose();
+    }
+  });
+});
+
+// ------------------------------------------------------------ ACC-PANE-193
+
+describe('ACC-PANE-193 - the panel header has a context menu of its own', () => {
+  const SYNC_LABEL = 'Sync File Browser';
+  const MOVE_LABEL = 'Move Panel Left';
+
+  /** A panel on a real application registry that holds the two commands the
+   * plugin registers there. */
+  let p: AssistantSessionsPanel;
+  /** The arguments of every run of the Move command. */
+  let moveArgs: unknown[];
+
+  beforeEach(() => {
+    moveArgs = [];
+    const commands = new CommandRegistry();
+    commands.addCommand(SYNC_FILE_BROWSER_COMMAND, {
+      label: SYNC_LABEL,
+      execute: () => undefined
+    });
+    commands.addCommand(MOVE_PANELS_COMMAND, {
+      label: MOVE_LABEL,
+      execute: args => {
+        moveArgs.push(args);
+      }
+    });
+    p = new AssistantSessionsPanel({
+      app: { serviceManager: { serverSettings: {} }, commands } as any,
+      descriptor: { ...DESCRIPTOR, iconName: 'testbed-header-menu-spec' },
+      rootDir: '/home/user'
+    });
+  });
+
+  afterEach(() => {
+    // A pointer press outside a menu closes it and detaches it from the
+    // document, so a menu one test opened is not on screen in the next test.
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    p.dispose();
+  });
+
+  const rightClickHeader = (): MouseEvent => {
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 12,
+      clientY: 34
+    });
+    p.node.querySelector('.jp-AiAssistantsPanel-header')!.dispatchEvent(event);
+    return event;
+  };
+
+  /** One entry per menu on screen: the items it draws, in order. */
+  const menusOnScreen = (): Array<{ command: string; label: string }[]> =>
+    Array.from(document.querySelectorAll<HTMLElement>('.lm-Menu')).map(menu =>
+      Array.from(menu.querySelectorAll<HTMLElement>('.lm-Menu-item')).map(
+        item => ({
+          command: item.dataset.command ?? '',
+          label: item.querySelector('.lm-Menu-itemLabel')?.textContent ?? ''
+        })
+      )
+    );
+
+  it('ACC-PANE-193 - a right-click on the header opens one menu: Sync, then Move', async () => {
+    render(p, [session()]);
+    expect(menusOnScreen()).toEqual([]);
+
+    rightClickHeader();
+    // The row menu opens asynchronously after a right-click, so wait before
+    // counting the menus.
+    await flush();
+
+    // The labels come from the application registry. A menu built on the
+    // panel's own registry would draw the two items with no text.
+    expect(menusOnScreen()).toEqual([
+      [
+        { command: SYNC_FILE_BROWSER_COMMAND, label: SYNC_LABEL },
+        { command: MOVE_PANELS_COMMAND, label: MOVE_LABEL }
+      ]
+    ]);
+  });
+
+  it('ACC-PANE-193 - a right-click on the header prevents the browser menu', () => {
+    expect(rightClickHeader().defaultPrevented).toBe(true);
+  });
+
+  it('ACC-PANE-200 - the Move item tells the command which panel its menu belongs to', async () => {
+    rightClickHeader();
+    await flush();
+    const menu = document.querySelector<HTMLElement>('.lm-Menu')!;
+    const press = (keyCode: number): void => {
+      menu.dispatchEvent(
+        new KeyboardEvent('keydown', { keyCode, bubbles: true })
+      );
+    };
+
+    press(40); // Down Arrow: Sync File Browser
+    press(40); // Down Arrow: Move Panel
+    press(13); // Enter
+
+    expect(moveArgs).toEqual([{ panel: p.id }]);
+    expect(p.id).not.toBe('');
+  });
+
+  it('DEF-PANE-290 - a header right-click stands down a row menu that is still loading', async () => {
+    // The row has other conversations, so its menu waits for their listing.
+    let arrive: () => void = () => undefined;
+    const arrived = new Promise<void>(resolve => {
+      arrive = resolve;
+    });
+    request.mockImplementation(() =>
+      arrived.then(() => ({ branches: [], current: '' }))
+    );
+    render(p, [session({ extra_sessions: 2 })]);
+    const row = p.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!;
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    );
+    // The row is highlighted while its menu loads.
+    expect(row.classList.contains('jp-mod-active')).toBe(true);
+    rightClickHeader();
+
+    // The listing arrives after the header menu has opened.
+    arrive();
+    await flush();
+
+    expect(menusOnScreen()).toEqual([
+      [
+        { command: SYNC_FILE_BROWSER_COMMAND, label: SYNC_LABEL },
+        { command: MOVE_PANELS_COMMAND, label: MOVE_LABEL }
+      ]
+    ]);
+    // The row whose menu stood down is no longer highlighted.
+    expect(p.node.querySelectorAll('.jp-mod-active')).toHaveLength(0);
   });
 });

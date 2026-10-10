@@ -1667,7 +1667,7 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - log: 2026-09-29T13:26:54Z @kj added
   - log: 2026-09-29T13:51:39Z @kj closed
 - [x] `DEF-GUARD-287` **Open Callback browser test failed once in 19 runs** - MINOR; callback.spec.ts 'the same link sent again': after the popup closed itself, Control+Shift+C did not show the command palette and the test ran out of time; 1 failure in 19 runs at 1.2.59, not reproduced in 18 repeats
-  - evidence: fixed: openPopup opens the palette again when it was closed; experiment: one command run 40 ms after the palette opens fails the old helper with the same error, and the new helper opens the popup on attempt 2
+  - evidence: fixed: openPopup opens the palette again when it was closed; at 1.2.70, with a command that closes the palette 40 ms after it opens, the 4 tests of callback.spec.ts pass with the helper as committed and fail with the helper as it was
   - repro: run the full Galata suite with --trace retain-on-failure and copy test-results before the next run
   - test-tags: E2E
   - root-cause: 2026-10-09T11:03:33Z @kj JupyterLab's modal command palette hides when any application command runs, and the helper then waited on the hidden input; JupyterLab runs router:tree and launcher:create 0.6 to 0.7 s after the helper's first key press (14 runs); which command ran in the failing run was not captured
@@ -1675,6 +1675,7 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - log: 2026-10-09T09:48:24Z @kj added
   - log: 2026-10-09T10:42:19Z @kj closed
   - log: 2026-10-09T11:03:33Z @kj edited evidence "wontfix: MINOR; 1 failure in 22 runs of the test, not reproduced in 21 later runs (18 repeats at 1.2.59, 3 full suites of 63 at 1.2.60 with traces kept on failure); cause unknown" -> "fixed: openPopup opens the palette again when it was closed; experiment: one command run 40 ms after the palette opens fails the old helper with the same error, and the new helper opens the popup on attempt 2"
+  - log: 2026-10-10T03:00:30Z @kj edited evidence "fixed: openPopup opens the palette again when it was closed; experiment: one command run 40 ms after the palette opens fails the old helper with the same error, and the new helper opens the popup on attempt 2" -> "fixed: openPopup opens the palette again when it was closed; at 1.2.70, with a command that closes the palette 40 ms after it opens, the 4 tests of callback.spec.ts pass with the helper as committed and fail with the helper as it was"
 - [x] `DEF-GUARD-292` **Header menu tests left their menus on screen** - MINOR; the ACC-PANE-193 block of panel.spec.ts closed its menu with a mousedown event, which does nothing; each test's menu stayed in the document for the next test, and the comment said it was closed
   - evidence: fixed: the block's afterEach dispatches pointerdown; the DEF-PANE-290 test in that block counts the menus on screen and failed with 3 menus while the cleanup dispatched mousedown; jest 326 at 1.2.62
   - repro: run the ACC-PANE-193 block and count .lm-Menu nodes at the start of its third test

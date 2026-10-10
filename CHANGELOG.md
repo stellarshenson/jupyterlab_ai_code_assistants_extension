@@ -4,6 +4,20 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.71] - 2026-10-10
+
+### Added
+
+- The file browser follows the session you open. Opening an existing session from a panel (a row click, Enter or Space on a row, Resume, an `Open Branched Conversation` item, the `Manage Sessions` Open button) moves the JupyterLab file browser to that session's project folder. The file browser tab is not activated and the keyboard focus stays in the terminal. A project folder outside the server root is skipped. When two sessions are opened close together, the file browser ends on the folder of the session opened last
+- A new setting, `syncFileBrowser`, turns this on and off for every panel. It is on by default
+- A right-click on a panel header opens a menu with the two shared settings changed most often: `Sync File Browser`, checked while it is on, and `Move Panel Left` or `Move Panel Right`, which moves every assistant panel to the other sidebar. The panel that was on screen stays on screen after the move; with one panel on screen in each sidebar, it is the panel whose menu was used
+
+### Changed
+
+- A change of the `sidebar` setting, from `Move Panel` or from the settings page, now also moves a panel that was placed with JupyterLab's own `Switch Sidebar Side`. The new side is saved to JupyterLab's layout setting, so it holds after a page reload. Before, such a panel stayed where JupyterLab had put it
+- The browser test helper for `Open Callback` opens the command palette again when another command closed it. One run in 19 had failed at that point. The extension itself is unchanged there
+- The project `Makefile` is at version 1.45: `make install` also installs the optional dependency groups of `pyproject.toml`
+
 ## [1.2.56] - 2026-10-02
 
 ### Changed

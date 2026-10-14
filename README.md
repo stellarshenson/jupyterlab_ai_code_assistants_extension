@@ -77,7 +77,7 @@ pip install jupyterlab_ai_code_assistants_extension
 
 ## Migrating from the standalone extensions
 
-This package supersedes `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension`. On first run it carries their settings and favourites over automatically; uninstall the standalones once you are ready:
+This package supersedes `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension`. On first run it carries their settings and favourites over automatically, and it never replaces a setting you have already saved in this extension; uninstall the standalones once you are ready:
 
 ```bash
 pip uninstall jupyterlab_claude_code_extension jupyterlab_codex_extension jupyterlab_kimi_code_extension

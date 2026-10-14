@@ -399,6 +399,15 @@ Migration from the standalone extensions and duplicate-panel detection
 - [x] `DEF-RETI-13` **Migration marker commits before the settings half can land** - MINOR; `POST migrate` marks a provider migrated in the same call that returns its mapped settings keys, but those keys are applied client-side through the settings registry - so a first activation whose `settingRegistry.load` failed migrated the favourites, dropped the settings, and the marker blocked every retry; `src/index.ts`
   - log: 2026-08-07T00:00:00Z @kj reported: reported by the bug-hunter adversary (round 1, MINOR)
   - log: 2026-08-07T00:00:00Z @kj fixed: src/index.ts returns from migrate() when the settings registry is unavailable (settings null), so the server-side marker can never commit before the settings half has somewhere to land; the next activation retries the whole migration
+- [x] `DEF-RETI-299` **Migration re-run overwrites launch-mode settings** - MAJOR; a re-run of the one-shot migration writes the retired extension saved values over values the user saved here; seen 2026-10-14 01:24: providers.claude.dangerouslySkipPermissions true -> false from the retired file; a retired true would turn the flag on
+  - evidence: src/index.ts migrate skips a key with a saved user value; index.spec.ts DEF-RETI-299 and ACC-RETI-85 cases, each reddened by its mutation; live page at 1.2.72 with marker removed: flag saved true unchanged, absent key carried; jest 338, pytest 340, Galata 65
+  - related: ACC-RETI-88 - its never-overwrite half held only while the marker was readable
+  - repro: start a lab on the real user-settings folder with an empty ai-code-assistants state folder; open the page
+  - test-tags: UNIT
+  - root-cause: 2026-10-14T08:44:32Z @kj the marker that stops a second run lives in the Jupyter data folder, the settings it protects in the config folder; a server sharing only the settings folder runs migration again, and src/index.ts applied every returned key unconditionally
+  - log: 2026-10-14T08:36:14Z @kj added
+  - log: 2026-10-14T08:44:32Z @kj root-cause updated "2026-10-14T08:36:14Z @kj the marker that stops a second run lives in the Jupyter data folder, the settings it protects in the config folder; a server sharing only the settings folder runs migration again, and the frontend applies every key unconditionally" -> "the marker that stops a second run lives in the Jupyter data folder, the settings it protects in the config folder; a server sharing only the settings folder runs migration again, and src/index.ts applied every returned key unconditionally"
+  - log: 2026-10-14T08:44:32Z @kj closed
 
 ## Panel and settings UX `PANE`
 

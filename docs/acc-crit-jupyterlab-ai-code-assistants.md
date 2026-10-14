@@ -893,6 +893,7 @@ This extension retires the three standalone extensions. A user upgrading must no
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:00Z @kj edited importance
   - log: 2026-09-19T23:27:03Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-10-14T08:44:37Z @kj settings half now holds without the marker: index.spec.ts DEF-RETI-299 case, a saved value survives a second migration (DEF-RETI-299)
 - [x] `ACC-RETI-89` **Metapackage updated** - MEDIUM; `stellars_jupyterlab_extensions` depends on this extension and drops the three standalone ones
   - evidence: Checked 2026-09-20: stellars_jupyterlab_extensions/pyproject.toml line 30 depends on jupyterlab_ai_code_assistants_extension, and none of jupyterlab_claude_code_extension, jupyterlab_codex_extension or jupyterlab_kimi_code_extension appears in its dependencies. A separate repository, so no test here can assert it
   - test-tags: MANUAL

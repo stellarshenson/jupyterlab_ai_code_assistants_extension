@@ -851,14 +851,25 @@ describe('ACC-SETT - settings drive the panels', () => {
       saveRejects?: boolean;
       layoutSaveRejects?: boolean;
       shellNotRestored?: boolean;
+      /** The `migrated` list `POST migrate` answers with; without it the
+       * request fails, as with nothing to carry over. */
+      migrated?: unknown[];
     } = {}
   ): Promise<ISettingsHarness> {
     const serverSettings = {};
-    request.mockImplementation((path: string, settings: unknown) =>
-      path === 'status' && settings === serverSettings
-        ? Promise.resolve(roster())
-        : Promise.reject(new Error('not this activation'))
-    );
+    request.mockImplementation((path: string, settings: unknown) => {
+      if (settings === serverSettings && path === 'status') {
+        return Promise.resolve(roster());
+      }
+      if (
+        settings === serverSettings &&
+        path === 'migrate' &&
+        options.migrated
+      ) {
+        return Promise.resolve({ migrated: options.migrated });
+      }
+      return Promise.reject(new Error('not this activation'));
+    });
 
     const docks: [AssistantSessionsPanel, string][] = [];
     const activated: { id: string; afterDocks: number }[] = [];
@@ -1224,6 +1235,28 @@ describe('ACC-SETT - settings drive the panels', () => {
         .some(line => line.includes('failed to load settings'))
     ).toBe(true);
     warned.mockRestore();
+    dispose(live);
+  });
+
+  // ------------------------------------------------------- DEF-RETI-299
+
+  const SKIP_KEY = 'providers.claude.dangerouslySkipPermissions';
+  const migratedSkip = (value: boolean): unknown[] => [
+    { provider_id: 'claude', keys: { [SKIP_KEY]: value }, favourites: [] }
+  ];
+
+  it('DEF-RETI-299 - a migration run again keeps the value the user saved here', async () => {
+    const live = await activate(
+      { [SKIP_KEY]: true },
+      { migrated: migratedSkip(false) }
+    );
+    expect(live.saved).toEqual([]);
+    dispose(live);
+  });
+
+  it('ACC-RETI-85 - a migrated key with nothing saved here is carried over', async () => {
+    const live = await activate({}, { migrated: migratedSkip(true) });
+    expect(live.saved).toEqual([[SKIP_KEY, true]]);
     dispose(live);
   });
 

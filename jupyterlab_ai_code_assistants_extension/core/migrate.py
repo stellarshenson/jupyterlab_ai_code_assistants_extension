@@ -8,8 +8,11 @@ hands the mapped settings keys back for the frontend to apply through the
 settings registry (the server has no writable handle on it).
 
 Idempotent by marker: each provider is recorded once in ``migration.json`` and
-skipped forever after, so a second call migrates nothing and can never clobber
-a value the user has since set here (acc-crit "Migration is idempotent").
+skipped forever after, so a second call migrates nothing (acc-crit "Migration
+is idempotent"). The marker sits in the Jupyter data folder and the settings in
+the config folder, so a server that shares only the settings folder migrates
+again; the frontend therefore applies a settings key only while nothing is
+saved for it here (DEF-RETI-299).
 
 Assistant-neutral: everything specific - which package, which sidecar, which
 key becomes which - is on the descriptor's ``LegacySource``.

@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.73] - 2026-10-14
+
+### Fixed
+
+- `Claude Code: Dangerously skip permissions` no longer turns itself off. The one-time migration from the retired standalone extensions could run again when a JupyterLab server used the same settings folder but a different data folder, and it then wrote the retired extension's saved value over the value saved in this extension. A migrated setting is now applied only when nothing is saved for it in this extension's settings, for every setting the migration carries over
+
 ## [1.2.71] - 2026-10-10
 
 ### Added

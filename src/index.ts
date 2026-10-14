@@ -439,6 +439,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
         );
         for (const entry of result.migrated ?? []) {
           for (const [key, value] of Object.entries(entry.keys ?? {})) {
+            // A value already saved here is the user's newer choice and
+            // stays. The marker that stops a second migration lives in the
+            // Jupyter data folder, apart from these settings, so a server
+            // that shares only the settings folder migrates again and would
+            // put the retired extension's value back (DEF-RETI-299).
+            if (settings?.get(key).user !== undefined) {
+              continue;
+            }
             // Per key. The server marks EVERY provider migrated before it
             // answers, so one rejection aborting the loop used to drop the
             // remaining providers' values with no retry ever offered again -

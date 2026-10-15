@@ -116,7 +116,9 @@ async def test_native_branch_does_not_mask_native_colour(jp_fetch, present, monk
 
 
 @pytest.mark.parametrize("route", ["launch", "launch-argv"])
-async def test_codex_new_launch_carries_native_id(jp_fetch, present, tmp_path, monkeypatch, route):
+async def test_codex_new_launch_carries_native_id(
+    jp_fetch, jp_serverapp, present, tmp_path, monkeypatch, route
+):
     """Panel and Launcher new sessions retain identity in their running argv."""
     child = "55555555-5555-4555-8555-555555555555"
     calls = []
@@ -130,12 +132,19 @@ async def test_codex_new_launch_carries_native_id(jp_fetch, present, tmp_path, m
 
     monkeypatch.setattr(codex, "_app_server", server)
     spawned = []
-    from jupyterlab_ai_code_assistants_extension.core.routes import LaunchHandler
+
     def create(**kwargs):
         spawned.append(kwargs)
         return type("Terminal", (), {"name": "native-id-terminal"})()
-    monkeypatch.setattr(LaunchHandler, "terminal_manager", property(lambda _: type(
-        "Manager", (), {"create": staticmethod(create)})()))
+
+    # The launch route resolves its manager through ``self.settings``; a fake
+    # hung on the handler class is never read, so the spawn landed in the real
+    # terminado manager. Patch the settings entry the route actually reads.
+    monkeypatch.setitem(
+        jp_serverapp.web_app.settings,
+        "terminal_manager",
+        type("Manager", (), {"create": staticmethod(create)})(),
+    )
     response = await jp_fetch(URL, "providers", "codex", route, method="POST",
                               body=json.dumps({"project_path": str(tmp_path)}))
     assert response.code == 200

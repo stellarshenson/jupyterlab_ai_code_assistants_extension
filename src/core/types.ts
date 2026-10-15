@@ -21,10 +21,7 @@
  * or read that value.
  */
 export type ForkStrategy =
-  | 'native-flag'
-  | 'native-command'
-  | 'server-copy'
-  | 'server-native';
+  'native-flag' | 'native-command' | 'server-copy' | 'server-native';
 
 /** See `IProviderDescriptor.terminalScope`. */
 export type TerminalScope = 'conversation' | 'project';

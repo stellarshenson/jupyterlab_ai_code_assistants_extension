@@ -449,7 +449,8 @@ describe('ACC-SESS-203 - automatic branch names', () => {
         });
         expect(document.querySelector('.jp-Dialog')).toBeNull();
         expect(launch).toHaveBeenCalledWith(
-          expect.objectContaining({ session_id: 'child' }), 'child'
+          expect.objectContaining({ session_id: 'child' }),
+          'child'
         );
       } finally {
         target.dispose();

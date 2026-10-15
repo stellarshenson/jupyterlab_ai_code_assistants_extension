@@ -17,15 +17,11 @@ Three consequences shape everything below:
 
 * the ``--<key>--`` directory name IS the ``encoded_path``. The key is a lossy
   encoding, so the project path is read from the header line's ``cwd``
-* the harness has no interactive terminal surface: ``dsh --profile web``
-  serves a browser UI that lists and resumes the project's conversations, and
-  ``dsh --profile headless`` runs one task and exits. A launch therefore
-  starts the web server in the project directory - ``--no-open``, because
-  the browser is on the user's side of JupyterLab, and ``--port 0``, so the
-  OS picks a free port - and the terminal shows the ``dsh web:`` line that
-  carries the authenticated URL. No flag names a conversation, so a row's
-  Open is the project's web UI rather than that one conversation, and every
-  launch of a project reads the same
+* the TUI is the interactive surface: ``dsh tui`` boots the community TUI
+  bundle in the project directory, and ``dsh tui --resume <id>`` reopens one
+  conversation. The id is the only conversation name that reaches a command
+  line, so a resume carries it and a bare launch starts a new conversation,
+  whose id the TUI mints itself
 * no fork verb and no colour concept: branching copies the log under a fresh
   id (the ``server-copy`` strategy), and a tint only ever comes from the
   extension's own colour store
@@ -56,6 +52,7 @@ from ..core.store import (
     SessionStore,
     cmdline_args,
     dispose_path,
+    flag_value,
     is_safe_segment,
     process_cmdline,
     process_comm,
@@ -622,21 +619,36 @@ class DeepSeekStore(SessionStore):
         name: str | None = None,
         project_path: str | None = None,
     ) -> list[str]:
-        """``dsh --profile web --no-open --port 0``, whatever the row.
+        """``dsh tui``, with ``--resume <id>`` when a conversation is named.
 
-        The web UI is the harness's only interactive surface and it takes no
-        conversation on its command line, so the same argv serves a resume, a
-        fork (already on disk under its own id by the time this runs) and a
-        new conversation; the terminal prints the ``dsh web:`` URL and the
-        conversation is chosen in the browser. A resume whose conversation is
-        gone REFUSES the launch all the same, so the row's Open never opens a
-        UI in which the conversation the user clicked does not exist.
+        The TUI takes a conversation on its command line, so a row's Open runs
+        the harness's terminal interface on THAT conversation rather than
+        serving a browser UI for the whole project. A fork is on disk under
+        its own id before this runs, so it resumes like any other row; a
+        launch with no id is a new conversation, whose id the TUI mints
+        itself. A resume whose conversation is gone REFUSES the launch, so the
+        row's Open never opens a TUI on a conversation the harness no longer
+        holds.
         """
-        if session_id and self._find_log(session_id) is None:
-            raise SessionNotFound(session_id)
-        return [cli_path, "--profile", "web", "--no-open", "--port", "0"]
+        argv = [cli_path, "tui"]
+        if session_id:
+            if self._find_log(session_id) is None:
+                raise SessionNotFound(session_id)
+            argv += ["--resume", session_id]
+        return argv
 
     # -- terminal identity ----------------------------------------------
+
+    def parse_session_id(self, cmdline: bytes) -> str | None:
+        """The conversation a ``dsh tui`` cmdline is running.
+
+        ``--resume <id>`` is the only place a conversation id reaches the
+        harness's command line, in both the ``--resume <id>`` and
+        ``--resume=<id>`` forms. A bare ``dsh tui`` starts a new conversation
+        whose id only the TUI knows, so it answers None, as does any process
+        that is not the harness.
+        """
+        return flag_value(cmdline_args(cmdline), "--resume")
 
     def owns_pid(self, pid: int) -> bool:
         """Whether the node process at ``pid`` is the harness rather than any
@@ -669,7 +681,7 @@ DESCRIPTOR = ProviderDescriptor(
         # No colour concept anywhere in the harness - the extension's
         # write-back store is the only source of a tint.
         colour_source="none",
-        # The web surface has no approval switch on its command line.
+        # The TUI has no approval switch on its command line.
         launch_modes=(),
         # A name is the newest ``session/title`` event of the log, which is
         # where the harness's web UI reads it.

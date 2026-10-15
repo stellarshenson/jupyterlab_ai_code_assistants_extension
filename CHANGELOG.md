@@ -2,6 +2,11 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+### Changed
+
+- The DeepSeek panel opens conversations in the terminal instead of the harness's browser UI. A row click resumes that row's conversation with `dsh tui --resume <id>` in a terminal, and the open verb reads `Resume`, no longer `Open Web UI`; a new session runs `dsh tui` and starts a conversation whose id the TUI mints itself. Each conversation opens in its own terminal, where one terminal used to serve every conversation of the project. Requires the community TUI bundle (`@deepseek-harness-tui/dsh-tui`), mounted as the `tui` profile with `dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui`
+- DeepSeek panel icon replaced with the official DeepSeek whale mark, rendered monochrome in the theme foreground
+
 <!-- <END NEW CHANGELOG ENTRY> -->
 
 ## [1.2.73] - 2026-10-14

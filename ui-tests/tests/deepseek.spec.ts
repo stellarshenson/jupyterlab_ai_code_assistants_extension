@@ -14,9 +14,9 @@ test.use({ autoGoto: false, waitForApplication });
  * one titled conversation in the scratch DeepSeek store, so the row drives the
  * whole launch path - panel to launch route to a pty running the `dsh` stub.
  * What is DeepSeek-specific and worth pinning in a browser: the row is named
- * by the log's title event, the open verb says the click serves the web UI
- * rather than resuming a conversation, and a second click on the row reuses
- * the terminal instead of starting a second server.
+ * by the log's title event, a click resumes that row's conversation in the
+ * TUI under the default open verb, and a second click on the row reuses the
+ * terminal instead of opening a second TUI.
  *
  * Not pinned here: reuse across a reload, a switch or a fork. That path rests
  * on the server confirming the terminal's process as the harness
@@ -31,7 +31,7 @@ test.use({ autoGoto: false, waitForApplication });
  * panel's reuse entry goes with the widget, and the next click starts the
  * harness afresh rather than focusing a dead shell (DEF-PANE-223).
  */
-test('a DeepSeek row opens the web UI terminal once', async ({ page }) => {
+test('a DeepSeek row opens the TUI terminal once', async ({ page }) => {
   await page.goto();
   await openPanelTab(page, 'deepseek');
 
@@ -43,10 +43,11 @@ test('a DeepSeek row opens the web UI terminal once', async ({ page }) => {
     .first();
   await expect(row).toBeVisible({ timeout: 15000 });
 
-  // The provider's own verb on the context menu.
+  // No provider verb: the click resumes the row's conversation, which is what
+  // the default label already says.
   await row.click({ button: 'right' });
   await expect(
-    page.locator('.lm-Menu-itemLabel', { hasText: 'Open Web UI' })
+    page.locator('.lm-Menu-itemLabel', { hasText: /^Resume$/ })
   ).toBeVisible();
   await page.keyboard.press('Escape');
 

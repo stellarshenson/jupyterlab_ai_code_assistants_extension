@@ -2096,26 +2096,48 @@ def test_deepseek_delete_keeps_the_current_and_remove_answers_every_id(deepseek)
     assert store.remove(DEEPSEEK_ENCODED) is None
 
 
-def test_deepseek_launch_argv_serves_the_web_ui(deepseek):
-    """Every launch of a project is the same web server; only a resume of a
-    conversation that is gone is refused."""
+def test_deepseek_launch_argv_runs_the_tui(deepseek):
+    """A bare launch starts a conversation, a named one resumes it, and only a
+    resume of a conversation that is gone is refused."""
     store, root = deepseek
     session = _dsh_id()
     write_deepseek_tree(root, [{"id": session}])
-    web = ["/bin/dsh", "--profile", "web", "--no-open", "--port", "0"]
-    assert store.launch_argv("/bin/dsh") == web
-    assert store.launch_argv("/bin/dsh", session_id=session) == web
+    assert store.launch_argv("/bin/dsh") == ["/bin/dsh", "tui"]
+    assert store.launch_argv("/bin/dsh", session_id=session) == [
+        "/bin/dsh",
+        "tui",
+        "--resume",
+        session,
+    ]
     with pytest.raises(SessionNotFound):
         store.launch_argv("/bin/dsh", session_id=_dsh_id())
-    # Nothing on the command line names a conversation, so none is read back.
-    assert store.parse_session_id(cmdline("dsh", "--profile", "web")) is None
+    # The two directions must agree or terminal reuse degrades to duplicates.
+    assert (
+        store.parse_session_id(cmdline(*store.launch_argv("dsh", session_id=session)))
+        == session
+    )
+    # The value arrives in both spellings flag_value handles.
+    assert (
+        store.parse_session_id(cmdline("dsh", "tui", f"--resume={session}"))
+        == session
+    )
+    # A bare launch starts a conversation whose id only the TUI knows.
+    assert store.parse_session_id(cmdline("dsh", "tui")) is None
+    # A flag with its value missing must not swallow the next flag as an id.
+    assert store.parse_session_id(cmdline("dsh", "tui", "--resume", "--verbose")) is None
 
 
 def test_deepseek_owns_pid_needs_the_harness_in_the_argv(deepseek, monkeypatch):
     store, _root = deepseek
     cmdlines = {
-        1: cmdline("node", "/opt/node_modules/.bin/dsh", "--profile", "web"),
-        2: cmdline("node", "/opt/node_modules/@deepseek-ai/dsh/lib/bin.js"),
+        1: cmdline("node", "/opt/node_modules/.bin/dsh", "tui"),
+        2: cmdline(
+            "node",
+            "/opt/node_modules/@deepseek-ai/dsh/lib/bin.js",
+            "tui",
+            "--resume",
+            _dsh_id(),
+        ),
         3: cmdline("node", "/srv/my-dsh-app/bin.js"),
         4: cmdline("node", "/srv/app/node_modules/.bin/vite", "dev"),
     }

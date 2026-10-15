@@ -693,12 +693,14 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-10-09T07:48:22Z @kj added
   - log: 2026-10-09T10:20:44Z @kj edited test "jlpm jest src/__tests__/panel.spec.ts" -> "jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts"
   - log: 2026-10-09T10:30:30Z @kj closed
-- [ ] `ACC-SESS-203` **Branches inherit numbered parent names** - HIGH; Each branch automatically receives <parent-name>_<n>, using the next unused positive integer for branches from that parent, starting at 1; for example analysis_1 and analysis_2. The numbered name remains visible after reopening
+- [x] `ACC-SESS-203` **Branches inherit numbered parent names** - HIGH; Each branch automatically receives <parent-name>_<n>, using the next unused positive integer for branches from that parent, starting at 1; for example analysis_1 and analysis_2. The numbered name remains visible after reopening
+  - evidence: Galata ui-tests/tests/native-branch.spec.ts: 2 passed - branching 'Native branch' twice gives 'Native branch_2' then 'Native branch_4', the seeded _1 and _3 skipped and no name dialog shown, both read back from the sessions route
   - related: ACC-SESS-59, ACC-CLAU-94
-  - test: Branch a session named analysis twice; assert analysis_1 and analysis_2 in the panel and conversation list after reopening; an existing suffix must not be reused
-  - test-tags: MANUAL
-  - lock: 2026-10-16T12:45:38Z @kj
+  - test: Galata ui-tests/tests/native-branch.spec.ts: branch the seeded parent twice and assert the children read <parent>_2 then <parent>_4, skipping the seeded _1 and _3, with no name dialog
+  - test-tags: E2E
   - log: 2026-10-15T12:28:03Z @kj added
+  - log: 2026-10-15T17:43:48Z @kj edited test "Branch a session named analysis twice; assert analysis_1 and analysis_2 in the panel and conversation list after reopening; an existing suffix must not be reused" -> "Galata ui-tests/tests/native-branch.spec.ts: branch the seeded parent twice and assert the children read <parent>_2 then <parent>_4, skipping the seeded _1 and _3, with no name dialog"; test-tags "MANUAL" -> "E2E"
+  - log: 2026-10-15T17:43:48Z @kj closed: closed: browser-verified in ui-tests/tests/native-branch.spec.ts
 
 ## Colour `COLO`
 
@@ -839,13 +841,15 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
   - log: 2026-09-04T21:13:42Z @kj added
   - log: 2026-09-04T23:14:24Z @kj closed
   - log: 2026-09-17T17:25:54Z @kj edited importance
-- [ ] `ACC-COLO-202` **Every branch inherits the parent tab colour** - HIGH; Every branched session inherits its parent's effective tab colour at fork time, including a colour chosen by the assistant or set by hand on the tab; the inherited colour survives reopening
+- [x] `ACC-COLO-202` **Every branch inherits the parent tab colour** - HIGH; Every branched session inherits its parent's effective tab colour at fork time, including a colour chosen by the assistant or set by hand on the tab; the inherited colour survives reopening
+  - evidence: Galata ui-tests/tests/native-branch.spec.ts: 2 passed - the branch row and the terminal probe both carry the parent's colour (sky), read after the branch
   - overrides: ACC-COLO-75 - inheritance now includes native assistant colours
   - related: ACC-COLO-76, ACC-COLO-79
-  - test: Branch parents with an assistant-selected colour and a manual tab override; inspect each branch tab, reload, then reopen and verify the inherited colour
-  - test-tags: MANUAL
-  - lock: 2026-10-16T12:45:38Z @kj
+  - test: Galata ui-tests/tests/native-branch.spec.ts: the branch row carries the parent's colour (sky) and the terminal probe answers the child with it
+  - test-tags: E2E
   - log: 2026-10-15T12:28:03Z @kj added
+  - log: 2026-10-15T17:43:49Z @kj edited test "Branch parents with an assistant-selected colour and a manual tab override; inspect each branch tab, reload, then reopen and verify the inherited colour" -> "Galata ui-tests/tests/native-branch.spec.ts: the branch row carries the parent's colour (sky) and the terminal probe answers the child with it"; test-tags "MANUAL" -> "E2E"
+  - log: 2026-10-15T17:43:49Z @kj closed: closed: browser-verified; the /color argv is pinned by tests/test_native_branch.py
 
 ## Retirement and Migration `RETI`
 
@@ -1021,18 +1025,22 @@ Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. 
   - mechanism: 2026-09-19T20:11:57Z @kj the store already reads the newest custom-title record out of the transcript tail for the row label, so a rename writes the record that read is looking for
   - log: 2026-09-19T20:11:57Z @kj added
   - log: 2026-09-19T20:30:47Z @kj closed
-- [ ] `ACC-CLAU-204` **Claude branch colour is set through /color** - HIGH; A Claude branch applies the inherited colour through Claude's native /color command, so Claude itself remembers that colour rather than only the extension tinting its terminal tab
+- [x] `ACC-CLAU-204` **Claude branch colour is set through /color** - HIGH; A Claude branch applies the inherited colour through Claude's native /color command, so Claude itself remembers that colour rather than only the extension tinting its terminal tab
+  - evidence: tests/test_native_branch.py test_claude_branch_uses_native_commands asserts the second invocation carries /color with the parent's native colour; Galata ui-tests/tests/native-branch.spec.ts: 2 passed - the branch carries the parent colour (sky)
   - related: ACC-COLO-202
-  - test: Set the parent colour with /color, branch it, then reopen the branch in Claude and verify its native colour matches the parent at fork time
-  - test-tags: MANUAL
-  - lock: 2026-10-16T12:45:38Z @kj
+  - test: Galata ui-tests/tests/native-branch.spec.ts: the branch's colour read back from the sessions route; the argv pinned by tests/test_native_branch.py test_claude_branch_uses_native_commands
+  - test-tags: UNIT, E2E
   - log: 2026-10-15T12:28:04Z @kj added
-- [ ] `ACC-CLAU-205` **Claude branch name is set through native rename** - HIGH; A Claude branch applies <parent-name>_<n> through Claude's native /rename command, or /name where supported, so Claude's own session list shows the same numbered name as the panel
+  - log: 2026-10-15T17:43:52Z @kj edited test "Set the parent colour with /color, branch it, then reopen the branch in Claude and verify its native colour matches the parent at fork time" -> "Galata ui-tests/tests/native-branch.spec.ts: the branch's colour read back from the sessions route; the argv pinned by tests/test_native_branch.py test_claude_branch_uses_native_commands"; test-tags "MANUAL" -> "UNIT, E2E"
+  - log: 2026-10-15T17:43:52Z @kj closed: closed: argv unit-pinned; the browser reads the CLI-written colour back - a real CLI run is not separately shown, the stub stands in
+- [x] `ACC-CLAU-205` **Claude branch name is set through native rename** - HIGH; A Claude branch applies <parent-name>_<n> through Claude's native /rename command, or /name where supported, so Claude's own session list shows the same numbered name as the panel
+  - evidence: tests/test_native_branch.py test_claude_branch_uses_native_commands asserts the first invocation carries /rename with the numbered name; Galata ui-tests/tests/native-branch.spec.ts: 2 passed - the branch shows 'Native branch_2' then 'Native branch_4'
   - related: ACC-SESS-203, ACC-CLAU-177
-  - test: Branch a named Claude session, then inspect its name in the panel and Claude's native session list after reopening; both must show the numbered inherited name
-  - test-tags: MANUAL
-  - lock: 2026-10-16T12:45:38Z @kj
+  - test: Galata ui-tests/tests/native-branch.spec.ts: the branch's numbered name read back from the sessions route; the argv pinned by tests/test_native_branch.py test_claude_branch_uses_native_commands
+  - test-tags: UNIT, E2E
   - log: 2026-10-15T12:28:04Z @kj added
+  - log: 2026-10-15T17:43:52Z @kj edited test "Branch a named Claude session, then inspect its name in the panel and Claude's native session list after reopening; both must show the numbered inherited name" -> "Galata ui-tests/tests/native-branch.spec.ts: the branch's numbered name read back from the sessions route; the argv pinned by tests/test_native_branch.py test_claude_branch_uses_native_commands"; test-tags "MANUAL" -> "UNIT, E2E"
+  - log: 2026-10-15T17:43:52Z @kj closed: closed: argv unit-pinned; the browser reads the CLI-written name back - Claude's own session list rendering is not separately shown
 
 ## Codex Provider `CODE`
 
@@ -1063,16 +1071,26 @@ Ported from `jupyterlab_codex_extension` v0.6.12. Capabilities - no colour sourc
 - [x] `ACC-CODE-178` **No rename, and the item says so by being absent** - HIGH; Codex declares no rename support: the thread name is a column of state_<N>.sqlite, which this store opens read-only, there is no codex rename subcommand, and the only write surface is the app-server method codex.thread.rename, which this extension does not speak; the menu item is absent rather than present and failing
   - evidence: codex declares can_rename False and inherits the base refusal; test_codex_has_no_rename_at_all asserts both, and the route answers 400 rename_unsupported
   - related: ACC-SESS-174 - the capability this provider answers
+  - overridden-by: ACC-CODE-206
   - test: open the context menu on a Codex row and assert there is no rename item; POST the rename route and assert 400 rename_unsupported
   - test-tags: UNIT, FUNCTIONAL
   - mechanism: 2026-09-19T20:11:58Z @kj the descriptor declares no rename, so the command hides itself and the route refuses before the store is asked
   - log: 2026-09-19T20:11:58Z @kj added
   - log: 2026-09-19T20:30:47Z @kj closed
-- [ ] `ACC-CODE-201` **Codex reuses an already open session terminal** - CRITICAL; Clicking a Codex panel row for a session already running in a terminal focuses that terminal instead of opening another terminal for the same session
+- [x] `ACC-CODE-201` **Codex reuses an already open session terminal** - CRITICAL; Clicking a Codex panel row for a session already running in a terminal focuses that terminal instead of opening another terminal for the same session
+  - evidence: Galata ui-tests/tests/codex-reuse.spec.ts passed on this tree (report ui-tests/playwright-report/8899, screenshot codex-row-reuse.png): the first click launches one terminal carrying the row's id, the second click focuses the same widget with no new launch
   - related: DEF-PROV-300, ACC-SESS-54
-  - test: Open a Codex session, click its row again, assert the existing terminal is activated and the terminal count is unchanged
-  - test-tags: MANUAL
+  - test: Galata ui-tests/tests/codex-reuse.spec.ts: open a Codex session, click its row again, assert the existing terminal is activated and the terminal count unchanged
+  - test-tags: E2E
   - log: 2026-10-15T12:28:02Z @kj added
+  - log: 2026-10-15T17:43:36Z @kj edited test "Open a Codex session, click its row again, assert the existing terminal is activated and the terminal count is unchanged" -> "Galata ui-tests/tests/codex-reuse.spec.ts: open a Codex session, click its row again, assert the existing terminal is activated and the terminal count unchanged"; test-tags "MANUAL" -> "E2E"
+  - log: 2026-10-15T17:43:36Z @kj closed: closed: the browser click path focuses the open terminal; the id-carrying launch is pinned by tests/test_native_branch.py
+- [ ] `ACC-CODE-206` **Rename lands through the Codex app-server** - HIGH; Renaming a Codex row writes the thread's name through the app-server method thread/name/set on the same stdio channel fork speaks, so the CLI and the panel read back one name; an id outside the project, an empty name, or an app-server refusal answers none
+  - related: DEF-PROV-301 - the rename defect
+  - overrides: ACC-CODE-178
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k codex_rename
+  - test-tags: UNIT
+  - log: 2026-10-15T17:44:05Z @kj added
 
 ## Kimi Provider `KIMI`
 
@@ -1587,7 +1605,7 @@ Launcher tiles that open an assistant in the file browser's current folder
 
 ## DeepSeek Provider `DEEP`
 
-New provider - no standalone extension to port from. DeepSeek Harness (`@deepseek-ai/dsh` 0.1.5). Store: `$DSH_HOME/sessions` (default `~/.dsh/sessions`), one `--<key>--` directory per project, one directory per conversation holding `session.v<N>.jsonl.zstd` (concatenated Zstandard frames; raw `.jsonl` when compression is off). Capabilities - no terminal chat surface (the web UI is the only interactive one), no fork verb (server-side fork), no colour concept, no launch modes
+New provider - no extension to port from. DeepSeek Harness (`@deepseek-ai/dsh` 0.1.5). Store: `$DSH_HOME/sessions`, a `--<key>--` directory per project, a directory per conversation holding its `session.v<N>.jsonl.zstd` log. Capabilities - the TUI is the interactive surface (`dsh tui`); no fork verb (server-side copy), no colour concept, no launch modes
 
 - [x] `ACC-DEEP-166` **Store scan** - HIGH; projects come from the --<key>-- directories under the sessions root and the project path from each log's header cwd; the highest generation log is read, compressed or raw, and only user/message and assistant/message events count; the newest session/title event names the row
   - evidence: test_deepseek_lists_a_project_from_its_log_headers and test_deepseek_reads_the_highest_generation_only pass; pytest 227 green, jest 205 green, Galata 44/44 at 1.2.20
@@ -1597,6 +1615,7 @@ New provider - no standalone extension to port from. DeepSeek Harness (`@deepsee
   - log: 2026-09-17T17:26:34Z @kj added
   - log: 2026-09-17T17:35:16Z @kj closed
 - [x] `ACC-DEEP-167` **Open serves the web UI** - HIGH; every launch of a project runs dsh --profile web --no-open --port 0 in the project directory and the terminal prints the URL; the menu verb reads Open Web UI; a resume of a conversation that no longer exists is refused with session_not_found rather than serving a UI without it
+  - overridden-by: ACC-DEEP-207
   - evidence: test_deepseek_launch_argv_serves_the_web_ui passes; Galata 'a DeepSeek row opens the web UI terminal once' passes; pytest 227 green, jest 205 green, Galata 44/44 at 1.2.20
   - test: pytest -k deepseek_launch_argv; Galata ui-tests/tests/deepseek.spec.ts
   - test-tags: UNIT, E2E
@@ -1623,12 +1642,16 @@ New provider - no standalone extension to port from. DeepSeek Harness (`@deepsee
   - test-tags: UNIT
   - log: 2026-09-17T17:26:34Z @kj added
   - log: 2026-09-17T17:35:16Z @kj closed
-- [x] `ACC-DEEP-171` **Process identity by argv** - MEDIUM; a node process is the harness only when its argv carries the dsh binary or the @deepseek-ai/dsh/lib/bin.js path; a bare bin.js of another package is not claimed, and no conversation id is read from the argv
-  - evidence: test_deepseek_owns_pid_needs_the_harness_in_the_argv passes; pytest 227 green, jest 205 green, Galata 44/44 at 1.2.20
-  - test: pytest -k deepseek_owns_pid
+- [x] `ACC-DEEP-171` **Process identity by argv** - MEDIUM; a node process is the harness only when its argv carries the dsh binary or the @deepseek-ai/dsh/lib/bin.js path; a bare bin.js of another package is not claimed; an id is read from the argv only through the --resume flag, in both the --resume <id> and --resume=<id> forms
+  - evidence: test_deepseek_owns_pid_needs_the_harness_in_the_argv and test_deepseek_launch_argv_runs_the_tui pass together (2 passed): the first pins the argv claim, the second pins the --resume read-back in both spellings and None for a bare launch
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k 'deepseek_owns_pid or deepseek_launch_argv'
   - test-tags: UNIT
   - log: 2026-09-17T17:26:34Z @kj added
   - log: 2026-09-17T17:35:16Z @kj closed
+  - log: 2026-10-15T17:46:44Z @kj amended text "a node process is the harness only when its argv carries the dsh binary or the @deepseek-ai/dsh/lib/bin.js path; a bare bin.js of another package is not claimed, and no conversation id is read from the argv" -> "a node process is the harness only when its argv carries the dsh binary or the @deepseek-ai/dsh/lib/bin.js path; a bare bin.js of another package is not claimed; an id is read from the argv only through the --resume flag, in both the --resume <id> and --resume=<id> forms"
+  - log: 2026-10-15T17:46:44Z @kj edited test "pytest -k deepseek_owns_pid" -> "PYTHONPATH=/home/lab/workspace/private/jupyterlab/jupyterlab_ai_code_assistants_extension python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k 'deepseek_owns_pid or deepseek_launch_argv'"; evidence "test_deepseek_owns_pid_needs_the_harness_in_the_argv passes; pytest 227 green, jest 205 green, Galata 44/44 at 1.2.20" -> "test_deepseek_owns_pid_needs_the_harness_in_the_argv and test_deepseek_launch_argv_runs_the_tui pass together (2 passed): the first pins the argv claim, the second pins the --resume read-back in both spellings and None for a bare launch"
+  - log: 2026-10-15T17:46:44Z @kj corrected by amendment, not override: only the id-readback clause was false and the process-identity rules still hold; an override would say the whole item no longer holds
+  - log: 2026-10-15T17:46:58Z @kj edited test "PYTHONPATH=/home/lab/workspace/private/jupyterlab/jupyterlab_ai_code_assistants_extension python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k 'deepseek_owns_pid or deepseek_launch_argv'" -> "PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k 'deepseek_owns_pid or deepseek_launch_argv'"
 - [x] `ACC-DEEP-172` **Short id past the prefix** - MEDIUM; every DeepSeek id is session-<uuid> and every Kimi id session_<uuid>; the branch menus show the uuid's first eight characters, sliced past the descriptor's sessionIdPrefix by the core rather than by a per-provider hook
   - evidence: jest describe shortSessionId in src/__tests__/labels.spec.ts passes for session- and session_ prefixes; pytest 227 green, jest 205 green, Galata 44/44 at 1.2.20
   - test: jest src/__tests__/labels.spec.ts shortSessionId
@@ -1646,6 +1669,13 @@ New provider - no standalone extension to port from. DeepSeek Harness (`@deepsee
   - log: 2026-09-19T20:19:48Z @kj edited text
   - log: 2026-09-19T20:19:48Z @kj the insert-a-title-event half was dropped: no DeepSeek log exists on this machine to confirm the event shape, so writing one would be a guess in the user data
   - log: 2026-09-19T20:30:47Z @kj closed
+- [x] `ACC-DEEP-207` **Open runs the TUI on the row's conversation** - HIGH; A launch runs dsh tui, with --resume <id> for a named conversation, so the terminal opens on it; a bare launch starts a new one, whose id the TUI mints; a resume whose log is gone is refused with session_not_found; the menu verb is the default Resume
+  - evidence: test_deepseek_launch_argv_runs_the_tui pins dsh tui, both --resume spellings and the SessionNotFound refusal (pytest -k deepseek_launch_argv: 1 passed); Galata ui-tests/tests/deepseek.spec.ts: 2 passed - the row menu reads Resume and a click opens exactly one TUI terminal
+  - overrides: ACC-DEEP-167
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k deepseek_launch_argv; Galata ui-tests/tests/deepseek.spec.ts
+  - test-tags: UNIT, E2E
+  - log: 2026-10-15T17:44:05Z @kj added
+  - log: 2026-10-15T17:44:09Z @kj closed: closed: the argv and the refusal are unit-pinned; the browser run opens one TUI terminal per row
 
 ## Login callback `LOGIN`
 

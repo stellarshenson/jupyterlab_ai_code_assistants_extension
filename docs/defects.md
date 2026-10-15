@@ -99,6 +99,7 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - root-cause: 2026-09-17T18:46:56Z @kj the CLI mints the id after launch and the probe reads nothing until then; bug-hunter lens, round 1, deferred as out of this extension's hands
   - log: 2026-09-17T18:46:56Z @kj added
   - log: 2026-09-17T19:13:45Z @kj closed
+  - log: 2026-10-15T17:43:33Z @kj superseded for Codex: new launches and forks mint the id through its own app-server before the terminal opens (test_native_branch.py test_codex_new_launch_carries_native_id, test_codex_fork_names_the_exact_child_without_starting_a_turn); the Kimi + case stands; README's exception sentence is superseded for Codex
 - [x] `DEF-SERV-219` **comm_name doubles as the probe-candidate flag** - MINOR; MINOR; the terminal probe treats a non-empty comm_name as 'this store can own a pid', so three stores set a decoy literal to be probed at all; affects the add-a-provider path only
   - evidence: wontfix: today's five providers are unaffected, the harm is on the add-a-provider path only; adjudicator round 1
   - repro: read routes.py:166-170 and the comm_name of deepseek, gemini and kimi
@@ -282,13 +283,25 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - test-tags: UNIT
   - log: 2026-09-28T11:45:36Z @kj added
   - log: 2026-09-28T11:45:44Z @kj closed
-- [ ] `DEF-PROV-300` **Codex opens another terminal for an already open session** - MAJOR; Clicking a Codex panel row whose session is already open starts another terminal with the same session; cause under investigation
+- [x] `DEF-PROV-300` **Codex opens another terminal for an already open session** - MAJOR; Clicking a Codex panel row whose session is already open starts another terminal for the same session; fix: a new launch mints its thread through the app-server and resumes it, so the running terminal is identifiable; `providers/codex.py`
+  - evidence: Galata ui-tests/tests/codex-reuse.spec.ts passed on this tree (report ui-tests/playwright-report/8899, screenshot codex-row-reuse.png): the first click launches one terminal carrying the row's id, the second click focuses the same widget with no new launch
+  - root-cause: 2026-10-15T17:43:21Z @kj a new launch carried no conversation id on its command line, so parse_session_id answered None and the running terminal could not be matched to the row; the click opened a second one
   - related: ACC-SESS-54 - an already running conversation must reuse its terminal
   - related: DEF-SERV-210 - earlier id-less launch exception; whether this report has that cause is unverified
+  - related: DEF-SERV-210 - confirmed: this report has that cause; the app-server mint now supplies the id
   - repro: Open a Codex session in a terminal, then click its row in the Codex panel; another terminal opens for that same session
-  - lock: 2026-10-16T12:45:38Z @kj
   - log: 2026-10-15T12:27:30Z @kj added
   - log: 2026-10-15T12:27:30Z @kj Reported 2026-10-15 at the end of Claude conversation 0257fef0-9212-4c10-ab11-3a300a3b5938; Claude hit its weekly limit before investigating
+  - log: 2026-10-15T17:43:16Z @kj edited text "Clicking a Codex panel row whose session is already open starts another terminal with the same session; cause under investigation" -> "Clicking a Codex panel row whose session is already open starts another terminal for the same session; fix: a new launch mints its thread through the app-server and resumes it, so the running terminal is identifiable; `providers/codex.py`"
+  - log: 2026-10-15T17:43:21Z @kj closed: fixed: launch_argv mints the thread through the app-server; the browser run shows the click focusing the open terminal
+- [ ] `DEF-PROV-301` **Codex conversation cannot be renamed** - MAJOR; no Rename item on a Codex row where other assistants have one; the descriptor sets can_rename=False and the store has no rename, so the core hides the action and the route answers 400 rename_unsupported; fix: write the name through Codex's app-server thread/name/set; `jupyterlab_ai_code_assistants_extension/providers/codex.py`
+  - repro: right-click a Codex panel row: no Rename item appears, though every other assistant's row offers one
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-10-15T16:46:54Z @kj the store never implemented rename because a Codex thread name lives in Codex's own database; the app-server method thread/name/set is the writable path, enabled by the same experimental initialize handshake the fork already uses
+  - lock: 2026-10-16T16:46:58Z @kj implementing rename through the app-server
+  - log: 2026-10-15T16:46:54Z @kj added
+  - log: 2026-10-15T17:44:09Z @kj attempted: rename writes through the Codex app-server method thread/name/set (can_rename true); pytest -k codex_rename: 3 passed locally
+  - log: 2026-10-15T17:44:09Z @kj verification pending: the implement lane's end-to-end report has not arrived; left open until it does
 
 ## Frontend / server contract `FRONT`
 

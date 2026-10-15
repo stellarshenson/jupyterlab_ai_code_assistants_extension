@@ -734,6 +734,33 @@ class CodexStore(SessionStore):
             _log.warning("codex could not branch %s: %s", session_id, err)
             return None
 
+    def rename(self, encoded_path: str, session_id: str, name: str) -> str | None:
+        """Set a thread's name through Codex's own app-server.
+
+        ``thread/name/set`` is the method the CLI's title editor calls, and it
+        writes the ``name`` column of ``state_<N>.sqlite`` - the column
+        ``list_sessions`` reads back, so the CLI and the panel show one name.
+        This store opens that database READ-ONLY, which makes the app-server
+        the only writable path rather than an alternative to one. Same stdio
+        channel as ``fork``, one request: the id and the project membership
+        are gated here because the answer to either being wrong is a refusal
+        of this store's, not a Codex error line.
+        """
+        if not is_thread_id(session_id) or not name:
+            return None
+        if not any(t["id"] == session_id for t in self._project_threads(encoded_path)):
+            return None
+        cli = shutil.which(CLI_BINARY)
+        if not cli:
+            return None
+        try:
+            with _app_server(cli) as request:
+                request("thread/name/set", {"threadId": session_id, "name": name})
+        except (OSError, ValueError, RuntimeError, KeyError) as err:
+            _log.warning("codex could not rename %s: %s", session_id, err)
+            return None
+        return name
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -814,13 +841,12 @@ DESCRIPTOR = ProviderDescriptor(
         # is the only source of a tint.
         colour_source="none",
         launch_modes=(BYPASS_MODE,),
-        # No rename. A thread's name is a column of ``state_<N>.sqlite``,
-        # which this store opens READ-ONLY, and Codex exposes no ``rename``
-        # subcommand to shell to the way ``archive`` and ``delete`` are - its
-        # only write surface is the app-server method ``codex.thread.rename``,
-        # which this extension does not speak. The panel hides the action
-        # rather than offering one that cannot land.
-        can_rename=False,
+        # Rename writes the ``name`` column of ``state_<N>.sqlite`` through the
+        # app-server method ``thread/name/set`` - the same experimental stdio
+        # channel ``fork`` speaks - so the CLI and the panel read back one
+        # name. The store opens the db READ-ONLY, which is why the CLI verb
+        # route (``archive``, ``delete``) has no rename sibling to use here.
+        can_rename=True,
     ),
     legacy=LegacySource(
         plugin_id="jupyterlab_codex_extension",

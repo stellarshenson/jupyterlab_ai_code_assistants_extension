@@ -298,11 +298,23 @@ async def test_branch_is_refused_when_the_provider_cannot_fork(
 
 
 async def test_rename_is_refused_when_the_assistant_has_no_writable_name(
-    jp_fetch, present
+    jp_fetch, present, monkeypatch
 ):
-    """Codex keeps thread names in a sqlite index this extension opens
-    read-only, so the descriptor says no and the route refuses before the
-    store is asked - the same shape as ``fork_unsupported``."""
+    """A ``can_rename: false`` descriptor refuses 400 ``rename_unsupported``
+    before the store is asked - the same shape as ``fork_unsupported``.
+
+    Staged on a monkeypatched descriptor, because no provider refuses rename
+    any more: Codex, the last one without a writable name, now writes thread
+    names through its own app-server (docs/defects.md DEF-PROV-301)."""
+    provider = registry.get("codex")
+    capabilities = dataclasses.replace(
+        provider.descriptor.capabilities, can_rename=False
+    )
+    monkeypatch.setattr(
+        provider,
+        "descriptor",
+        dataclasses.replace(provider.descriptor, capabilities=capabilities),
+    )
     status, error = await error_of(
         jp_fetch,
         URL,

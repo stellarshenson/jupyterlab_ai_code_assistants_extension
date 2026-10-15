@@ -6,6 +6,7 @@ retired standalone extensions; nothing here reads a real assistant directory.
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -2203,13 +2204,92 @@ def test_claude_rename_refuses_a_conversation_the_project_does_not_hold(claude):
     assert store.rename(CLAUDE_ENCODED, "../escape", "New") is None
 
 
-def test_codex_has_no_rename_at_all(codex):
-    """Codex's names live in a sqlite index this store opens read-only, and the
-    CLI exposes no rename subcommand - so the base class's refusal stands and
-    the descriptor says so, which is what hides the action."""
-    store, _root = codex
-    assert codex_provider.DESCRIPTOR.capabilities.can_rename is False
-    assert type(store).rename is store_module.SessionStore.rename
+def test_codex_rename_sends_one_set_name_request(codex, monkeypatch):
+    """One ``thread/name/set`` on the app-server, with the exact params.
+
+    The name lands in the ``name`` column ``list_sessions`` reads back, so the
+    method and its two params are the whole contract: a different spelling
+    lands somewhere neither the CLI nor the panel reads.
+    """
+    store, root = codex
+    thread = new_uuid()
+    write_codex_db(root, [{"id": thread, "preview": "hello"}])
+    calls = []
+
+    @contextlib.contextmanager
+    def server(cli):
+        assert cli == "/bin/codex"
+        def request(method, params):
+            calls.append((method, params))
+            return {}
+        yield request
+
+    monkeypatch.setattr(codex_provider, "_app_server", server)
+    monkeypatch.setattr(codex_provider.shutil, "which", lambda _: "/bin/codex")
+    assert codex_provider.DESCRIPTOR.capabilities.can_rename is True
+    assert store.rename(PROJECT_PATH, thread, "release prep") == "release prep"
+    assert calls == [
+        ("thread/name/set", {"threadId": thread, "name": "release prep"})
+    ]
+
+
+def test_codex_rename_refuses_before_any_app_server_is_opened(codex, monkeypatch):
+    """A non-thread id, a thread of another project, an empty name and an
+    absent CLI all answer None without spawning anything - the store re-gates
+    every one of them rather than trusting the route's pre-flight."""
+    store, root = codex
+    thread, elsewhere = new_uuid(), new_uuid()
+    write_codex_db(
+        root,
+        [
+            {"id": thread, "preview": "a"},
+            {"id": elsewhere, "cwd": "/srv/other", "preview": "b"},
+        ],
+    )
+    calls = []
+
+    @contextlib.contextmanager
+    def server(cli):
+        def request(method, params):
+            calls.append((method, params))
+            return {}
+        yield request
+
+    monkeypatch.setattr(codex_provider, "_app_server", server)
+    monkeypatch.setattr(codex_provider.shutil, "which", lambda _: "/bin/codex")
+    # Not a thread id at all.
+    assert store.rename(PROJECT_PATH, "--all", "New") is None
+    # A thread this project does not hold, and one of another project.
+    assert store.rename(PROJECT_PATH, new_uuid(), "New") is None
+    assert store.rename(PROJECT_PATH, elsewhere, "New") is None
+    # Nothing to store.
+    assert store.rename(PROJECT_PATH, thread, "") is None
+    # A CLI that cannot be found.
+    monkeypatch.setattr(codex_provider.shutil, "which", lambda _: None)
+    assert store.rename(PROJECT_PATH, thread, "New") is None
+    assert calls == []
+
+
+def test_codex_rename_reports_an_app_server_refusal_as_a_failure(
+    codex, monkeypatch, caplog
+):
+    """A refused ``thread/name/set`` (unknown thread, locked store) answers
+    None with the reason in the server log, the way a refused fork does."""
+    store, root = codex
+    thread = new_uuid()
+    write_codex_db(root, [{"id": thread, "preview": "hello"}])
+
+    @contextlib.contextmanager
+    def server(cli):
+        def request(method, params):
+            raise RuntimeError("thread/name/set: no rollout found")
+        yield request
+
+    monkeypatch.setattr(codex_provider, "_app_server", server)
+    monkeypatch.setattr(codex_provider.shutil, "which", lambda _: "/bin/codex")
+    with caplog.at_level("WARNING", logger=codex_provider.__name__):
+        assert store.rename(PROJECT_PATH, thread, "New") is None
+    assert f"could not rename {thread}" in caplog.text
 
 
 def test_kimi_rename_writes_the_title_and_flags_it_custom(kimi):

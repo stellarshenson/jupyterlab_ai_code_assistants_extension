@@ -282,6 +282,13 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - test-tags: UNIT
   - log: 2026-09-28T11:45:36Z @kj added
   - log: 2026-09-28T11:45:44Z @kj closed
+- [ ] `DEF-PROV-300` **Codex opens another terminal for an already open session** - MAJOR; Clicking a Codex panel row whose session is already open starts another terminal with the same session; cause under investigation
+  - related: ACC-SESS-54 - an already running conversation must reuse its terminal
+  - related: DEF-SERV-210 - earlier id-less launch exception; whether this report has that cause is unverified
+  - repro: Open a Codex session in a terminal, then click its row in the Codex panel; another terminal opens for that same session
+  - lock: 2026-10-16T12:45:38Z @kj
+  - log: 2026-10-15T12:27:30Z @kj added
+  - log: 2026-10-15T12:27:30Z @kj Reported 2026-10-15 at the end of Claude conversation 0257fef0-9212-4c10-ab11-3a300a3b5938; Claude hit its weekly limit before investigating
 
 ## Frontend / server contract `FRONT`
 

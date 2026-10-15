@@ -37,20 +37,14 @@ export const descriptor: IProviderDescriptor = {
   iconName: 'jupyterlab_ai_code_assistants_extension:claude',
   iconSvg: claudeSvgStr,
   cliBinary: 'claude',
-  // `claude --fork-session --session-id <uuid>`: the CLI forks in-process and
-  // takes the new id from us, so the fork is known before it exists - and its
-  // store entry is written lazily, on the first turn, which is what the core's
-  // branch watcher waits for.
-  forkStrategy: 'native-flag',
+  // The server forks with native /rename and /color before opening the CLI.
+  forkStrategy: 'server-native',
   // `/color` is Claude's own surface for a conversation's colour, recorded in
   // its transcript, so the assistant supplies the DEFAULT tint - a colour the
   // user then sets on the tab diverges from it deliberately and wins.
   colourSource: 'native',
   terminalScope: 'conversation',
-  // `-n <name>` at launch: Claude stamps the name itself and re-stamps it on
-  // every turn, which is the only way a fork's name survives - a title written
-  // after the fact loses to the parent title the fork inherits.
-  promptsForBranchName: true,
+  promptsForBranchName: false,
   // `/rename` writes a `custom-title` record into the transcript, and the
   // store writes the same record.
   canRename: true,

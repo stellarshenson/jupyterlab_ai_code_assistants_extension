@@ -31,13 +31,16 @@ Three shape notes for the core contract:
 from __future__ import annotations
 
 import json
+import contextlib
 import logging
 import os
 import re
+import selectors
 import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 import urllib.parse
 from pathlib import Path
 from typing import Any
@@ -98,6 +101,62 @@ _THREAD_COLUMNS = (
     "has_user_event",
 )
 _ROLLOUT_META_SCAN_LINES = 10
+
+
+@contextlib.contextmanager
+def _app_server(cli: str):
+    """Speak the native metadata API over a private stdio connection."""
+    process = subprocess.Popen(
+        [cli, "app-server", "--stdio"], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    )
+    pending = bytearray()
+    request_id = 0
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+
+    def request(method, params):
+        nonlocal request_id
+        request_id += 1
+        message = {"id": request_id, "method": method, "params": params}
+        process.stdin.write(json.dumps(message).encode() + b"\n")
+        process.stdin.flush()
+        deadline = time.monotonic() + _CLI_TIMEOUT_S
+        while True:
+            while b"\n" in pending:
+                line, _, rest = pending.partition(b"\n")
+                pending[:] = rest
+                response = json.loads(line)
+                if response.get("id") != request_id:
+                    continue
+                if "error" in response:
+                    raise RuntimeError(f"Codex refused {method}: {response['error'].get('message', '')}")
+                return response["result"]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise TimeoutError(f"Codex did not answer {method}")
+            chunk = os.read(process.stdout.fileno(), 65536)
+            if not chunk:
+                raise RuntimeError("Codex closed its metadata connection")
+            pending.extend(chunk)
+
+    try:
+        request("initialize", {"clientInfo": {
+            "name": "jupyterlab_ai_code_assistants", "version": "1"
+        }, "capabilities": {"experimentalApi": True}})
+        process.stdin.write(b'{"method":"initialized"}\n')
+        process.stdin.flush()
+        yield request
+    finally:
+        selector.close()
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        process.stdin.close()
+        process.stdout.close()
 
 
 def codex_home() -> Path:
@@ -651,6 +710,30 @@ class CodexStore(SessionStore):
         ]
         return self._dispose(targets, to_trash)
 
+    def fork(self, encoded_path: str, session_id: str, name: str | None = None) -> str | None:
+        """Fork and name through Codex, leaving its database under CLI control."""
+        if not is_thread_id(session_id) or not name:
+            return None
+        if not any(t["id"] == session_id for t in self._project_threads(encoded_path)):
+            return None
+        cli = shutil.which(CLI_BINARY)
+        if not cli:
+            return None
+        try:
+            with _app_server(cli) as request:
+                result = request("thread/fork", {
+                    "threadId": session_id, "excludeTurns": True,
+                    "deferGoalContinuation": True,
+                })
+                child_id = result["thread"]["id"]
+                if not is_thread_id(child_id):
+                    return None
+                request("thread/name/set", {"threadId": child_id, "name": name})
+                return child_id
+        except (OSError, ValueError, RuntimeError, KeyError) as err:
+            _log.warning("codex could not branch %s: %s", session_id, err)
+            return None
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -663,21 +746,32 @@ class CodexStore(SessionStore):
         mode: str | None = None,
         name: str | None = None,
         fork_from: str | None = None,
+        project_path: str | None = None,
     ) -> list[str]:
-        """The argv that opens a conversation in a terminal.
+        """Create new threads before launch so every terminal carries its id.
 
-        ``codex resume <id>`` continues an existing thread; ``codex fork
-        <parent>`` branches one into a new thread whose id codex mints itself,
-        which is why nothing here consumes ``fork_session_id`` - the frontend's
-        discovery watcher owns fork identity. A bare ``codex`` starts a fresh
-        thread; ``new_session_id`` and ``name`` have no flag to carry them, and
-        the descriptor says so, so neither is ever sent.
+        Native thread creation writes metadata without starting a model turn.
+        Resuming that id makes both panel and Launcher terminals identifiable
+        through their command line, including after a JupyterLab reload.
         """
         argv = [cli_path]
         if session_id and is_thread_id(session_id):
             argv += ["resume", session_id]
         elif fork_from and is_thread_id(fork_from):
             argv += ["fork", fork_from]
+        elif project_path:
+            try:
+                with _app_server(cli_path) as request:
+                    result = request("thread/start", {
+                        "cwd": project_path, "ephemeral": False,
+                    })
+                    thread_id = result["thread"]["id"]
+                    if not is_thread_id(thread_id):
+                        return []
+                    argv += ["resume", thread_id]
+            except (OSError, ValueError, RuntimeError, KeyError) as err:
+                _log.warning("codex could not create a thread: %s", err)
+                return []
         if mode == BYPASS_MODE:
             argv.append(BYPASS_FLAG)
         return argv
@@ -715,7 +809,7 @@ DESCRIPTOR = ProviderDescriptor(
         # The CLI owns the fork verb AND mints the fork's id itself, so a
         # branch is a ``fork_from`` launch and the id is discovered afterwards -
         # there is no server-side fork for the branch route to serve.
-        fork_strategy="native-command",
+        fork_strategy="server-native",
         # No colour concept anywhere in Codex - the extension's write-back store
         # is the only source of a tint.
         colour_source="none",

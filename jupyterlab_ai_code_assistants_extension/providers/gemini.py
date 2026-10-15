@@ -872,6 +872,7 @@ class GeminiStore(SessionStore):
         fork_from: str | None = None,
         mode: str | None = None,
         name: str | None = None,
+        project_path: str | None = None,
     ) -> list[str]:
         """``gemini --session-file <chat>`` to resume, ``--session-id`` to start.
 

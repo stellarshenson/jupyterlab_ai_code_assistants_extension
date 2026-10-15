@@ -716,6 +716,7 @@ class KimiStore(SessionStore):
         fork_from: str | None = None,
         mode: str | None = None,
         name: str | None = None,
+        project_path: str | None = None,
     ) -> list[str]:
         """``kimi -S <id>`` to resume, bare ``kimi`` to start fresh.
 

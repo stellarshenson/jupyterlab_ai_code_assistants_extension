@@ -426,6 +426,39 @@ describe('DEF-45 - both destructive menu entries are marked alike', () => {
 
 // --------------------------------------------------------------- DEF-31
 
+describe('ACC-SESS-203 - automatic branch names', () => {
+  it.each(['server-copy', 'server-native'] as const)(
+    '%s requests a numbered name and resumes the returned child without a dialog',
+    async forkStrategy => {
+      const target = makePanel({ ...DESCRIPTOR, forkStrategy });
+      const parent = session({ name: 'analysis', name_source: 'session' });
+      const launch = jest.fn().mockResolvedValue({});
+      (target as any)._terminals.launch = launch;
+      (target as any)._activeSession = parent;
+      (target as any)._fetch = jest.fn().mockResolvedValue(undefined);
+      request.mockImplementation((_provider, path) =>
+        Promise.resolve(path === 'branch' ? { session_id: 'child' } : {})
+      );
+      try {
+        await (target as any)._branchSession();
+        const branch = request.mock.calls.find(call => call[1] === 'branch')!;
+        expect(JSON.parse(branch[3]!.body as string)).toEqual({
+          encoded_path: parent.encoded_path,
+          session_id: parent.session_id,
+          base_name: 'analysis'
+        });
+        expect(document.querySelector('.jp-Dialog')).toBeNull();
+        expect(launch).toHaveBeenCalledWith(
+          expect.objectContaining({ session_id: 'child' }), 'child'
+        );
+      } finally {
+        target.dispose();
+        request.mockImplementation(() => Promise.resolve({}));
+      }
+    }
+  );
+});
+
 describe('DEF-31 - a fork started inside the parent capture window', () => {
   /** The parent's conversation and the colour ladder around it. `picked` is
    * deliberately NOT the colour the parent's id hashes to, so "inherited the

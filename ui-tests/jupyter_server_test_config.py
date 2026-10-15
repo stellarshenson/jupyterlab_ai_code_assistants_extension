@@ -26,6 +26,7 @@ same value for a hand-launched server.
 import json
 import os
 import stat
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -134,8 +135,17 @@ sleep infinity
 )
 for _name in STUBBED:
     _path = _stub_bin / _name
-    _path.write_text(_STUB, encoding="utf-8")
+    if _name in ("claude", "codex"):
+        _path.write_text(
+            f"#!{sys.executable}\n" + (HERE / "native_cli_stub.py").read_text(),
+            encoding="utf-8",
+        )
+    else:
+        _path.write_text(_STUB, encoding="utf-8")
     _path.chmod(_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+os.environ["JLAB_TEST_AGENT_ROSTER"] = json.dumps([
+    {"id": _BG_AGENT_ID, "kind": "background", "pid": os.getpid(), "sessionId": _BG_SESSION_ID}
+])
 # PATH is REPLACED, not prefixed. A developer with a real assistant CLI on
 # their PATH would otherwise make the "absent binary" provider available, and
 # the suite would silently stop testing the case it exists for. What remains is
@@ -229,6 +239,31 @@ _rdir.mkdir(parents=True, exist_ok=True)
 _jsonl = _rdir / "rename-0.jsonl"
 _jsonl.write_text(json.dumps({"cwd": str(_rename_cwd)}) + "\n", encoding="utf-8")
 os.utime(_jsonl, (_now - 900, _now - 900))
+
+# Native branch tests own their projects and cannot rename another spec's row.
+for _project, _title in (("native-branch", "Native branch"), ("manual-branch", "Manual branch")):
+    _cwd = _root / _project
+    _cwd.mkdir()
+    _directory = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(str(_cwd))
+    _directory.mkdir(parents=True)
+    for _index, _suffix in enumerate(("_1", "_3", "")):
+        _file = _directory / f"{_project}-{_index}.jsonl"
+        _file.write_text("".join(json.dumps(record) + "\n" for record in (
+            {"cwd": str(_cwd)},
+            {"type": "custom-title", "customTitle": _title + _suffix},
+            {"type": "agent-color", "agentColor": "blue"},
+        )))
+        os.utime(_file, (_now - 1200 + _index, _now - 1200 + _index))
+
+_codex_root = Path(os.environ["CODEX_HOME"])
+_codex_root.mkdir(parents=True)
+_codex_cwd = _root / "codex-branch"
+_codex_cwd.mkdir()
+with sqlite3.connect(_codex_root / "state_5.sqlite") as _connection:
+    _connection.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT, name TEXT, updated_at_ms INTEGER, has_user_event INTEGER)")
+    _connection.execute("INSERT INTO threads VALUES (?, ?, ?, ?, 1)", (
+        "11111111-1111-4111-8111-111111111111", str(_codex_cwd), "Codex branch", int((_now - 1200) * 1000),
+    ))
 
 # One DeepSeek project with a titled conversation, so its panel has a row to
 # open. The harness keys the project directory by the cwd with its separators

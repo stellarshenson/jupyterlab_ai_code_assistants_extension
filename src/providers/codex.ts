@@ -39,8 +39,8 @@ export const descriptor: IProviderDescriptor = {
   iconName: 'jupyterlab_ai_code_assistants_extension:codex',
   iconSvg: codexSvgStr,
   cliBinary: 'codex',
-  // `codex fork <parent>` owns both the verb and the new id.
-  forkStrategy: 'native-command',
+  // The native metadata API returns a named fork before its terminal opens.
+  forkStrategy: 'server-native',
   // No `/color` equivalent, and nothing in the thread store records one.
   colourSource: 'none',
   terminalScope: 'conversation',

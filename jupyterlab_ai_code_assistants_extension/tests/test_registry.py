@@ -27,7 +27,7 @@ EXPECTED_IDS = {"claude", "codex", "deepseek", "gemini", "kimi"}
 # The same vocabulary the frontend descriptor's ``forkStrategy`` uses - the two
 # registries describe one assistant, so a strategy named differently on each
 # side is a divergence waiting to be branched on.
-FORK_STRATEGIES = {"native-flag", "native-command", "server-copy", "none"}
+FORK_STRATEGIES = {"native-flag", "native-command", "server-copy", "server-native", "none"}
 COLOUR_SOURCES = {"native", "derived", "none"}
 
 _counter = itertools.count()

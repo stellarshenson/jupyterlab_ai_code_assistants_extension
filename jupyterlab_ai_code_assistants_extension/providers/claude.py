@@ -33,7 +33,7 @@ import time
 import uuid
 from pathlib import Path
 
-from ..core import state
+from ..core import colour_store, state
 from ..core.registry import Capabilities, LegacySource, ProviderDescriptor
 from ..core.store import (
     NODE_COMMS,
@@ -1356,6 +1356,50 @@ class ClaudeStore(SessionStore):
         if side_dir.is_dir():
             dispose_path(side_dir, to_trash)
 
+    def fork(
+        self, encoded_path: str, session_id: str, name: str | None = None
+    ) -> str | None:
+        """Create the branch through Claude's native local commands.
+
+        Print mode executes /rename and /color without a model turn. Complete
+        both before opening the interactive CLI, which then reads their state.
+        """
+        project_dir = self._project_dir(encoded_path)
+        if project_dir is None or not is_safe_segment(session_id):
+            return None
+        parent = project_dir / f"{session_id}.jsonl"
+        cli = shutil.which(CLI_BINARY)
+        if not parent.is_file() or not cli or not name:
+            return None
+        cwd = _tail_records(parent).get("cwd")
+        if not isinstance(cwd, str) or not os.path.isdir(cwd):
+            return None
+        colour = colour_store.load_colours(self.provider_id).get(session_id)
+        colour = colour or self.default_colour(session_id)
+        native_colour = next(
+            (key for key, value in _TAB_COLOUR_ID.items() if value == colour),
+            "default",
+        )
+        child_id = str(uuid.uuid4())
+        commands = [
+            [cli, "-p", "--resume", session_id, "--fork-session",
+             "--session-id", child_id, f"/rename {name}"],
+            [cli, "-p", "--resume", child_id, f"/color {native_colour}"],
+        ]
+        try:
+            for argv in commands:
+                result = subprocess.run(
+                    argv, cwd=cwd, stdin=subprocess.DEVNULL,
+                    capture_output=True, timeout=30,
+                )
+                if result.returncode != 0:
+                    _log.warning("claude branch command failed: %s", argv[-1].split()[0])
+                    return None
+        except (OSError, subprocess.TimeoutExpired) as err:
+            _log.warning("claude could not branch %s: %s", session_id, err)
+            return None
+        return child_id
+
     def rename(self, encoded_path: str, session_id: str, name: str) -> str | None:
         """Append the ``custom-title`` record the CLI's own ``/rename`` writes.
 
@@ -1427,6 +1471,7 @@ class ClaudeStore(SessionStore):
         fork_from: str | None = None,
         mode: str | None = None,
         name: str | None = None,
+        project_path: str | None = None,
     ) -> list[str]:
         """The argv that opens a conversation.
 
@@ -1587,9 +1632,8 @@ DESCRIPTOR = ProviderDescriptor(
     label="Claude Code",
     cli_binary=CLI_BINARY,
     capabilities=Capabilities(
-        # The CLI forks in-process from a flag pair, under an id the FRONTEND
-        # mints and carries on the launch - so there is no server-side fork.
-        fork_strategy="native-flag",
+        # Native local commands finish the fork before its terminal opens.
+        fork_strategy="server-native",
         # Claude supplies a conversation's DEFAULT colour through ``/color``;
         # a colour the user sets on the tab overrides it and is remembered.
         colour_source="native",

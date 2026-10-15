@@ -48,7 +48,7 @@ class ProviderError(ValueError):
 #: and the id is discovered afterwards by the frontend's branch watcher. The
 #: vocabulary is shared verbatim with the frontend descriptor's
 #: ``forkStrategy``.
-SERVER_MINTED_FORKS = frozenset({"server-copy"})
+SERVER_MINTED_FORKS = frozenset({"server-copy", "server-native"})
 
 
 @dataclass(frozen=True)

@@ -1173,6 +1173,13 @@ export class AssistantSessionsPanel extends Widget {
     if (!session) {
       return;
     }
+    if (
+      this._descriptor.forkStrategy === 'server-copy' ||
+      this._descriptor.forkStrategy === 'server-native'
+    ) {
+      await this._branchByServerCopy(session, undefined, force);
+      return;
+    }
     const parentColour = this._terminals.colourFor(session);
 
     let name: string | undefined;
@@ -1203,10 +1210,6 @@ export class AssistantSessionsPanel extends Widget {
       }
     }
 
-    if (this._descriptor.forkStrategy === 'server-copy') {
-      await this._branchByServerCopy(session, name, force);
-      return;
-    }
     if (this._descriptor.forkStrategy === 'native-command') {
       await this._branchByNativeCommand(session, force, parentColour);
       return;
@@ -1301,7 +1304,8 @@ export class AssistantSessionsPanel extends Widget {
           body: JSON.stringify({
             encoded_path: session.encoded_path,
             session_id: session.session_id,
-            name
+            name,
+            base_name: session.name
           })
         }
       );

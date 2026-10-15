@@ -516,6 +516,7 @@ class SessionStore(ABC):
         fork_from: str | None = None,
         mode: str | None = None,
         name: str | None = None,
+        project_path: str | None = None,
     ) -> list[str]:
         """The argv that opens a conversation in a terminal.
 

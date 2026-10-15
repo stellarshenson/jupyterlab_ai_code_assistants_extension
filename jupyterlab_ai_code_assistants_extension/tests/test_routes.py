@@ -855,13 +855,19 @@ async def test_fork_from_excludes_the_other_launch_ids(jp_fetch, tmp_path, prese
 
 
 async def test_a_native_command_provider_has_no_server_side_branch(
-    jp_fetch, present
+    jp_fetch, present, monkeypatch
 ):
     """Its fork id exists only inside the terminal, so the branch route refuses.
 
     400 ``fork_unsupported`` rather than the 400 ``fork_failed`` a store that
     never implemented ``fork`` used to answer.
     """
+    provider = registry.get("codex")
+    monkeypatch.setattr(provider, "descriptor", dataclasses.replace(
+        provider.descriptor, capabilities=dataclasses.replace(
+            provider.descriptor.capabilities, fork_strategy="native-command"
+        )
+    ))
     status, error = await error_of(
         jp_fetch,
         URL,

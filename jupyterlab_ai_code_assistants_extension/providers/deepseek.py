@@ -620,6 +620,7 @@ class DeepSeekStore(SessionStore):
         fork_from: str | None = None,
         mode: str | None = None,
         name: str | None = None,
+        project_path: str | None = None,
     ) -> list[str]:
         """``dsh --profile web --no-open --port 0``, whatever the row.
 

@@ -693,6 +693,12 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-10-09T07:48:22Z @kj added
   - log: 2026-10-09T10:20:44Z @kj edited test "jlpm jest src/__tests__/panel.spec.ts" -> "jlpm jest src/__tests__/panel.spec.ts; Galata file-browser-sync.spec.ts"
   - log: 2026-10-09T10:30:30Z @kj closed
+- [ ] `ACC-SESS-203` **Branches inherit numbered parent names** - HIGH; Each branch automatically receives <parent-name>_<n>, using the next unused positive integer for branches from that parent, starting at 1; for example analysis_1 and analysis_2. The numbered name remains visible after reopening
+  - related: ACC-SESS-59, ACC-CLAU-94
+  - test: Branch a session named analysis twice; assert analysis_1 and analysis_2 in the panel and conversation list after reopening; an existing suffix must not be reused
+  - test-tags: MANUAL
+  - lock: 2026-10-16T12:45:38Z @kj
+  - log: 2026-10-15T12:28:03Z @kj added
 
 ## Colour `COLO`
 
@@ -765,6 +771,7 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
   - log: 2026-09-17T17:25:59Z @kj edited importance
   - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-75` **Branch colour inheritance** - HIGH; a branched conversation inherits the parent's effective colour at fork time. For a native provider only a colour this extension's own store holds for the parent is inherited - an entry the parent itself inherited counts; copying the parent's assistant-chosen tint would pin the fork to it and shadow the fork's own `/color`
+  - overridden-by: ACC-COLO-202
   - evidence: test_colour_store.py test_a_branch_inherits_the_parents_default, test_a_branch_inherits_the_parents_override_not_its_default, test_inheritance_is_written_at_fork_time_not_resolved_later and test_a_colourless_parent_gives_the_branch_nothing cover the fork-time copy and the native exclusion
   - test-tags: UNIT
   - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py
@@ -832,6 +839,13 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
   - log: 2026-09-04T21:13:42Z @kj added
   - log: 2026-09-04T23:14:24Z @kj closed
   - log: 2026-09-17T17:25:54Z @kj edited importance
+- [ ] `ACC-COLO-202` **Every branch inherits the parent tab colour** - HIGH; Every branched session inherits its parent's effective tab colour at fork time, including a colour chosen by the assistant or set by hand on the tab; the inherited colour survives reopening
+  - overrides: ACC-COLO-75 - inheritance now includes native assistant colours
+  - related: ACC-COLO-76, ACC-COLO-79
+  - test: Branch parents with an assistant-selected colour and a manual tab override; inspect each branch tab, reload, then reopen and verify the inherited colour
+  - test-tags: MANUAL
+  - lock: 2026-10-16T12:45:38Z @kj
+  - log: 2026-10-15T12:28:03Z @kj added
 
 ## Retirement and Migration `RETI`
 
@@ -1007,6 +1021,18 @@ Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. 
   - mechanism: 2026-09-19T20:11:57Z @kj the store already reads the newest custom-title record out of the transcript tail for the row label, so a rename writes the record that read is looking for
   - log: 2026-09-19T20:11:57Z @kj added
   - log: 2026-09-19T20:30:47Z @kj closed
+- [ ] `ACC-CLAU-204` **Claude branch colour is set through /color** - HIGH; A Claude branch applies the inherited colour through Claude's native /color command, so Claude itself remembers that colour rather than only the extension tinting its terminal tab
+  - related: ACC-COLO-202
+  - test: Set the parent colour with /color, branch it, then reopen the branch in Claude and verify its native colour matches the parent at fork time
+  - test-tags: MANUAL
+  - lock: 2026-10-16T12:45:38Z @kj
+  - log: 2026-10-15T12:28:04Z @kj added
+- [ ] `ACC-CLAU-205` **Claude branch name is set through native rename** - HIGH; A Claude branch applies <parent-name>_<n> through Claude's native /rename command, or /name where supported, so Claude's own session list shows the same numbered name as the panel
+  - related: ACC-SESS-203, ACC-CLAU-177
+  - test: Branch a named Claude session, then inspect its name in the panel and Claude's native session list after reopening; both must show the numbered inherited name
+  - test-tags: MANUAL
+  - lock: 2026-10-16T12:45:38Z @kj
+  - log: 2026-10-15T12:28:04Z @kj added
 
 ## Codex Provider `CODE`
 
@@ -1042,6 +1068,11 @@ Ported from `jupyterlab_codex_extension` v0.6.12. Capabilities - no colour sourc
   - mechanism: 2026-09-19T20:11:58Z @kj the descriptor declares no rename, so the command hides itself and the route refuses before the store is asked
   - log: 2026-09-19T20:11:58Z @kj added
   - log: 2026-09-19T20:30:47Z @kj closed
+- [ ] `ACC-CODE-201` **Codex reuses an already open session terminal** - CRITICAL; Clicking a Codex panel row for a session already running in a terminal focuses that terminal instead of opening another terminal for the same session
+  - related: DEF-PROV-300, ACC-SESS-54
+  - test: Open a Codex session, click its row again, assert the existing terminal is activated and the terminal count is unchanged
+  - test-tags: MANUAL
+  - log: 2026-10-15T12:28:02Z @kj added
 
 ## Kimi Provider `KIMI`
 

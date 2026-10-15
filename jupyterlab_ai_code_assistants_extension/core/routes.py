@@ -707,10 +707,16 @@ class BranchHandler(_ProviderHandler):
         encoded_path = body.get("encoded_path")
         session_id = body.get("session_id")
         name = body.get("name")
+        base_name = body.get("base_name")
         if not isinstance(encoded_path, str) or not isinstance(session_id, str):
             self.bad_request()
             return
         if name is not None and (not isinstance(name, str) or not name.strip()):
+            self.bad_request("invalid_name")
+            return
+        if base_name is not None and (
+            not isinstance(base_name, str) or not base_name.strip()
+        ):
             self.bad_request("invalid_name")
             return
         if (
@@ -719,23 +725,39 @@ class BranchHandler(_ProviderHandler):
         ):
             self.bad_request("fork_unsupported")
             return
-        new_id = await asyncio.get_running_loop().run_in_executor(
-            None, provider.store.fork, encoded_path, session_id, name
-        )
-        if not new_id:
-            self.bad_request("fork_failed")
-            return
-        state.write_pin(provider.id, encoded_path, new_id)
-        # A native provider hands the fork its own colour, so only what this
-        # store already holds is worth inheriting - passing no default makes
-        # ``inherit_colour`` write exactly that, or nothing.
-        parent_default = (
-            None
-            if provider.descriptor.capabilities.colour_source == "native"
-            else provider.store.default_colour(session_id)
-        )
-        colour_store.inherit_colour(provider.id, session_id, new_id, parent_default)
-        self.finish(json.dumps({"session_id": new_id}))
+        # Serialise creation and naming for this provider. A second request
+        # sees the first branch before allocating its suffix.
+        locks = self.settings.setdefault("ai_assistants_branch_locks", {})
+        async with locks.setdefault(provider.id, asyncio.Lock()):
+            def create_branch():
+                branch_name = name
+                if base_name is not None:
+                    data = provider.store.list_branches(encoded_path)
+                    if data is None:
+                        return None
+                    names = {b["label"] for b in data["branches"]}
+                    names.update(
+                        row["name"] for row in provider.store.list_sessions()
+                        if row["encoded_path"] == encoded_path
+                    )
+                    n = 1
+                    while f"{base_name}_{n}" in names:
+                        n += 1
+                    branch_name = f"{base_name}_{n}"
+                return provider.store.fork(encoded_path, session_id, branch_name)
+
+            new_id = await asyncio.get_running_loop().run_in_executor(None, create_branch)
+            if not new_id:
+                self.bad_request("fork_failed")
+                return
+            provider.store.release_switch(encoded_path)
+            state.write_pin(provider.id, encoded_path, new_id)
+            # A native fork sets the effective colour in the assistant itself;
+            # copying it into our override store would shadow later native edits.
+            if provider.descriptor.capabilities.colour_source != "native":
+                parent_default = provider.store.default_colour(session_id)
+                colour_store.inherit_colour(provider.id, session_id, new_id, parent_default)
+            self.finish(json.dumps({"session_id": new_id}))
 
 
 class RenameHandler(_ProviderHandler):
@@ -916,6 +938,7 @@ class _LaunchBase(_ProviderHandler):
                 None,
                 lambda: provider.store.launch_argv(
                     self.cli_path,
+                    project_path=project_path,
                     session_id=session_id,
                     new_session_id=new_session_id,
                     fork_session_id=fork_session_id,

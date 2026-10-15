@@ -20,7 +20,11 @@
  * about it - and the flag never crosses the wire, so no TS code could produce
  * or read that value.
  */
-export type ForkStrategy = 'native-flag' | 'native-command' | 'server-copy';
+export type ForkStrategy =
+  | 'native-flag'
+  | 'native-command'
+  | 'server-copy'
+  | 'server-native';
 
 /** See `IProviderDescriptor.terminalScope`. */
 export type TerminalScope = 'conversation' | 'project';

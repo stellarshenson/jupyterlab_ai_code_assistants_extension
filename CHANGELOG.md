@@ -2,9 +2,14 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+<!-- <END NEW CHANGELOG ENTRY> -->
+
+## [1.2.83] - 2026-10-16
+
 ### Changed
 
 - The DeepSeek panel opens conversations in the terminal instead of the harness's browser UI. A row click resumes that row's conversation with `dsh tui --resume <id>` in a terminal, and the open verb reads `Resume`, no longer `Open Web UI`; a new session runs `dsh tui` and starts a conversation whose id the TUI mints itself. Each conversation opens in its own terminal, where one terminal used to serve every conversation of the project. Requires the community TUI bundle (`@deepseek-harness-tui/dsh-tui`), mounted as the `tui` profile with `dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui`
+- A DeepSeek launch without the TUI bundle is refused before any terminal opens, with a message naming the bundle and the command that mounts it
 - DeepSeek panel icon replaced with the official DeepSeek whale mark, rendered monochrome in the theme foreground
 - Codex conversations can be renamed from the panel. The name is written through Codex's own app-server, so Codex's CLI lists the same name the panel shows; the Rename item was previously absent for Codex
 - Branching a named conversation names the branch after its parent with the next free number, `analysis_1` then `analysis_2`, without asking for a name, and the branch inherits the parent's tab colour
@@ -14,8 +19,7 @@
 ### Fixed
 
 - The Manage Sessions dialog opens with the keyboard focus in its filter field, so typing filters the list straight away. The focus used to land on `Close`, where typed characters were dropped
-
-<!-- <END NEW CHANGELOG ENTRY> -->
+- A click on a Codex row whose conversation was started with `+` or branched from the panel focuses its open terminal instead of opening a second one. Codex's own app-server now creates the conversation and its id before the terminal opens
 
 ## [1.2.73] - 2026-10-14
 

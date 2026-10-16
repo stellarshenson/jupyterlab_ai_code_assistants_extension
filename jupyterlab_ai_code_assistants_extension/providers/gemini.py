@@ -20,7 +20,7 @@ Four consequences shape everything below:
   install still shows every conversation, and the auth error surfaces inside the
   launched terminal where the user can act on it
 * Gemini has no fork flag, so branching copies the chat file under a fresh id -
-  the ``server`` fork strategy
+  the ``server-copy`` fork strategy
 * Gemini has no colour command and records no colour, so a tint only ever comes
   from the extension's own colour store
 

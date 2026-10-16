@@ -11,7 +11,7 @@ Three consequences shape everything below:
 * the ``wd_id`` IS the ``encoded_path`` - there is no path encoding to reverse,
   so a project the registry does not list simply has no row
 * Kimi has no fork flag, so branching is a directory copy with a re-stamped
-  ``state.json`` and an appended index line - the ``server`` fork strategy
+  ``state.json`` and an appended index line - the ``server-copy`` fork strategy
 * Kimi has no colour command, so a conversation's default tint is a hash of its
   id; the extension's own colour store still overrides it
 

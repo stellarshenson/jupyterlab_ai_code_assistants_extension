@@ -20,8 +20,8 @@ const TERMINAL =
  * Branching a named conversation through the browser, on the native path.
  *
  * The server mints the branch (Claude's own `/rename` plus `/color` against a
- * forked session id), so unlike the `server-copy` strategies the flow asks the
- * user for nothing - the child is named `<parent>_<next free suffix>` from the
+ * forked session id), so the flow asks the user for nothing - the child is
+ * named `<parent>_<next free suffix>` from the
  * parent's name alone. What only a real browser can answer, and what this spec
  * pins: the row ends up wearing that server-minted name, the suffix allocator
  * skips names the project already uses, the second branch moves past the
@@ -36,7 +36,8 @@ const TERMINAL =
  * conversation that already exists.
  *
  * Not pinned here: what the two native CLI invocations carry (argv, the
- * `/color` name, the transcript rewrite) - those are unit contracts in
+ * `/color` name, the parent transcript left unchanged) - those are unit
+ * contracts in
  * `tests/test_native_branch.py`; and the branch's tab tint as painted by the
  * colourful-tab extension, which is read from the server's own probe colour
  * below rather than from a canvas.
@@ -163,9 +164,9 @@ async function sessionRow(
  * plain item too, which suppresses the variant and flattens the item to the
  * top level wearing the full title; both layouts are handled.
  *
- * The dialog check is the "no name is typed" claim: the strategies that ask
- * open an `InputDialog` and wait, so the row would never rename - asserting no
- * dialog renders says the same thing at the moment it would have appeared. */
+ * The dialog check is the "no name is typed" claim: no fork strategy asks for
+ * a name, and asserting no dialog renders checks that at the moment one would
+ * have appeared. */
 async function branchRow(page: any, name: string) {
   const target = row(page, name);
   await expect(target).toBeVisible({ timeout: 15000 });

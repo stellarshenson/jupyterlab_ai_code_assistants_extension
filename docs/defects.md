@@ -225,7 +225,7 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - log: 2026-08-26T00:00:00Z @kj logged, not fixed (core contract drift): `core/store.py` describes `switch` as validation plus a recency-aligning touch; the Claude store now also rewrites conversation content inside it. The three sibling providers still match the contract as written, correctly, since none has a compaction concept. Zero code reaches this - it is a docstring, and editing prose that is merely incomplete is how this loop has previously manufactured its next round's finding
 
 - [-] `DEF-PROV-128` **A transcript repair can still race a live writer on the fork path, and possibly in the window just after a compaction** - MAJOR, logged not fixed, found by the round-1 bug-hunter against the DEF-127 fix; `jupyterlab_ai_code_assistants_extension/providers/claude.py`
-  - root-cause: 2026-10-16T07:53:47Z @kj Claude Code 2.1.247 opens the transcript per append burst and closes it (0 open .jsonl fds across 3718 samples, open at 2 of 21 write instants), and _conversation_is_live reads the same sessions/*.json records the CLI's own holder check reads
+  - root-cause: 2026-10-16T10:23:40Z @kj A writer holding an append fd across the `os.replace` keeps writing to the UNLINKED inode
   - log: 2026-08-26T00:00:00Z @kj reported: the consequence is measured and it is worse than losing the racing turn. A writer holding an append fd across the `os.replace` keeps writing to the UNLINKED inode - `turn written BEFORE the swap survives: True`, `turn written AFTER the swap survives: False`, `st_nlink == 0` - so every remaining turn of that session is lost silently while the process still appears to work. The only defence is `_conversation_is_live`, which believes `~/.claude/sessions/*.json`, a record this module's own comments note is rewritten only on a busy/idle status transition. Two paths reach the swap with a plausibly live conversation. FORK: `attach_id` is computed only when `not fork_session_id`, so on a branch the background-agent roster is never consulted, and the parent is then repaired unconditionally - and a fork is documented in this same method as the escape from an agent-owned conversation, i.e. the parent is exactly the transcript most likely to have a live writer. POST-COMPACTION: a boundary-rooted transcript is by construction one that was just compacted, so if the CLI restamps `sessions/<pid>.json` at its next status transition rather than when it opens the new transcript, the gate answers False for a conversation being appended to right now. The consequence is measured; the probability is not
   - log: 2026-08-26T00:00:00Z @kj logged, not fixed: the narrow fix the reviewer named for the fork path - skip the repair when `fork_session_id` is set - is wrong by its own argument, because repairing the parent BEFORE the fork is what makes the fork inherit a good root. The gate that would cover all three cases is a freshness floor in `ensure_continuable` (refuse a transcript whose mtime is younger than about 60 s), two lines, but it interacts with the `os.utime` in `switch` and its value depends entirely on an experiment nobody has run. Deferred deliberately rather than guessed at
   - log: 2026-08-26T00:00:00Z @kj settling test, to run before this is taken: point `CLAUDE_CONFIG_DIR` at a scratch tree, run `/compact` in a terminal, and observe (a) whether a new `<id>.jsonl` appears with the boundary as its first record and (b) how long `sessions/<pid>.json` keeps naming the old id. That interval IS the exposure window; if it is zero the post-compaction half of this entry closes and only the fork half remains
@@ -233,6 +233,7 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - log: 2026-08-26T00:00:00Z @kj CORRECTION, and it cuts against this entry: the round-1 claim that the attach path was already a no-op because 44 live `kind: "bg"` records carry `sessionId` is FALSE, retracted by the reviewer that made it and re-measured here. Census of `~/.claude/sessions/`: 3031 records, 2978 `interactive`, 44 `bg`, 9 unkinded - and 0 of the 44 have a live pid, so `_conversation_is_live` answers False for every one of them. Nothing prunes that directory (see the module's own note), so the count measured DEAD records. The guard above is therefore a real behaviour change, not a scope reduction, and the liveness gate is weaker cover than round 1 credited it with - which raises rather than lowers the value of settling the window below
   - log: 2026-08-27T14:55:15Z @kj rejected: measured against the real writer - Claude Code 2.1.247 opens the transcript per append burst and closes it (0 open .jsonl fds across 3718 samples, open at 2 of 21 write instants), and _conversation_is_live reads the same sessions/*.json records the CLI's own holder check reads; the remaining remedy is an mtime floor, which is timing code. Reopen if a /compact settling test shows the record naming the old id for a non-zero interval, or a background worker is observed holding a transcript fd beyond one burst (close-out campaign)
   - log: 2026-09-28T11:45:36Z @kj same race class, found by DEF-PROV-272 review: make_continuable runs right after claude stop removes the worker record while the worker may still be exiting; only a compacted bg-held transcript is rewritten; unmeasured whether the exiting worker appends
+  - log: 2026-10-16T10:23:40Z @kj root-cause updated "2026-10-16T07:53:47Z @kj Claude Code 2.1.247 opens the transcript per append burst and closes it (0 open .jsonl fds across 3718 samples, open at 2 of 21 write instants), and _conversation_is_live reads the same sessions/*.json records the CLI's own holder check reads" -> "A writer holding an append fd across the `os.replace` keeps writing to the UNLINKED inode"
 
 - [-] `DEF-PROV-130` **A symlinked transcript is replaced by a regular file and the real target keeps the broken content** - MINOR, logged not fixed, found by the round-1 bug-hunter; `jupyterlab_ai_code_assistants_extension/providers/claude.py`
   - root-cause: 2026-10-16T07:53:47Z @kj `with_name` builds the temp beside the LINK while `read_text` and `stat` follow it to the target, so `os.replace` puts a regular file where the link was
@@ -1041,6 +1042,7 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: MANUAL
   - log: 2026-09-17T19:13:26Z @kj added
   - log: 2026-09-17T19:13:45Z @kj closed
+  - log: 2026-10-16T11:56:34Z @kj the project-scope code this defect lives in was removed with terminalScope (DEF-GUARD-316); no code path remains
 - [x] `DEF-PANE-228` **Two guards in the project-scope code no production input reaches** - MINOR; src/core/terminals.ts: the projectPath-less arm of findForSession is reached only by a test, since panel.ts launchHere always passes the folder and _doOpenSession returns before it for project scope; the !this._tracker return in _projectTerminal duplicates the optional chaining _liveTerminals already does; round-2 ux lens; private symbols, and the proposed edits trade an unreachable arm for a dead argument
   - root-cause: 2026-10-16T07:52:56Z @kj the projectPath-less arm of findForSession is reached only by a test, since panel.ts launchHere always passes the folder and _doOpenSession returns before it for project scope; the !this._tracker return in _projectTerminal duplicates the optional chaining _liveTerminals already does
   - evidence: wontfix: private symbols with no user effect; making projectPath required forces the conversation-scope call to pass an argument it never reads, and the tracker guard mirrors the one in findForSession
@@ -1048,6 +1050,7 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: MANUAL
   - log: 2026-09-17T19:13:26Z @kj added
   - log: 2026-09-17T19:13:45Z @kj closed
+  - log: 2026-10-16T11:56:34Z @kj the project-scope code this defect lives in was removed with terminalScope (DEF-GUARD-316); no code path remains
 - [x] `DEF-PANE-229` **_doOpenSession project-scope early return duplicates the fresh-launch call** - MINOR; src/core/terminals.ts _doOpenSession: the project-scope branch calls launch() with the same five-field request as the step-3 call below it; wrapping steps 1-2 in the conversation-scope condition would leave one launch; round-2 ux lens; behaviour identical
   - root-cause: 2026-10-16T07:52:56Z @kj the project-scope branch calls launch() with the same five-field request as the step-3 call below it
   - evidence: wontfix: behaviour identical; the early return keeps the project-scope path readable as one block and the launch call is five fields
@@ -1055,6 +1058,7 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: MANUAL
   - log: 2026-09-17T19:13:26Z @kj added
   - log: 2026-09-17T19:13:45Z @kj closed
+  - log: 2026-10-16T11:56:34Z @kj the project-scope code this defect lives in was removed with terminalScope (DEF-GUARD-316); no code path remains
 - [x] `DEF-PANE-236` **Manage Sessions popup buttons below AA on the dark theme** - MINOR; the popup's small-text buttons measure 3.2-3.5:1 on the stock dark theme (--md-red-700 on #212121); base.css:956 paints the armed delete label in --jp-layout-color1, which is white only in light; remedy is color: white at base.css:956 plus a dark-theme outline override
   - root-cause: 2026-10-16T07:52:56Z @kj the popup's small-text buttons measure 3.2-3.5:1 on the stock dark theme (--md-red-700 on #212121); base.css:956 paints the armed delete label in --jp-layout-color1, which is white only in light
   - evidence: wontfix: MINOR logged not fixed - text legible, the destructive step stays behind the two-click arm, and contrast fixes here needed two ledger corrections before (DEF-PANE-185, DEF-PANE-213); round-4 ux-designer
@@ -1305,6 +1309,16 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-10-16T06:37:02Z @kj the JupyterLab Dialog handles Enter in the capture phase and acts only on its own buttons, so Enter never reaches a button the extension adds
   - log: 2026-10-16T06:37:02Z @kj added
   - log: 2026-10-16T06:37:42Z @kj closed: accepted and logged, not fixed
+  - log: 2026-10-16T10:23:40Z @kj second symptom of the same cause, found by the final-commit ux review: Enter on a row label resolves the dialog default button, so Manage Sessions closes instead of switching; Space still switches. Stays logged, not fixed, under the same ruling
+  - log: 2026-10-16T12:14:11Z @kj third symptom of the same cause, found by the review of the DEF-PANE-314 fix: with the filter focused, Enter resolves the dialog default button, so Manage Sessions closes and the filter text is lost. Stays logged, not fixed, under the same ruling
+- [x] `DEF-PANE-314` **Manage Sessions opens with focus on Close, not on the filter field** - MINOR; text typed straight after opening Manage Sessions goes to the Close button and is dropped; the filter must be clicked first; src/core/popup.ts
+  - evidence: popup.ts focuses the filter after dialog.ready, so Close stays the Dialog primary; popup.spec.ts pins both the filter focus and focus returning to Close (mutation-checked); claude-regression.spec.ts types into the filter then Shift+Tab reaches Close; Galata 72/72 at 1.2.82
+  - repro: open Manage Sessions from a row menu and type at once: the filter stays empty and Close shows the focus ring (CI screenshot manage-sessions-delete-disabled.png at 2d0ef12)
+  - test-tags: E2E
+  - root-cause: 2026-10-16T11:33:44Z @kj popup.ts calls search.focus() straight after dialog.launch(), which attaches the dialog later in a promise continuation, so focus() runs on a detached input and the Dialog then focuses its default button on attach
+  - log: 2026-10-16T11:33:44Z @kj added
+  - log: 2026-10-16T12:14:11Z @kj amended text "text typed straight after opening Manage Sessions goes to the Close button and is dropped, and Enter closes the dialog; the filter must be clicked first; src/core/popup.ts" -> "text typed straight after opening Manage Sessions goes to the Close button and is dropped; the filter must be clicked first; src/core/popup.ts"
+  - log: 2026-10-16T13:58:21Z @kj closed
 
 ## Colour store `COLO`
 
@@ -1789,9 +1803,10 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - log: 2026-08-27T14:21:02Z @kj imported
   - log: 2026-08-27T16:09:38Z @kj closed: fixed (close-out campaign, v1.0.40): setRoot re-renders once when the root VALUE changes and sessions are already drawn (changed && _sessions !== null) - data-driven, fires once per panel per roster change, not per reconcile tick; rows drawn rootless now correct the moment the roster lands instead of at the next 30 s poll. Three Jest assertions, mutation-checked both halves
 - [-] `DEF-GUARD-137` **A permanently unanswerable status route docks every enabled assistant forever** - MINOR, logged not fixed; a 404 (server extension off, a proxy) reaches the catch and leaves `status` null, so each panel banners "Could not reach the server - retrying" every 30 s where the old code showed an empty sidebar. Remedy would be `isResponseStatus(err, 404)` treated as an answer; declined under the ruling that a failure writes nothing
-  - root-cause: 2026-10-16T07:52:51Z @kj declined under the ruling that a failure writes nothing
+  - root-cause: 2026-10-16T10:23:39Z @kj a 404 (server extension off, a proxy) reaches the catch and leaves `status` null
   - log: 2026-08-27T14:21:02Z @kj imported
   - log: 2026-08-27T14:55:15Z @kj rejected: a 404 on the status route is a failed probe and a failed probe writes nothing (DEF-132); treating it as an empty roster makes a failure write a verdict and would empty the sidebar irrecoverably on a proxy-authored 404 - the exact DEF-132 mechanism (close-out campaign)
+  - log: 2026-10-16T10:23:39Z @kj root-cause updated "2026-10-16T07:52:51Z @kj declined under the ruling that a failure writes nothing" -> "a 404 (server extension off, a proxy) reaches the catch and leaves `status` null"
 - [x] `DEF-GUARD-138` **A docked-but-uninstalled provider's panel blames the server on a 503 `cli_not_found`** - MINOR, logged not fixed; `_showError` branches only on timeout. Inside the cost DEF-132 accepted
   - root-cause: 2026-10-16T07:52:53Z @kj `_showError` branches only on timeout
   - log: 2026-08-27T14:21:02Z @kj imported
@@ -2059,3 +2074,24 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - log: 2026-10-09T14:40:28Z @kj closed: fixed
   - log: 2026-10-10T01:19:52Z @kj edited evidence "the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); 12 of 12 with --repeat-each 12, 4 of 6 failed before; full browser suite 65 of 65 twice at 1.2.66" -> "the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); with the stale workspace write forced to land first, 3 of 3 pass with the wait and 3 of 3 fail without it; full browser suite 65 of 65 twice at 1.2.69"
   - log: 2026-10-10T02:29:37Z @kj edited evidence "the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); with the stale workspace write forced to land first, 3 of 3 pass with the wait and 3 of 3 fail without it; full browser suite 65 of 65 twice at 1.2.69" -> "the test polls the last answered workspace PUT for the placed panel on the right before page.reload(); with the stale workspace write forced to land first, 3 of 3 pass with the wait and 3 of 3 fail without it; full browser suite 65 of 65 twice at 1.2.70"
+- [x] `DEF-GUARD-315` **Fork paths for native-flag, native-command and the branch-name prompt have no producer** - MINOR; about 250 production lines in src/core/panel.ts, colour.ts, terminals.ts, core/routes.py and the claude and codex provider modules serve fork strategies and a prompt no shipped provider declares; reachable only by a hand-built POST; found by the final-commit architect review
+  - evidence: removed native-flag, native-command, promptsForBranchName, the branch-name dialog, fork watcher, ColourStore.inherit, colourFor, the launch fork keys and the orphaned launch name key; all five providers fork through the server branch route; Jest 336, pytest 365, Galata 72/72 at 1.2.82
+  - repro: grep forkStrategy and promptsForBranchName in src/providers and the python providers: every provider declares server-native or server-copy and promptsForBranchName false
+  - test-tags: UNIT
+  - root-cause: 2026-10-16T11:33:44Z @kj commit 2d62036 moved Claude and Codex to server-native forking, which left no producer of native-flag or native-command, but their core paths and tests stayed
+  - log: 2026-10-16T11:33:44Z @kj added
+  - log: 2026-10-16T13:58:21Z @kj closed
+- [x] `DEF-GUARD-316` **terminalScope 'project' has no producer since DeepSeek moved to the TUI** - MINOR; the project-scope branches in src/core/terminals.ts and panel.ts, the confirmed field and the TerminalScope type serve a value no provider declares; three logged MINORs (DEF-PANE-227, 228, 229) live in that code; found by the final-commit architect review
+  - evidence: removed the TerminalScope type, the descriptor field, _projectTerminal and the project branches; conversation-scope reuse unchanged and covered by terminals.spec.ts, launcher.spec.ts and codex-reuse.spec.ts; Jest 336, Galata 72/72 at 1.2.82
+  - repro: grep terminalScope in src/providers: all five declare conversation
+  - test-tags: UNIT
+  - root-cause: 2026-10-16T11:33:44Z @kj commit a0cd1ad moved DeepSeek, the only project-scoped provider, to terminalScope conversation, and the project branches stayed
+  - log: 2026-10-16T11:33:44Z @kj added
+  - log: 2026-10-16T13:58:21Z @kj closed
+- [x] `DEF-GUARD-317` **Comments and a type still describe the enum launch mode DEF-GUARD-111 removed** - MINOR; src/core/types.ts, src/providers/gemini.ts and src/core/panel.ts describe an id=value enum mode, and the mode records are typed boolean | string where nothing produces a string; found by the final-commit architect review
+  - evidence: removed the enum-mode comments in types.ts, gemini.ts and panel.ts, narrowed mode records to Record<string, boolean>, corrected the Gemini line in .agents/AGENTS.md; launch-mode.spec.ts 'ignores a token from a retired setting' passes; Jest 336
+  - repro: read src/core/types.ts near the launch-mode token comment: it says an enum mode is <id>=<value>; the server answers such a token 400 mode_unsupported
+  - test-tags: UNIT
+  - root-cause: 2026-10-16T11:33:44Z @kj DEF-GUARD-111 removed Gemini's enum approvalMode but left the comments that describe it and the string half of the mode-record type
+  - log: 2026-10-16T11:33:44Z @kj added
+  - log: 2026-10-16T13:58:22Z @kj closed

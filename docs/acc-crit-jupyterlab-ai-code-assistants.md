@@ -377,6 +377,7 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:57Z @kj edited importance
   - log: 2026-09-19T23:37:35Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-10-16T11:56:08Z @kj correction: evidence cites DEF-PANE-211 for terminalScope, a gate removed with the field (DEF-GUARD-316); the live gates are canRename ('offers the item only where the assistant keeps a writable name') and DEF-35 for a provider with no launch modes
 - [x] `ACC-PANE-45` **Edge: empty history** - MEDIUM; a provider with no sessions shows an empty-state message, not a blank panel
   - evidence: panel.spec.ts ACC-PANE-45 asserts two lines - the assistant is named in 'No Testbed sessions found.' and the second names + as the way out - and that no row is rendered. Mutation: blanking the message reddens it
   - test-tags: UNIT
@@ -539,6 +540,7 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
   - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-10-16T11:56:08Z @kj correction: evidence cites terminals.spec.ts 'launches once when nothing runs the project, and gates + and forks the same way', a project-scope case removed with terminalScope (DEF-GUARD-316); the live cover is ui-tests/tests/resume.spec.ts, claude-regression.spec.ts 'new-session menu item opens a terminal in the current folder' and the test_routes.py launch and launch-argv cases
 - [x] `ACC-SESS-54` **Terminal reuse** - CRITICAL; a terminal already running that exact conversation is focused, never duplicated
   - evidence: terminals.spec.ts seven cases: focuses the running terminal the server confirms, reuses the microcache entry after the row moved, relaunches once the confirmed terminal has stopped, never reuses a terminal whose conversation the server cannot read, and answers the Launcher path from the project rather than the row id
   - test-tags: UNIT
@@ -546,6 +548,7 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
   - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-10-16T11:56:23Z @kj correction: six of the seven terminals.spec.ts cases it counts, four of the five it names among them, were project-scope cases removed with terminalScope and the projectPath parameter of findForSession (DEF-GUARD-316); the live cover is terminals.spec.ts 'never reuses a terminal whose conversation the server cannot read', launcher.spec.ts 'focuses the open terminal already running it, and launches nothing' and ui-tests/tests/codex-reuse.spec.ts; reason: the length is the list of removed and replacing tests, each named so it can be run
 - [x] `ACC-SESS-55` **Conversation switcher** - HIGH; a submenu lists a project's other conversations with short id and last activity; picking one makes it the row's current conversation
   - evidence: panel.spec.ts ACC-SESS-55 asserts each submenu entry carries the name, the short id in brackets and a relative time, that two conversations of one project read differently, and that picking one calls _switchBranch with that id; labels.spec.ts covers branchMenuLabel and shortSessionId. Mutations: dropping the time, dropping the short id, and switching to the row's own id each redden it
   - test-tags: UNIT
@@ -574,6 +577,7 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
   - log: 2026-09-19T23:33:09Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-10-16T11:56:08Z @kj correction: evidence cites panel.spec.ts DEF-PANE-211, removed with terminalScope (DEF-GUARD-316); the Open Branched Conversation submenu is now added whenever the menu carries branches, and the live cover is the two claude-regression.spec.ts cases and panel.spec.ts ACC-SESS-55
 - [x] `ACC-SESS-59` **Branch session** - HIGH; forks the current conversation into a new one in its own terminal, by the provider's `forkStrategy`
   - evidence: One case per strategy: test_claude_launch_argv for native-flag, test_routes.py test_a_native_command_fork_launches_with_fork_from and test_a_native_command_provider_has_no_server_side_branch for native-command, test_kimi_fork_copies_the_directory_and_appends_the_index and test_gemini_fork_rewrites_every_metadata_record for server-copy, test_routes.py test_branch_is_refused_when_the_provider_cannot_fork for none; panel.spec.ts DEF-31 and DEF-35 cover the menu entry
   - test-tags: UNIT, FUNCTIONAL
@@ -581,6 +585,7 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
   - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-10-16T11:56:22Z @kj correction: native-flag and native-command were removed with their tests (DEF-GUARD-315); the evidence cited test_claude_launch_argv for native-flag (Claude is server-native), test_a_native_command_fork_launches_with_fork_from, test_a_native_command_provider_has_no_server_side_branch and panel.spec.ts DEF-31; the live cover is tests/test_native_branch.py test_claude_branch_uses_native_commands and test_codex_fork_names_the_exact_child_without_starting_a_turn for server-native, test_kimi_fork_copies_the_directory_and_appends_the_index and test_gemini_fork_rewrites_every_metadata_record for server-copy, test_routes.py test_branch_is_refused_when_the_provider_cannot_fork for none, and panel.spec.ts ACC-SESS-203 and DEF-35 for the panel branch path and the menu entry; reason: the length is the list of removed and replacing tests, each named so it can be run
 - [x] `ACC-SESS-60` **Copy session id** - MEDIUM; copies the row's current conversation id to the clipboard
   - evidence: panel.spec.ts ACC-SESS-60 asserts Clipboard.copyToSystem is called with the row's current conversation id, and with nothing at all when no row is active. Mutation: copying an empty string when there is no row reddens it
   - test-tags: UNIT
@@ -665,13 +670,14 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-09-19T20:11:40Z @kj added
   - log: 2026-09-19T20:11:57Z @kj edited title
   - log: 2026-09-19T20:30:47Z @kj closed
-- [x] `ACC-SESS-175` **Empty rename refused** - MEDIUM; Ok on an empty field renames nothing and says so in a notification, the way Branch Session already refuses an empty name
+- [x] `ACC-SESS-175` **Empty rename refused** - MEDIUM; Ok on an empty field renames nothing and says so in a notification
   - evidence: panel.spec.ts ACC-SESS-175 - an empty field sends no request and warns; test_routes name_invalid over empty, whitespace, over-long, missing and non-string
   - test: open the rename dialog, clear the field, press Ok, assert no request went out and a warning notification appeared
   - test-tags: UNIT, FUNCTIONAL
   - mechanism: 2026-09-19T20:11:40Z @kj the trimmed value is tested before the request, and the server rejects an empty or over-long name as well
   - log: 2026-09-19T20:11:40Z @kj added
   - log: 2026-09-19T20:30:47Z @kj closed
+  - log: 2026-10-16T11:56:00Z @kj amended text "Ok on an empty field renames nothing and says so in a notification, the way Branch Session already refuses an empty name" -> "Ok on an empty field renames nothing and says so in a notification"
 - [x] `ACC-SESS-190` **Open moves the file browser** - HIGH; with syncFileBrowser on, opening a session moves the file browser to its project folder; open means a row click, Enter or Space on a row, Resume, an Open Branched Conversation item, or the Manage Sessions Open button; a reused terminal counts
   - evidence: panel.spec.ts: 7 route cases plus root path, order and reuse cases pass, each red under two independent mutations; Galata tests 1 and 3 pass at 1.2.60 and fail when the built bundle syncs only with the setting off
   - mechanism: 2026-10-09T10:30:30Z @kj panel.ts _openSession calls _moveFileBrowserTo after the awaited open; it runs filebrowser:go-to-path with the folder relative to the server root and dontShowBrowser true; every open route goes through _openSession
@@ -823,6 +829,7 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
   - log: 2026-08-09T00:00:00Z @kj corrected - adversarial round 4 (architect MAJOR, bug-hunter MAJOR, both reproduced): the legacy rule claimed a pre-1.0.0 file held only tab write-backs, but inherit_colour shipped in 8e62249, so an upgrader's release would un-inherit exactly as before; a legacy file now holds nothing hand-set, and re-picking the colour on the tab is the way back
   - log: 2026-09-17T17:26:00Z @kj edited importance
   - log: 2026-09-19T23:27:05Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-10-16T11:56:08Z @kj correction: the 'ColourStore origins' case 'does not count an inherited tint as the user own' drove ColourStore.inherit, removed with the native fork paths (DEF-GUARD-315); the frontend no longer writes an inherited tint, BranchHandler does while minting the fork, so test_colour_store.py test_an_inherited_tint_is_not_a_hand_set_one covers that rule and colour.spec.ts keeps the legacy-file rule
 - [x] `ACC-COLO-80` **Colour write failure is reported** - MEDIUM; a colour the store cannot persist answers 500 rather than 200, and the panel treats an answer that does not hold the colour as a failed write - it leaves the cache untouched, paints nothing, and says in the console that the choice did not stick. What the user sees is the class the companion put on the tab element, which survives only until the next tab switch, so the failure is visible rather than silent
   - evidence: test_colour_store.py test_a_colour_that_cannot_be_persisted_is_not_reported_as_stored and test_a_refused_write_says_so_in_the_server_log; colour.spec.ts 'treats an answer that does not hold the colour as a failed write' and 'keeps the last confirmed colour when the server refuses, and says so'; tab-colour-capture.spec.ts 'paints nothing, and says the choice did not stick'
   - test-tags: UNIT, FUNCTIONAL
@@ -976,13 +983,16 @@ This extension retires the three standalone extensions. A user upgrading must no
 
 Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. Capabilities - native fork, user-set colour, remote control, background agents.
 
-- [x] `ACC-CLAU-94` **Native fork** - HIGH; branching uses `claude --fork-session`; the chosen name is stamped and the fork becomes the row's current conversation
-  - evidence: test_claude_launch_argv asserts --resume <parent> --fork-session --session-id <fork> -n <name>, so the flag pair, the minted id and the stamped name are one argv; test_claude_a_fork_of_an_agent_owned_conversation_still_forks holds the fork path against an attach; test_routes.py asserts the fork id reaches the argv route; test_claude_parse_session_id_prefers_the_fork makes the fork, not the parent, the row's current conversation
+- [x] `ACC-CLAU-94` **Native fork** - HIGH; branching uses `claude --fork-session`; the numbered branch name is stamped and the fork becomes the row's current conversation
+  - evidence: test_native_branch.py test_claude_branch_uses_native_commands asserts claude -p --resume <parent> --fork-session --session-id <child> with /rename <name>, then /color; test_branch_names_skip_used_suffixes holds the numbered name; test_native_branch_does_not_mask_native_colour asserts BranchHandler pins the Claude fork as the project's current conversation; ui-tests native-branch.spec.ts shows the Native branch_2 row
   - test-tags: UNIT, FUNCTIONAL
-  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k "claude_launch_argv or fork_of_an_agent_owned" and PYTHONPATH=$PWD python3 -m pytest -k native_command_fork
+  - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_native_branch.py -k "claude_branch_uses_native_commands or skip_used_suffixes or does_not_mask_native_colour"
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
   - log: 2026-09-19T23:24:13Z @kj edited test (added) and test-tags (added) and evidence (added)
+  - log: 2026-10-16T11:56:00Z @kj amended text "branching uses `claude --fork-session`; the chosen name is stamped and the fork becomes the row's current conversation" -> "branching uses `claude --fork-session`; the numbered branch name is stamped and the fork becomes the row's current conversation"
+  - log: 2026-10-16T11:56:00Z @kj edited test "PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k "claude_launch_argv or fork_of_an_agent_owned" and PYTHONPATH=$PWD python3 -m pytest -k native_command_fork" -> "PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_native_branch.py -k "claude_branch_uses_native_commands or skip_used_suffixes" and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k parse_session_id_prefers_the_fork"; evidence "test_claude_launch_argv asserts --resume <parent> --fork-session --session-id <fork> -n <name>, so the flag pair, the minted id and the stamped name are one argv; test_claude_a_fork_of_an_agent_owned_conversation_still_forks holds the fork path against an attach; test_routes.py asserts the fork id reaches the argv route; test_claude_parse_session_id_prefers_the_fork makes the fork, not the parent, the row's current conversation" -> "test_native_branch.py test_claude_branch_uses_native_commands asserts claude -p --resume <parent> --fork-session --session-id <child> with /rename <name>, then /color; test_branch_names_skip_used_suffixes holds the numbered name; test_claude_parse_session_id_prefers_the_fork makes the fork, not the parent, the row's current conversation; ui-tests native-branch.spec.ts shows the Native branch_2 row"
+  - log: 2026-10-16T13:57:42Z @kj edited test "PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_native_branch.py -k "claude_branch_uses_native_commands or skip_used_suffixes" and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k parse_session_id_prefers_the_fork" -> "PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_native_branch.py -k "claude_branch_uses_native_commands or skip_used_suffixes or does_not_mask_native_colour""; evidence "test_native_branch.py test_claude_branch_uses_native_commands asserts claude -p --resume <parent> --fork-session --session-id <child> with /rename <name>, then /color; test_branch_names_skip_used_suffixes holds the numbered name; test_claude_parse_session_id_prefers_the_fork makes the fork, not the parent, the row's current conversation; ui-tests native-branch.spec.ts shows the Native branch_2 row" -> "test_native_branch.py test_claude_branch_uses_native_commands asserts claude -p --resume <parent> --fork-session --session-id <child> with /rename <name>, then /color; test_branch_names_skip_used_suffixes holds the numbered name; test_native_branch_does_not_mask_native_colour asserts BranchHandler pins the Claude fork as the project's current conversation; ui-tests native-branch.spec.ts shows the Native branch_2 row"
 - [x] `ACC-CLAU-95` **Remote control indicator** - HIGH; a green dot marks sessions actively under remote control, not merely a running terminal
   - evidence: panel.spec.ts three cases: remote control gives the dot its own sentence, a live process alone gives a different one, and a provider that does not declare the capability never shows the remote sentence. Mutations: dropping the hasRemoteControl gate, and reordering the two branches, each redden it
   - test-tags: UNIT
@@ -1463,7 +1473,7 @@ All routes are namespaced by provider id under the extension base `jupyterlab-ai
 - `GET providers/<id>/branches?encoded_path=...` -> `{current, total, branches: [...]}`
 - `POST providers/<id>/switch` body `{encoded_path, session_id}` -> `{requested, current}`; 404 `branch_not_found`, 400 invalid input
 - `POST providers/<id>/favourite` body `{project_path, favourite}` -> `{favourites: [...]}`
-- `POST providers/<id>/launch` body `{project_path, encoded_path?, session_id?, new_session_id?, fork_session_id?, fork_from?, mode?, name?}` -> `{terminal_name}`; 404 `session_not_found`, 400 `mode_unsupported`, 503 `cli_not_found`
+- `POST providers/<id>/launch` body `{project_path, encoded_path?, session_id?, new_session_id?, mode?}` -> `{terminal_name}`; 404 `session_not_found`, 400 `mode_unsupported`, 503 `cli_not_found`
 - `POST providers/<id>/launch-argv` - same body and validator as `launch` -> `{argv}`; 404 `session_not_found`, 400 `mode_unsupported`, 503 `cli_not_found`
 - `POST providers/<id>/branch` body `{encoded_path, session_id, name?}` -> `{session_id}`; 400 `fork_unsupported`
 - `DELETE providers/<id>/sessions` body `{encoded_path, session_ids?}` -> `{removed_count}`

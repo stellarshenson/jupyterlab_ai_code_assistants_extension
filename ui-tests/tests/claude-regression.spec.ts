@@ -220,10 +220,24 @@ test('Manage Sessions Delete sits in the action row and follows the destructive 
   });
 
   const popup = await openManageSessions(page);
+
+  // Opens with the keyboard focus on the filter, not on Close, so typing
+  // filters straight away (DEF-PANE-314). "branch" is in every seeded session
+  // id, so every row stays listed for the steps below.
+  const filter = popup.locator('.jp-AiAssistantsPanel-branchSearch');
+  await expect(filter).toBeFocused();
+  await page.keyboard.type('branch');
+  await expect(filter).toHaveValue('branch');
+
   const dialog = page.locator('.jp-Dialog');
   const footer = dialog.locator('.jp-Dialog-footer');
   const del = footer.locator('.jp-AiAssistantsPanel-branchDelete');
   const close = footer.locator('.jp-Dialog-button', { hasText: 'Close' });
+
+  // Shift+Tab from the filter, the first focusable element, leaves the
+  // dialog, and the dialog returns the focus to Close, its primary button.
+  await page.keyboard.press('Shift+Tab');
+  await expect(close).toBeFocused();
 
   // In the dialog's own action row, not the body: on its left edge, on the
   // same line as Close.

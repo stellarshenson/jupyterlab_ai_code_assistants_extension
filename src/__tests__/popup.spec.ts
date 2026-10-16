@@ -100,6 +100,33 @@ describe('Manage Sessions popup click zones', () => {
   });
 });
 
+describe('Manage Sessions popup focus (DEF-PANE-314)', () => {
+  // The popup moves the focus to the filter once the dialog is ready.
+  const ready = (): Promise<void> => Dialog.tracker.find(() => true)!.ready;
+
+  it('opens with the keyboard focus on the filter, not on Close', async () => {
+    await ready();
+    expect(document.activeElement).toBe(
+      document.querySelector('.jp-AiAssistantsPanel-branchSearch')
+    );
+  });
+
+  it('sends focus that leaves the dialog to Close, not to the filter', async () => {
+    await ready();
+    // Shift+Tab from the filter, the first focusable element, leaves the
+    // dialog; the dialog returns that focus to its primary button.
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    const close = document.querySelector<HTMLButtonElement>(
+      '.jp-Dialog-footer .jp-Dialog-button'
+    )!;
+    expect(close.textContent).toBe('Close');
+    expect(document.activeElement).toBe(close);
+    outside.remove();
+  });
+});
+
 describe('Manage Sessions popup Delete button (DEF-PANE-307)', () => {
   it('sits in the dialog action row, after the list and before Close', () => {
     const del = deleteButton();

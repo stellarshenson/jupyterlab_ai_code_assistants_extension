@@ -11,6 +11,10 @@
 - A Claude terminal tab follows your newest colour choice. Running `/color` in the conversation after picking a colour on its tab now changes the tab, where the tab pick used to win until `Reset Tab Colour`; a tab pick made after `/color` still stands, also when the conversation is opened again. A `/color` that Claude rejects does not count, and `/color pink` and `/color cyan` show as rose and sky
 - The Manage Sessions dialog shows `Delete` in its action row beside `Close`, as an outlined red button that fills red once armed for the second click, instead of as grey text on a row of its own
 
+### Fixed
+
+- The Manage Sessions dialog opens with the keyboard focus in its filter field, so typing filters the list straight away. The focus used to land on `Close`, where typed characters were dropped
+
 <!-- <END NEW CHANGELOG ENTRY> -->
 
 ## [1.2.73] - 2026-10-14

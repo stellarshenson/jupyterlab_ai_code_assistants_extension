@@ -38,7 +38,7 @@ export namespace ManageSessionsPopup {
     /** Tooltip for one row's Open button. The panel owns it because the launch
      * mode in force is panel state, and every other surface that opens a
      * conversation names it. */
-    openTitle: (sessionId: string) => string;
+    openTitle: () => string;
     /** Make a conversation the row's current one. */
     onSwitch: (sessionId: string) => void;
     /** Open a conversation in its own terminal. */
@@ -193,7 +193,7 @@ export function showManageSessionsPopup(
     btn.type = 'button';
     btn.className = 'jp-AiAssistantsPanel-branchOpen';
     btn.textContent = 'Open';
-    btn.title = options.openTitle(sessionId);
+    btn.title = options.openTitle();
     btn.addEventListener('click', e => {
       e.stopPropagation();
       dialog.dispose();
@@ -518,5 +518,9 @@ export function showManageSessionsPopup(
   // dialog.dispose() (on open/switch) rejects this promise with `undefined`;
   // catch it so the teardown never surfaces as an unhandled rejection.
   dialog.launch().catch(() => undefined);
-  search.focus();
+  // The Dialog focuses its primary button once attached; the filter takes the
+  // focus after that, so typing filters the list. Close stays the primary, so
+  // focus that leaves the dialog (Shift+Tab from the filter) returns to Close
+  // (DEF-PANE-314).
+  void dialog.ready.then(() => search.focus());
 }

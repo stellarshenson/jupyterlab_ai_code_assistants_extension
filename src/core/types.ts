@@ -30,7 +30,9 @@ export type ForkStrategy =
 export type TerminalScope = 'conversation' | 'project';
 
 /** Where a conversation's DEFAULT tab tint comes from. A user-set colour in
- * the extension's own write-back store always wins over all three. */
+ * the extension's own write-back store wins over `derived` and `none`. Over
+ * `native` the newer choice wins: the server releases a stored entry older
+ * than the assistant's newest run of its own colour command (DEF-COLO-306). */
 export type ColourSource = 'native' | 'derived' | 'none';
 
 /** One launch-behaviour setting of an assistant, in that assistant's own

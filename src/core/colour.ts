@@ -1,7 +1,10 @@
 // Terminal tab tint per conversation.
 //
 // Effective colour, highest wins:
-//   1. user-set     - the write-back store this module keeps, per provider
+//   1. user-set     - the write-back store this module keeps, per provider.
+//                     Only entries the server still holds: it releases a pick
+//                     that the assistant's own later colour command overtook,
+//                     because the newer of the two channels wins (DEF-COLO-306)
 //   2. native       - the conversation's own colour, when the assistant has one
 //   3. derived      - a stable hash of the conversation id
 //   4. none         - no tint

@@ -1395,7 +1395,9 @@ export class AssistantSessionsPanel extends Widget {
    * store holds for the parent is inherited there - an entry the parent itself
    * inherited counts, which is what makes a branch of a branch take what its
    * parent actually shows. Copying the parent's native tint instead would pin
-   * the fork to it and shadow the fork's own `/color` for good.
+   * the fork to it in this store: the copy is written after the fork's own
+   * `/color`, so it would stand over that colour until the fork's next
+   * `/color`.
    * Every other assistant inherits the parent's effective colour, which is the
    * only tint it has. */
   private async _inheritColour(
@@ -2497,8 +2499,8 @@ export class AssistantSessionsPanel extends Widget {
     // colourful-tab extension as a choice with no colour and does drop the
     // override, but only for the conversation that terminal is running - so
     // without this item an override on a branch with no tab open would be
-    // permanent, and on a native assistant that means `/color` silently never
-    // showing again.
+    // permanent on an assistant with no colour command, and on a native one
+    // would hold until the next `/color` run in that conversation.
     //
     // It covers every conversation of the row, not just the current one: a
     // terminal opened on a branch files its colour under THAT branch, and this

@@ -41,7 +41,8 @@ export const descriptor: IProviderDescriptor = {
   forkStrategy: 'server-native',
   // `/color` is Claude's own surface for a conversation's colour, recorded in
   // its transcript, so the assistant supplies the DEFAULT tint - a colour the
-  // user then sets on the tab diverges from it deliberately and wins.
+  // user sets on the tab overrides it and is remembered, until a later
+  // `/color` takes over (`colour_choice_ms` in providers/claude.py).
   colourSource: 'native',
   terminalScope: 'conversation',
   promptsForBranchName: false,

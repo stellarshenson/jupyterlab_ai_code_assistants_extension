@@ -113,6 +113,24 @@ BG_STOP_TIMEOUT_S = 10.0
 # ``agent-color`` and ``timestamp`` records: measured across live transcripts the newest of each
 # sits within ~14 KiB of EOF, so a tens-of-MB transcript is never read whole.
 _TAIL_BYTES = 131072
+# What an interactive ``/color`` run leaves in a transcript: two ``system``
+# records of subtype ``local_command``, the command - its ``content`` names
+# the command in this tag - then the command's stdout, whose ``parentUuid`` is
+# the command record's ``uuid``. The command record is written whether or not
+# Claude accepted the colour, so the stdout is the evidence of acceptance:
+# ``Session color set to: <colour>`` or ``Session color reset to default``
+# when accepted, ``Invalid color "<arg>". Available colors: ...`` when
+# rejected - and only an accepted run appends an ``agent-color`` record.
+# Measured with Claude 2.1.301 against a scratch config dir, and matched by
+# every ``/color`` pair in the live transcripts. A print-mode run
+# (``claude -p``) records the command as a ``user`` record instead, so its
+# stdout follows no local_command record and is not counted. The tag is
+# matched whole, closing bracket included, so a command that merely starts
+# with ``/color`` is not one; the stdout prefix is matched as a prefix, so an
+# output Claude words differently in a later release reads as no evidence and
+# keeps a stored pick rather than releasing it.
+_COLOUR_COMMAND_TAG = "<command-name>/color</command-name>"
+_COLOUR_ACCEPTED_PREFIX = "<local-command-stdout>Session color "
 # Lines read from the FRONT of a transcript when its tail carries no cwd at all.
 _HEAD_SCAN_LIMIT = 50
 _DECODE_MAX_DEPTH = 20
@@ -126,7 +144,12 @@ _ATTACH_ID_RE = re.compile(r"[0-9a-f-]{4,64}")
 # Claude's per-conversation colour (``/color``, or auto-assigned) mapped onto
 # the six-id vocabulary of ``jupyterlab_colourful_tab_extension``. That
 # extension owns the tab CSS and the ids; the store only feeds it one of them,
-# and an unrecognised name resolves to no tint rather than to a guess.
+# and an unrecognised name resolves to no tint rather than to a guess. Claude
+# accepts eight colours (its own ``Invalid color`` message lists red, blue,
+# green, yellow, purple, orange, pink, cyan, and ``default`` to reset), so two
+# share a palette id with their nearest neighbour: pink as rose, cyan as sky.
+# They come LAST because ``fork`` maps a tab id back to a Claude colour by the
+# first key that carries it, and rose and sky must go back as red and blue.
 _TAB_COLOUR_ID = {
     "red": "rose",
     "orange": "peach",
@@ -134,6 +157,8 @@ _TAB_COLOUR_ID = {
     "green": "mint",
     "blue": "sky",
     "purple": "lavender",
+    "pink": "rose",
+    "cyan": "sky",
 }
 
 
@@ -161,9 +186,10 @@ def _tail_records(path: Path) -> dict:
 
 
 def _read_tail(path: Path, stat: os.stat_result) -> dict:
-    """``{"cwd", "custom_title", "agent_colour", "last_timestamp"}`` from a tail.
+    """``{"cwd", "custom_title", "agent_colour", "colour_command",
+    "last_timestamp"}`` from a tail.
 
-    One pass over the last ``_TAIL_BYTES`` for all four, because all four are
+    One pass over the last ``_TAIL_BYTES`` for all five, because all five are
     "the last record of this type wins" and the panel needs them together:
 
     * ``cwd`` - the directory the conversation last ran in, which differs from
@@ -176,6 +202,13 @@ def _read_tail(path: Path, stat: os.stat_result) -> dict:
     * ``agent_colour`` - ``/color`` appends ``{"type": "agent-color", ...}``;
       auto-assigned multi-session colours land there too, so a conversation
       that never ran ``/color`` still carries one
+    * ``colour_command`` - the ``timestamp`` of the newest ``/color`` run
+      Claude ACCEPTED: the stdout record that answers a
+      ``_COLOUR_COMMAND_TAG`` record with ``_COLOUR_ACCEPTED_PREFIX``, which
+      is when the user last chose a colour through Claude. A rejected run
+      (``/color sky``) changes no colour, so it is no choice. NOT the
+      ``agent-color`` record: Claude re-appends that one with no timestamp on
+      every resume, so it says what the colour is, never when it was chosen
     * ``last_timestamp`` - the newest record's own clock, which is what
       ``_activity_ms`` reports rather than the file mtime, since the mtime is
       not only the assistant's to write
@@ -190,6 +223,9 @@ def _read_tail(path: Path, stat: os.stat_result) -> dict:
         return {}
 
     records: dict = {}
+    # The ``uuid`` of the last ``/color`` command record, which its stdout
+    # record names as ``parentUuid``.
+    colour_run = None
     for raw_line in chunk.splitlines():
         try:
             record = json.loads(raw_line)
@@ -209,6 +245,20 @@ def _read_tail(path: Path, stat: os.stat_result) -> dict:
             colour = record.get("agentColor")
             if isinstance(colour, str) and colour.strip():
                 records["agent_colour"] = colour.strip().lower()
+        elif kind == "system" and record.get("subtype") == "local_command":
+            content = record.get("content")
+            stamp = record.get("timestamp")
+            if isinstance(content, str) and _COLOUR_COMMAND_TAG in content:
+                colour_run = record.get("uuid")
+            elif (
+                isinstance(content, str)
+                and content.startswith(_COLOUR_ACCEPTED_PREFIX)
+                and isinstance(colour_run, str)
+                and record.get("parentUuid") == colour_run
+                and isinstance(stamp, str)
+                and stamp
+            ):
+                records["colour_command"] = stamp
         # Same "last one wins" pass: the newest record's own clock, which is
         # what ``_activity_ms`` answers with for a transcript whose mtime the
         # switch deliberately put in the future.
@@ -1374,8 +1424,15 @@ class ClaudeStore(SessionStore):
         cwd = _tail_records(parent).get("cwd")
         if not isinstance(cwd, str) or not os.path.isdir(cwd):
             return None
-        colour = colour_store.load_colours(self.provider_id).get(session_id)
-        colour = colour or self.default_colour(session_id)
+        # The colour the parent SHOWS, so judged like every other read: a pick
+        # the parent's own later ``/color`` overtook is not copied into the
+        # branch, where the ``/color`` below would make it the branch's own
+        # colour for good. Read only - this runs pooled, and colour WRITES are
+        # loop-serialised (DEF-99); the next listing releases the entry.
+        live, _stale = colour_store.judge(
+            self.provider_id, [session_id], self.colour_choice_ms
+        )
+        colour = live.get(session_id) or self.default_colour(session_id)
         native_colour = next(
             (key for key, value in _TAB_COLOUR_ID.items() if value == colour),
             "default",
@@ -1613,17 +1670,45 @@ class ClaudeStore(SessionStore):
         A row carries its own colour from the tail scan ``list_sessions``
         already performs; a probed terminal may be running any conversation of
         a project, including one no row represents, and resolving that by row
-        would clear the tint of every such terminal. The id is a file NAME,
-        never a glob pattern, so it is escaped before it reaches the glob.
+        would clear the tint of every such terminal.
         """
+        path = self._transcript(session_id)
+        if path is None:
+            return None
+        return _TAB_COLOUR_ID.get(_tail_records(path).get("agent_colour") or "")
+
+    def colour_choice_ms(self, session_id: str) -> int | None:
+        """When ``/color`` last ran in this conversation, in epoch ms.
+
+        Read from the same memoised tail scan as ``default_colour``, so a
+        ``/color`` that has scrolled out of the last ``_TAIL_BYTES`` reads as
+        None - no evidence, which keeps a stored pick rather than releasing it.
+        A Claude fork writes no colour-store entry for the branch: the branch
+        route copies a parent's entry only for a provider whose colour source
+        is not native, and ``fork`` writes none. ``fork`` runs ``/color`` in
+        the branch with the colour the parent shows, which sets the branch's
+        ``agent-color``; that run is print mode, so it is no choice time here
+        (``_COLOUR_COMMAND_TAG``). The branch's choice time is the newest
+        ``/color`` that ``--fork-session`` copied from the parent, with its
+        original time - with no entry to release it changes nothing, and a pick
+        made on the branch's tab afterwards is newer than it.
+        """
+        path = self._transcript(session_id)
+        if path is None:
+            return None
+        return iso_ms(_tail_records(path).get("colour_command"))
+
+    def _transcript(self, session_id: str) -> Path | None:
+        """The transcript of one conversation in any project, or None. The id
+        is a file NAME, never a glob pattern, so it is escaped before it
+        reaches the glob."""
         if not is_safe_segment(session_id):
             return None
         try:
-            matches = self._projects_root().glob(
+            for path in self._projects_root().glob(
                 f"*/{glob.escape(session_id)}.jsonl"
-            )
-            for path in matches:
-                return _TAB_COLOUR_ID.get(_tail_records(path).get("agent_colour") or "")
+            ):
+                return path
         except OSError:
             return None
         return None
@@ -1637,7 +1722,8 @@ DESCRIPTOR = ProviderDescriptor(
         # Native local commands finish the fork before its terminal opens.
         fork_strategy="server-native",
         # Claude supplies a conversation's DEFAULT colour through ``/color``;
-        # a colour the user sets on the tab overrides it and is remembered.
+        # a colour the user sets on the tab overrides it and is remembered,
+        # until a later ``/color`` takes over (``colour_choice_ms``).
         colour_source="native",
         launch_modes=(MODE_SKIP_PERMISSIONS,),
         # A name is a ``custom-title`` record appended to the transcript,

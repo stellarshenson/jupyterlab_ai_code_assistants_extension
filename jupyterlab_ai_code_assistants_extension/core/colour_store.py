@@ -3,9 +3,12 @@
 The descriptor's ``colour_source`` flag decides only the DEFAULT tint - read
 from the assistant, derived from the id, or absent. This store is what makes a
 tab colour settable at all: a tab recoloured in JupyterLab writes back here,
-and the write-back beats the default for EVERY provider - including a
-``native`` one, whose ``/color`` is the default the user deliberately diverged
-from (acc-crit "Override precedence").
+and the write-back beats the default for EVERY provider. A ``native`` one is
+the exception in time only: its assistant has a colour command of its own, so
+two channels set the colour and the NEWER one wins (docs/defects.md
+DEF-COLO-306). Every entry therefore records when it was written, and
+``judge`` sets an entry aside once the assistant reports a colour choice made
+after it.
 
 A stored colour has two possible origins, and they are recorded apart because
 only one of them is the user's to take back. A HAND-SET colour came from the
@@ -21,6 +24,8 @@ against one assistant can never surface on another's row.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from .state import state_dir
@@ -44,8 +49,9 @@ def _colours_path(provider_id: str) -> Path:
     return state_dir() / f"{provider_id}-colours.json"
 
 
-def _read(provider_id: str) -> tuple[dict[str, str], set[str]]:
-    """The file's two halves: every colour, and the hand-set ids among them.
+def _read(provider_id: str) -> tuple[dict[str, str], set[str], dict[str, int]]:
+    """The file's three parts: every colour, the hand-set ids among them, and
+    when each was written (epoch ms).
 
     A file written before origins were recorded has no ``overrides`` key, and
     NOTHING in it counts as hand-set. Both writers predate the distinction -
@@ -55,22 +61,43 @@ def _read(provider_id: str) -> tuple[dict[str, str], set[str]]:
     hand-set offers it for release and destroys a branch's colour with no undo,
     while calling a hand-set one inherited merely withholds the release until
     the user picks a colour on that tab again.
+
+    A file written before times were recorded has no ``stamps`` key, and an
+    entry with no time counts as older than any colour choice the assistant
+    reports (``judge``) - every such entry predates this field, and the
+    alternative keeps a stale pick over a ``/color`` the user ran after it.
     """
     data = load_json(_colours_path(provider_id))
     if not isinstance(data, dict):
-        return {}, set()
+        return {}, set(), {}
     raw = data.get("colours")
     if not isinstance(raw, dict):
-        return {}, set()
+        return {}, set(), {}
     colours = {
         key: value
         for key, value in raw.items()
         if isinstance(key, str) and key and is_colour(value)
     }
+    raw_stamps = data.get("stamps")
+    stamps = (
+        {
+            key: value
+            for key, value in raw_stamps.items()
+            if key in colours
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        }
+        if isinstance(raw_stamps, dict)
+        else {}
+    )
     stored = data.get("overrides")
     if not isinstance(stored, list):
-        return colours, set()
-    return colours, {sid for sid in stored if isinstance(sid, str) and sid in colours}
+        return colours, set(), stamps
+    return (
+        colours,
+        {sid for sid in stored if isinstance(sid, str) and sid in colours},
+        stamps,
+    )
 
 
 def load_store(provider_id: str) -> tuple[dict[str, str], list[str]]:
@@ -79,7 +106,7 @@ def load_store(provider_id: str) -> tuple[dict[str, str], list[str]]:
     Answered together because two reads of the same file can straddle another
     process's write and answer halves that never coexisted.
     """
-    colours, overrides = _read(provider_id)
+    colours, overrides, _stamps = _read(provider_id)
     return colours, sorted(overrides)
 
 
@@ -88,8 +115,13 @@ def load_colours(provider_id: str) -> dict[str, str]:
     return _read(provider_id)[0]
 
 
-def _save(provider_id: str, colours: dict[str, str], overrides: set[str]) -> bool:
-    """Persist both halves. Answers whether the write landed.
+def _save(
+    provider_id: str,
+    colours: dict[str, str],
+    overrides: set[str],
+    stamps: dict[str, int],
+) -> bool:
+    """Persist all three parts in one atomic write. Answers whether it landed.
 
     Callers for whom the colour IS the action report the failure; the ones for
     which it is a side effect of something larger (a fork, a removal) ignore it
@@ -98,7 +130,11 @@ def _save(provider_id: str, colours: dict[str, str], overrides: set[str]) -> boo
     try:
         write_json_atomic(
             _colours_path(provider_id),
-            {"colours": colours, "overrides": sorted(overrides)},
+            {
+                "colours": colours,
+                "overrides": sorted(overrides),
+                "stamps": {sid: stamps[sid] for sid in colours if sid in stamps},
+            },
         )
     except OSError as err:
         _log.warning(
@@ -130,35 +166,100 @@ def set_colour(
     """Record (or with ``colour`` None, drop) a conversation's colour.
 
     ``hand_set`` False marks the colour as inherited - written on the
-    conversation's behalf at fork time rather than chosen on its tab. Answers
-    whether the store now holds what was asked of it.
+    conversation's behalf at fork time rather than chosen on its tab. Both
+    record the time of the write, which is what ``judge`` holds against the
+    assistant's own colour choices. Answers whether the store now holds what
+    was asked of it.
     """
     if not session_id:
         return False
-    colours, overrides = _read(provider_id)
+    colours, overrides, stamps = _read(provider_id)
     if colour is None:
         if colours.pop(session_id, None) is None:
             return True
         overrides.discard(session_id)
+        stamps.pop(session_id, None)
     else:
         if not is_colour(colour):
             return False
         colours[session_id] = colour.strip().lower()
+        stamps[session_id] = int(time.time() * 1000)
         if hand_set:
             overrides.add(session_id)
         else:
             overrides.discard(session_id)
-    return _save(provider_id, colours, overrides)
+    return _save(provider_id, colours, overrides, stamps)
 
 
 def drop_colours(provider_id: str, session_ids: list[str]) -> bool:
     """Forget the colours of deleted conversations, leaving no orphan keys."""
-    colours, overrides = _read(provider_id)
+    colours, overrides, stamps = _read(provider_id)
     removed = [sid for sid in session_ids if colours.pop(sid, None) is not None]
     if not removed:
         return True
     overrides.difference_update(removed)
-    return _save(provider_id, colours, overrides)
+    for sid in removed:
+        stamps.pop(sid, None)
+    return _save(provider_id, colours, overrides, stamps)
+
+
+def judge(
+    provider_id: str,
+    session_ids: Iterable[str | None],
+    colour_choice_ms: Callable[[str], int | None],
+) -> tuple[dict[str, str], dict[str, int | None]]:
+    """The colours that still stand, and the entries a newer choice overtook.
+
+    Two channels set a ``native`` assistant's colour - its own colour command
+    and a pick on the tab - and the newer one wins (DEF-COLO-306).
+    ``colour_choice_ms`` is the store's ``SessionStore.colour_choice_ms``: when
+    the conversation's newest colour command ran, or None. An entry written
+    before that time, or with no time at all, is stale; one with no command
+    found stands, because a command that left the transcript's readable tail
+    is not evidence that none ran - the release is permanent, so it is never
+    made on missing evidence.
+
+    Only ``session_ids`` are judged, since each costs the store a transcript
+    read. The stale map carries the time each entry was judged with, so
+    ``release_stale`` drops only an entry that was not rewritten meanwhile. One
+    file read for both answers, so they describe the same moment.
+    """
+    colours, _overrides, stamps = _read(provider_id)
+    stale: dict[str, int | None] = {}
+    for sid in dict.fromkeys(session_ids):
+        if not sid or sid not in colours:
+            continue
+        chosen = colour_choice_ms(sid)
+        if chosen is None:
+            continue
+        stamp = stamps.get(sid)
+        if stamp is None or stamp < chosen:
+            stale[sid] = stamp
+    live = {sid: colour for sid, colour in colours.items() if sid not in stale}
+    return live, stale
+
+
+def release_stale(provider_id: str, stale: dict[str, int | None]) -> bool:
+    """Drop the entries ``judge`` found stale, unless rewritten since.
+
+    The judgement runs in the executor and this write on the IOLoop, so a pick
+    can land between the two; it carries a newer time than the one judged, and
+    dropping it would discard the newest choice. Compared entry by entry,
+    against the time recorded when it was judged.
+    """
+    colours, overrides, stamps = _read(provider_id)
+    removed = [
+        sid
+        for sid, judged in stale.items()
+        if sid in colours and stamps.get(sid) == judged
+    ]
+    if not removed:
+        return True
+    for sid in removed:
+        colours.pop(sid, None)
+        overrides.discard(sid)
+        stamps.pop(sid, None)
+    return _save(provider_id, colours, overrides, stamps)
 
 
 def inherit_colour(

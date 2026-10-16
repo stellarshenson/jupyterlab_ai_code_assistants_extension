@@ -87,7 +87,11 @@ describe('fnv1aColour', () => {
 });
 
 describe('effectiveColour', () => {
-  it('lets a user-set colour beat every default', () => {
+  it('lets a stored colour the server still holds beat every default', () => {
+    // Newest wins between `/color` and a pick on the tab (DEF-COLO-306), and
+    // the server is where that is decided: it releases a pick a later `/color`
+    // overtook, so an entry that reaches this cache is the newer channel. The
+    // release reaching the cache is asserted in tab-colour-capture.spec.ts.
     expect(effectiveColour(SESSION_A, 'native', 'sky', 'peach')).toEqual('sky');
     expect(effectiveColour(SESSION_A, 'derived', 'sky', null)).toEqual('sky');
     expect(effectiveColour(SESSION_A, 'none', 'sky', null)).toEqual('sky');

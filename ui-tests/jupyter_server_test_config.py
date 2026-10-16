@@ -255,6 +255,23 @@ for _project, _title in (("native-branch", "Native branch"), ("manual-branch", "
         )))
         os.utime(_file, (_now - 1200 + _index, _now - 1200 + _index))
 
+# A Claude project owned by `colour-newest-wins.spec.ts` alone: it stores a pick
+# against this conversation and appends a `/color` run to this transcript, then
+# puts the transcript back. Seeded with Claude's own colour already set and no
+# `/color` run in its tail, so a pick made on it stands until the spec runs
+# `/color` after it. Old mtime, for the reason the wide and rename projects have
+# them: two specs resolve their subject as "the first listed conversation".
+_newest_cwd = _root / "colour-newest"
+_newest_cwd.mkdir()
+_newest_dir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(str(_newest_cwd))
+_newest_dir.mkdir(parents=True)
+_jsonl = _newest_dir / "colour-newest-0.jsonl"
+_jsonl.write_text("".join(json.dumps(record) + "\n" for record in (
+    {"cwd": str(_newest_cwd)},
+    {"type": "agent-color", "agentColor": "orange"},
+)), encoding="utf-8")
+os.utime(_jsonl, (_now - 1800, _now - 1800))
+
 _codex_root = Path(os.environ["CODEX_HOME"])
 _codex_root.mkdir(parents=True)
 _codex_cwd = _root / "codex-branch"

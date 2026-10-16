@@ -166,3 +166,50 @@ def test_codex_new_launch_failure_never_opens_an_unidentifiable_session(monkeypa
         yield request
     monkeypatch.setattr(codex, "_app_server", server)
     assert registry.get("codex").store.launch_argv("/bin/codex", project_path="/project") == []
+
+
+def test_claude_branch_does_not_copy_a_pick_the_parents_color_overtook(
+    scratch_stores, tmp_path, monkeypatch
+):
+    """The branch is born with the colour its parent SHOWS. A pick older than
+    the parent's own ``/color`` is stale; copying it would run it as the
+    branch's ``/color`` and make it the branch's newest choice for good."""
+    store = registry.get("claude").store
+    parent = "44444444-4444-4444-8444-444444444444"
+    child = "55555555-5555-4555-8555-555555555555"
+    project = tmp_path / "project"
+    project.mkdir()
+    encoded = claude._encode_path(str(project))
+    folder = scratch_stores / "claude" / "projects" / encoded
+    folder.mkdir(parents=True)
+    # An untimed pick - written before times were recorded - and a ``/color
+    # blue`` the parent ran, which is newer than any untimed entry.
+    (scratch_stores / "state").mkdir(parents=True, exist_ok=True)
+    (scratch_stores / "state" / "claude-colours.json").write_text(
+        json.dumps({"colours": {parent: "lavender"}, "overrides": [parent]})
+    )
+    (folder / f"{parent}.jsonl").write_text(
+        json.dumps({"type": "user", "cwd": str(project)}) + "\n"
+        + json.dumps({"type": "agent-color", "agentColor": "blue"}) + "\n"
+        + json.dumps({
+            "type": "system", "subtype": "local_command", "uuid": "cmd-1",
+            "timestamp": "2026-10-01T10:00:00.000Z",
+            "content": "<command-name>/color</command-name>\n"
+                       "<command-args>blue</command-args>",
+        }) + "\n"
+        + json.dumps({
+            "type": "system", "subtype": "local_command", "parentUuid": "cmd-1",
+            "timestamp": "2026-10-01T10:00:00.000Z",
+            "content": "<local-command-stdout>Session color set to: blue"
+                       "</local-command-stdout>",
+        }) + "\n"
+    )
+    monkeypatch.setattr(claude.shutil, "which", lambda _: "/bin/claude")
+    monkeypatch.setattr(claude.uuid, "uuid4", lambda: child)
+    calls = []
+    monkeypatch.setattr(
+        claude.subprocess, "run",
+        lambda argv, **kwargs: calls.append(argv) or subprocess.CompletedProcess(argv, 0),
+    )
+    assert store.fork(encoded, parent, "analysis_1") == child
+    assert calls[-1] == ["/bin/claude", "-p", "--resume", child, "/color blue"]

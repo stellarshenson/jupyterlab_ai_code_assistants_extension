@@ -399,6 +399,53 @@ describe('a choice made while the probe cannot be read at all', () => {
   });
 });
 
+describe('a stored colour the server has released', () => {
+  // DEF-COLO-306: the server drops a pick that a later colour command of the
+  // assistant overtook, and answers the probe with the conversation's own
+  // colour. The cache still holds the pick until something reloads it, and it
+  // sits on the top rung of the ladder.
+  beforeEach(async () => {
+    server.colours[SESSION] = 'sky';
+    server.overrides = [SESSION];
+    await store.load();
+    delete server.colours[SESSION];
+    server.overrides = [];
+  });
+
+  it('is not painted again - the pass reloads and paints what the server answers', async () => {
+    server.probes['1'] = {
+      terminal_name: '1',
+      running: true,
+      session_id: SESSION,
+      colour: 'peach'
+    };
+    await manager.reconcileColours();
+
+    expect(store.get(SESSION)).toBeNull();
+    expect(paints(terminals[0]).pop()).toEqual('peach');
+  });
+
+  it('is kept while the probe agrees with it', async () => {
+    server.colours[SESSION] = 'sky';
+    server.overrides = [SESSION];
+    server.probes['1'] = {
+      terminal_name: '1',
+      running: true,
+      session_id: SESSION,
+      colour: 'sky'
+    };
+    const loads = (): number =>
+      request.mock.calls.filter(
+        call => call[1] === 'colours' && !(call[3] as RequestInit)?.method
+      ).length;
+    const before = loads();
+    await manager.reconcileColours();
+
+    expect(loads()).toEqual(before);
+    expect(paints(terminals[0]).pop()).toEqual('sky');
+  });
+});
+
 describe('a store that refuses the write', () => {
   it('paints nothing, and says the choice did not stick', async () => {
     server.refuseColours = true;

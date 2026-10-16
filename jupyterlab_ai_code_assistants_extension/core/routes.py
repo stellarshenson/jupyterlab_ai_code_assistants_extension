@@ -263,17 +263,50 @@ def _effective_colour(
     ``default`` is the conversation's own colour as its source produced it -
     the value the store already read while building the row, so a listing never
     re-derives it once per row. The extension's own store overrides it for
-    EVERY provider, ``native`` included: a colour the user set by hand on the
-    tab is a later expression of intent than the one the assistant's own
-    ``/color`` produced, so it wins and is remembered.
+    EVERY provider, ``native`` included - but only an entry that still stands.
+    Two channels set a ``native`` conversation's colour, the assistant's own
+    colour command and a pick on the tab, and the newer one wins
+    (docs/defects.md DEF-COLO-306): a pick made after ``/color`` stands, and a
+    ``/color`` run after a pick - the same colour again, or a reset - takes
+    over. ``_live_colours`` is what sets the overtaken entries aside.
 
-    ``stored`` is the override map, passed in rather than read here: a listing
+    ``stored`` is that judged map, passed in rather than read here: a listing
     resolves every row from one file read, and a required parameter means one
     lookup path rather than two for the same question.
     """
     if not session_id:
         return None
     return stored.get(session_id) or default
+
+
+def _live_colours(
+    provider: registry.Provider, session_ids: list[str | None]
+) -> tuple[dict[str, str], dict[str, int | None]]:
+    """The stored colours that still stand for these conversations, and the
+    entries a newer assistant-side colour choice overtook.
+
+    Executor-side: the judgement asks the provider's store when each stored
+    conversation last ran its colour command, which is a transcript read. The
+    sessions listing and the terminal probe are the two reads that resolve an
+    effective colour; both judge here, and both hand the stale entries to
+    ``_release_stale`` on the IOLoop.
+    """
+    return colour_store.judge(
+        provider.id, session_ids, provider.store.colour_choice_ms
+    )
+
+
+def _release_stale(provider: registry.Provider, stale: dict[str, int | None]) -> None:
+    """Drop the overtaken entries from the store, so the conversation's own
+    colour shows from now on - including after the command's record has left
+    the part of the transcript the store reads.
+
+    ON the IOLoop: colour WRITES are loop-serialised (docs/defects.md DEF-99).
+    A failed write is ignored: the entry is judged stale again on the next
+    read, and the answer being built already leaves it out.
+    """
+    if stale:
+        colour_store.release_stale(provider.id, stale)
 
 
 class _ProviderHandler(APIHandler):
@@ -405,12 +438,21 @@ class SessionsHandler(_ProviderHandler):
         if provider is None:
             return
         root_dir = os.path.expanduser(self.settings.get("server_root_dir") or "~")
-        rows = await asyncio.get_running_loop().run_in_executor(
-            None, _list_with_git_branches, provider.store, str(root_dir)
+
+        def listing():
+            rows = _list_with_git_branches(provider.store, str(root_dir))
+            # Read once for the whole listing, not once per row, and judged
+            # beside it in the executor - see `_live_colours`.
+            stored, stale = _live_colours(
+                provider, [row.get("session_id") for row in rows]
+            )
+            return rows, stored, stale
+
+        rows, stored, stale = await asyncio.get_running_loop().run_in_executor(
+            None, listing
         )
+        _release_stale(provider, stale)
         favourites = set(state.load_favourites(provider.id))
-        # Read once for the whole listing, not once per row.
-        stored = colour_store.load_colours(provider.id)
         for row in rows:
             row["favourite"] = row.get("project_path") in favourites
             # British spelling throughout - the store emits ``colour`` and the
@@ -593,7 +635,9 @@ class ColoursHandler(_ProviderHandler):
     Every provider is writable, ``native`` ones included. An assistant that
     owns conversation colours only supplies the DEFAULT tint; a colour the user
     then sets by hand on the tab diverges from it deliberately, and that later
-    preference is what the store keeps.
+    preference is what the store keeps - until the assistant's own colour
+    command runs after it. The newer choice wins, so the read that judges the
+    entry releases it then (``_live_colours``, DEF-COLO-306).
 
     A write that cannot be persisted answers 500 rather than 200. Elsewhere a
     colour is decoration and a failed write costs only the tint, but here the
@@ -691,8 +735,10 @@ class BranchHandler(_ProviderHandler):
     overtakes it. It also inherits the parent's effective colour, written now
     rather than resolved later so it survives the parent being recoloured or
     deleted. A ``native`` provider inherits only what this extension's own
-    store holds for the parent - never the assistant's own tint, which would
-    pin the fork and shadow its own ``/color``. An inherited entry counts: a
+    store holds for the parent - never the assistant's own tint, which the
+    native fork already gives the branch. A copy would be written after the
+    fork's own colour choice, so it would stand over that choice until the
+    branch next runs its colour command. An inherited entry counts: a
     branch of a branch takes what its parent actually shows.
     """
 
@@ -752,8 +798,10 @@ class BranchHandler(_ProviderHandler):
                 return
             provider.store.release_switch(encoded_path)
             state.write_pin(provider.id, encoded_path, new_id)
-            # A native fork sets the effective colour in the assistant itself;
-            # copying it into our override store would shadow later native edits.
+            # A native fork sets the effective colour in the assistant itself,
+            # so a copy here would only record it twice. Written after the
+            # fork's own colour choice, the copy would also stand over it until
+            # the branch next runs its colour command (colour_store.judge).
             if provider.descriptor.capabilities.colour_source != "native":
                 parent_default = provider.store.default_colour(session_id)
                 colour_store.inherit_colour(provider.id, session_id, new_id, parent_default)
@@ -962,8 +1010,9 @@ class _LaunchBase(_ProviderHandler):
             # 404 above: there the panel owns the copy and would replace the
             # message with it. This is the one refusal whose body carries the
             # sentence for the user, in `message` and no `error` code; every
-            # other refusal in this file is a bare `error` code the panel
-            # replaces with its own copy. The status is 409 because the body
+            # other refusal in this file is a bare `error` code, for which the
+            # panel supplies the words - its own sentence for a code it knows,
+            # its own copy around the rest. The status is 409 because the body
             # is well-formed and the conversation is not gone - the
             # assistant's own state is what stands in the way.
             self.set_status(409)
@@ -1156,9 +1205,14 @@ class TerminalHandler(_ProviderHandler):
             return
         pid = ptyproc.pid
 
-        def probe() -> dict:
+        def probe() -> tuple[dict, dict[str, int | None]]:
             found, session_id = _tree_assistant(pid)
             running = found is not None and found.id == provider.id
+            stored, stale = (
+                _live_colours(provider, [session_id])
+                if running and session_id
+                else ({}, {})
+            )
             return {
                 "terminal_name": terminal_name,
                 "running": running,
@@ -1174,14 +1228,17 @@ class TerminalHandler(_ProviderHandler):
                         provider.store.default_colour(session_id)
                         if session_id
                         else None,
-                        colour_store.load_colours(provider.id),
+                        stored,
                     )
                     if running
                     else None
                 ),
-            }
+            }, stale
 
-        payload = await asyncio.get_running_loop().run_in_executor(None, probe)
+        payload, stale = await asyncio.get_running_loop().run_in_executor(
+            None, probe
+        )
+        _release_stale(provider, stale)
         self.finish(json.dumps(payload))
 
 

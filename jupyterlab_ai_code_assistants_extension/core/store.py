@@ -598,13 +598,28 @@ class SessionStore(ABC):
         Read from the assistant for a ``native`` colour source, derived from
         the id for a ``derived`` one, None for ``none``.
 
-        Precedence is NOT off the ``colour_source`` flag: the extension's own
+        Precedence is NOT off the ``colour_source`` flag. The extension's own
         colour store beats this value for every provider alike
-        (``routes._effective_colour``), because a colour set by hand on the tab
-        is a later expression of intent than whatever produced the default. The
-        flag decides only what a FORK inherits - a ``native`` parent's own tint
-        is left behind so the branch's own ``/color`` is not shadowed
-        (``routes.BranchHandler``).
+        (``routes._effective_colour``) - unless the assistant made a colour
+        choice AFTER the stored entry was written: two channels set the
+        colour, the assistant's own command and a pick on the tab, and the
+        newer one wins (``colour_choice_ms``, ``colour_store.judge``,
+        docs/defects.md DEF-COLO-306). The flag decides only what a FORK
+        inherits - a ``native`` parent's own tint is left behind so the
+        branch's own ``/color`` is not shadowed (``routes.BranchHandler``).
+        """
+        return None
+
+    def colour_choice_ms(self, session_id: str) -> int | None:
+        """When the conversation's newest assistant-side colour choice was
+        made, in epoch ms, or None.
+
+        The other channel of the newest-wins rule ``default_colour`` states: a
+        stored entry written before this time is released by the core. None -
+        the default, and the answer for an assistant with no colour command -
+        means no evidence, and an entry is never released on none. A store
+        reports only an explicit command the user ran, never a record the
+        assistant re-stamps on its own, or a resume would release every pick.
         """
         return None
 

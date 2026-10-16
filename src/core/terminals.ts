@@ -546,6 +546,32 @@ export class TerminalManager {
             sessionForCwds(info.cwds ?? [], this._sessions)?.session_id ??
             null;
 
+          // The server releases a stored colour that a later colour command of
+          // the assistant overtook (DEF-COLO-306), and the cache would go on
+          // painting it from the top of the ladder: only the panel's poll
+          // reloads it, and that poll stops while the panel is hidden. A probe
+          // naming this conversation answers its effective colour with every
+          // entry the server still holds on top, so a cached entry the probe
+          // disagrees with is no longer the server's - reload before painting.
+          // The reload queues behind every write of the store (DEF-30), so a
+          // pick confirmed after the probe answered survives it.
+          const cached = this._colours.get(sessionId);
+          if (
+            cached !== null &&
+            info.session_id === sessionId &&
+            info.colour !== undefined &&
+            info.colour !== cached
+          ) {
+            await this._colours.load();
+            if (
+              !this._colouredTabs ||
+              this._disposed ||
+              this._pass !== generation
+            ) {
+              return;
+            }
+          }
+
           const native =
             info.colour ??
             (sessionId

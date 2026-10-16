@@ -340,6 +340,19 @@ class SessionNotFound(Exception):
     """
 
 
+class LaunchRefused(Exception):
+    """A launch the store refuses in words meant for the user.
+
+    Raised out of ``launch_argv`` when the assistant's installation cannot
+    serve a launch at all - the DeepSeek harness with no ``tui`` profile, for
+    instance. Unlike :class:`SessionNotFound`, whose answer is a fixed code
+    the panel already narrates, this refusal exists to carry text: the route
+    answers it with the message itself (a non-404 body's ``message``, which
+    the panel prints verbatim), so the missing piece and the command that
+    installs it reach the user instead of their having to reverse a code.
+    """
+
+
 class SessionStore(ABC):
     """Per-provider access to one assistant's conversation history."""
 
@@ -523,8 +536,8 @@ class SessionStore(ABC):
         Exactly one of the four ids applies: ``session_id`` opens an existing
         conversation, ``new_session_id`` starts a fresh one under an id the
         caller chose (so the terminal is identifiable from its argv),
-        ``fork_session_id`` branches the resumed one under an id the store
-        minted, and ``fork_from`` names the conversation a
+        ``fork_session_id`` branches the resumed one under a frontend-minted
+        id, and ``fork_from`` names the conversation a
         ``fork_strategy: native-command`` CLI is to branch into an id it mints
         itself inside the terminal. ``mode`` is a launch mode
         from the descriptor's ``launch_modes`` - the core has already rejected

@@ -12,9 +12,9 @@
 // * `colourSource: 'none'` - no colour command, and nothing in the log records
 //   one, so a tab tint only ever comes from the extension's own write-back
 //   store
-// * `promptsForBranchName: true` - the branch flow asks for a name, which the
-//   server writes into the copied log's title event, the field the harness
-//   itself displays a conversation under
+// * `promptsForBranchName: false` - no name dialog is raised: the server names
+//   the branch `<parent>_<n>` and writes that into the copied log's title
+//   event, the field the harness itself displays a conversation under
 // * `mintsNewSessionId: false` - a bare `dsh tui` starts a conversation whose
 //   id the TUI mints itself; nothing on the command line takes one
 // * `terminalScope: 'conversation'` - a terminal runs the conversation its
@@ -44,7 +44,7 @@ export const descriptor: IProviderDescriptor = {
   forkStrategy: 'server-copy',
   colourSource: 'none',
   terminalScope: 'conversation',
-  promptsForBranchName: true,
+  promptsForBranchName: false,
   // The name is the newest `session/title` event of the log.
   canRename: true,
   mintsNewSessionId: false,

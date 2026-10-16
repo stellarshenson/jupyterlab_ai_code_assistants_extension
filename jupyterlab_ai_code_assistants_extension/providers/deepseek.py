@@ -2,7 +2,8 @@
 
 New provider: no standalone extension preceded it, so the store below is
 written against the harness's own on-disk format, verified in the installed
-bundle of ``@deepseek-ai/dsh`` 0.1.5 (``dsh-session-persistence-jsonl``).
+bundle of ``@deepseek-ai/dsh`` 0.1.5 and against 0.2.0-rc.2
+(``dsh-session-persistence-jsonl``).
 
 The store reads ``$DSH_HOME/sessions`` (``~/.dsh/sessions`` by default): one
 directory per project named ``--<key>--``, the key being the project path
@@ -48,6 +49,7 @@ from ..core.registry import Capabilities, ProviderDescriptor
 from ..core.store import (
     NODE_COMMS,
     FileMemo,
+    LaunchRefused,
     SessionNotFound,
     SessionStore,
     cmdline_args,
@@ -66,6 +68,16 @@ _log = logging.getLogger(__name__)
 DSH_HOME_ENV = "DSH_HOME"
 DSH_DIRNAME = ".dsh"
 SESSIONS_DIRNAME = "sessions"
+# The directory the harness keeps a mounted profile in, and the profile the
+# community TUI bundle is mounted under - ``dsh tui`` boots that bundle and
+# dies inside its own boot code without it.
+PROFILES_DIRNAME = "profiles"
+TUI_PROFILE = "tui"
+#: The bundle's real name, which the harness's own failure never says: its
+#: message names only the literal placeholder ``<package>``. The preflight in
+#: ``launch_argv`` is what puts this name, and the exact mount command, in
+#: front of the user.
+TUI_BUNDLE = "@deepseek-harness-tui/dsh-tui"
 
 # The harness mints ``session-<uuid4>`` and names the conversation's directory
 # after it, so the charset is what keeps a tampered id off a path join.
@@ -626,10 +638,31 @@ class DeepSeekStore(SessionStore):
         serving a browser UI for the whole project. A fork is on disk under
         its own id before this runs, so it resumes like any other row; a
         launch with no id is a new conversation, whose id the TUI mints
-        itself. A resume whose conversation is gone REFUSES the launch, so the
-        row's Open never opens a TUI on a conversation the harness no longer
-        holds.
+        itself. Two preconditions REFUSE the launch rather than let it die in
+        the terminal: a missing ``tui`` profile (``dsh tui`` cannot boot the
+        community bundle without it, and dsh's own failure names the bundle
+        nowhere), and a resume whose conversation is gone (the row's Open must
+        never open a TUI on a conversation the harness no longer holds).
         """
+        # A filesystem check, not a spawn: the harness stores a mounted
+        # profile as a directory under its home, so the precondition costs
+        # one stat per launch rather than a ``dsh plugin`` subprocess. Ahead
+        # of the conversation lookup because the profile is what every launch
+        # needs - even a valid resume dies without it.
+        if not (dsh_home() / PROFILES_DIRNAME / TUI_PROFILE).is_dir():
+            # Kept within 97 characters for the TOAST, not for the terminal:
+            # JupyterLab clips a toast to its first 140 characters followed by
+            # an ellipsis (``jp-toast-message``), and the panel prepends one
+            # of its own copies plus ``": "`` to this sentence - 43 characters
+            # at most - so the sentence is bounded at 140 - 43 = 97 and the
+            # longest copy the panel can prepend still leaves it whole. A
+            # longer sentence cut the bundle's name off the very message that
+            # exists to carry it, seen in the browser; the bundle's name is
+            # the command's own argument, so nothing is dropped to fit.
+            raise LaunchRefused(
+                f"the TUI bundle is not mounted: `dsh plugin --profile "
+                f"{TUI_PROFILE} add {TUI_BUNDLE}`"
+            )
         argv = [cli_path, "tui"]
         if session_id:
             if self._find_log(session_id) is None:

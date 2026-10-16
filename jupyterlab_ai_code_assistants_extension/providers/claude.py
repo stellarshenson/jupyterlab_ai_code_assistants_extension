@@ -1475,9 +1475,11 @@ class ClaudeStore(SessionStore):
     ) -> list[str]:
         """The argv that opens a conversation.
 
-        ``fork_from`` is never consumed: Claude forks from a flag pair under an
-        id the store minted (``fork_strategy: native-flag``), so a branch
-        arrives as ``fork_session_id``.
+        ``fork_from`` is never consumed: the store forks through Claude's own
+        non-interactive commands and mints the child id itself
+        (``fork_strategy: server-native``), so a branch arrives as
+        ``session_id``. The ``--fork-session`` pair serves a frontend-minted
+        ``fork_session_id``, the ``native-flag`` shape.
 
         Whether a live background agent holds the conversation is decided
         HERE rather than by the caller: an agent can start or finish inside the

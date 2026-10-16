@@ -9,9 +9,10 @@
 // * `colourSource: 'none'` - no colour command, and nothing in the chat store
 //   records one, so a tab tint only ever comes from the extension's own
 //   write-back store
-// * `promptsForBranchName: true` - the branch flow asks for a name, which the
-//   server stamps into the copied chat file's `summary`, the field the CLI
-//   itself displays a conversation under; there is no naming flag to pass it to
+// * `promptsForBranchName: false` - no name dialog is raised: the server names
+//   the branch `<parent>_<n>` and stamps that into the copied chat file's
+//   `summary`, the field the CLI itself displays a conversation under; there
+//   is no naming flag to pass it to
 // * `mintsNewSessionId: true` - `--session-id <uuid>` starts a fresh
 //   conversation under an id we chose, so a new session is identifiable from
 //   its argv on the first poll instead of being an unknown terminal
@@ -51,7 +52,7 @@ export const descriptor: IProviderDescriptor = {
   terminalScope: 'conversation',
   // The fork's name is written into the copy by the server; the CLI has no
   // naming flag to take it.
-  promptsForBranchName: true,
+  promptsForBranchName: false,
   // The name is `summary` in the chat file, which is what the CLI shows.
   canRename: true,
   // `--session-id <uuid>` starts a conversation under an id we mint.

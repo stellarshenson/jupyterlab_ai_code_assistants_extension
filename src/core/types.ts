@@ -13,6 +13,9 @@
  *   the id has to be discovered by diffing the branch list after launch
  * - `server-copy` - the CLI has no fork at all; the server copies the store
  *   entry, answers with the new id, and the launch resumes that id
+ * - `server-native` - the store drives the CLI's own non-interactive fork
+ *   path, so the fork exists with its id before any terminal opens and the
+ *   launch resumes that id
  *
  * No `none` member. Python's `Capabilities` defaults `fork_strategy` to
  * `"none"` and answers a fork against it with 400 `fork_unsupported`, but

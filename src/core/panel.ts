@@ -1163,7 +1163,7 @@ export class AssistantSessionsPanel extends Widget {
    * Branch the active row's current conversation, by the descriptor's
    * `forkStrategy`.
    *
-   * The three strategies differ only in who mints the new id and when it
+   * The strategies differ only in who mints the new id and when it
    * becomes knowable - so the shared part (ask for a name, launch a terminal
    * on the fork, inherit the parent's tint, surface the branch) lives here
    * once, and the strategy decides the payload and the discovery.
@@ -1274,9 +1274,10 @@ export class AssistantSessionsPanel extends Widget {
     void this._fetch().catch(() => undefined);
   }
 
-  /** The assistant has no fork at all: the server copies the store entry and
-   * answers with the new id, so the branch exists before the terminal opens
-   * and one refresh surfaces it - no watcher needed. */
+  /** The server mints the new id and answers with it before the terminal
+   * opens - `server-copy` copies the store entry, `server-native` drives the
+   * assistant's own non-interactive fork path - so one refresh surfaces the
+   * branch and no discovery watcher is needed. */
   private async _branchByServerCopy(
     session: ISession,
     name: string | undefined,
@@ -1294,6 +1295,10 @@ export class AssistantSessionsPanel extends Widget {
     if (this._colours.isPending(session.session_id)) {
       await this._colours.load();
     }
+    // Whether the POST below returned the minted fork. Past that point the
+    // branch exists server-side - row, pin and colour - and only the launch
+    // of its terminal can still fail, which is a different thing to report.
+    let minted = false;
     try {
       const fork = await requestProvider<IForkResponse>(
         this._descriptor.id,
@@ -1309,6 +1314,7 @@ export class AssistantSessionsPanel extends Widget {
           })
         }
       );
+      minted = true;
       // No colour write here. `BranchHandler` already inherited it while
       // minting this fork, from a read taken server-side at request time -
       // strictly fresher than the click-time read this would repeat, and the
@@ -1328,6 +1334,21 @@ export class AssistantSessionsPanel extends Widget {
           `${this._descriptor.label} cannot branch this conversation.`,
           { autoClose: 4000 }
         );
+      } else if (minted) {
+        // The branch was created and only its terminal was refused - the
+        // launch preflight's 409 carries words for the user. "Could not
+        // branch this session" would be false, and the early return would
+        // skip the refresh that surfaces the new row, so the refusal keeps
+        // its own message and the list is re-read all the same.
+        // Kept to 41 characters for the TOAST, not for taste: ": " plus the
+        // longest message a store may raise (97, the DeepSeek refusal's
+        // bound in tests/test_provider_stores.py) is 41 + 2 + 97 = 140 -
+        // exactly the window before JupyterLab clips the rest.
+        this._notifyLaunchError(
+          'Branch created; its terminal did not open',
+          err
+        );
+        await this._fetch().catch(() => undefined);
       } else {
         this._showActionError(
           'Could not branch this session - try again.',

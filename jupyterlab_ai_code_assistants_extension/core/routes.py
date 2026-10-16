@@ -24,7 +24,7 @@ from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 
 from . import colour_store, migrate, registry, state
-from .store import SessionNotFound, git_branch, load_jsonc
+from .store import LaunchRefused, SessionNotFound, git_branch, load_jsonc
 
 
 URL_PREFIX = "jupyterlab-ai-code-assistants-extension"
@@ -955,6 +955,19 @@ class _LaunchBase(_ProviderHandler):
             # removed enumerates as nothing rather than as a miss).
             self.set_status(404)
             self.finish(json.dumps({"error": "session_not_found"}))
+            return None
+        except LaunchRefused as err:
+            # The store refused the launch in words meant for the user (the
+            # harness's `tui` profile not mounted, say). This cannot ride the
+            # 404 above: there the panel owns the copy and would replace the
+            # message with it. This is the one refusal whose body carries the
+            # sentence for the user, in `message` and no `error` code; every
+            # other refusal in this file is a bare `error` code the panel
+            # replaces with its own copy. The status is 409 because the body
+            # is well-formed and the conversation is not gone - the
+            # assistant's own state is what stands in the way.
+            self.set_status(409)
+            self.finish(json.dumps({"message": str(err)}))
             return None
         if not argv:
             self.bad_request("launch_unsupported")

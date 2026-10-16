@@ -833,9 +833,9 @@ DESCRIPTOR = ProviderDescriptor(
     label="Codex",
     cli_binary=CLI_BINARY,
     capabilities=Capabilities(
-        # The CLI owns the fork verb AND mints the fork's id itself, so a
-        # branch is a ``fork_from`` launch and the id is discovered afterwards -
-        # there is no server-side fork for the branch route to serve.
+        # The store forks through the app-server (``thread/fork`` plus
+        # ``thread/name/set``) and answers with the child id, so the branch
+        # exists before any terminal opens.
         fork_strategy="server-native",
         # No colour concept anywhere in Codex - the extension's write-back store
         # is the only source of a tint.

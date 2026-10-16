@@ -53,6 +53,10 @@ def scratch_stores(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(scratch / "codex"))
     monkeypatch.setenv("KIMI_CODE_HOME", str(scratch / "kimi"))
     monkeypatch.setenv("DSH_HOME", str(scratch / "dsh"))
+    # The DeepSeek launch preflights `$DSH_HOME/profiles/tui` and refuses
+    # without it, so the scratch harness stands provisioned the way the UI
+    # suite's does; the refusal test unmounts it itself.
+    (scratch / "dsh" / "profiles" / "tui").mkdir(parents=True, exist_ok=True)
     # The background-agent roster is the only listing path that shells out.
     monkeypatch.setattr(claude_provider, "bg_agents", lambda binary=None: {})
     monkeypatch.setattr(claude_provider, "_bg_agents_refresh", lambda binary=None: {})

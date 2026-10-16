@@ -20,7 +20,10 @@ import zstandard
 
 from jupyterlab_ai_code_assistants_extension.core import state
 from jupyterlab_ai_code_assistants_extension.core import store as store_module
-from jupyterlab_ai_code_assistants_extension.core.store import SessionNotFound
+from jupyterlab_ai_code_assistants_extension.core.store import (
+    LaunchRefused,
+    SessionNotFound,
+)
 from jupyterlab_ai_code_assistants_extension.providers import codex as codex_provider
 from jupyterlab_ai_code_assistants_extension.providers import deepseek as deepseek_provider
 from jupyterlab_ai_code_assistants_extension.providers import gemini as gemini_provider
@@ -1935,6 +1938,11 @@ def deepseek(scratch_stores):
     # What the registry binds at discovery.
     store.provider_id = "deepseek"
     store.session_id_prefix = deepseek_provider.DESCRIPTOR.session_id_prefix
+    # The TUI bundle mounted, as a machine with it has things: launch_argv
+    # preflights the `tui` profile and refuses without it, so every launching
+    # test runs against the mounted shape, and the refusal test unmounts it
+    # itself.
+    (scratch_stores / "dsh" / "profiles" / "tui").mkdir(parents=True, exist_ok=True)
     return store, scratch_stores / "dsh"
 
 
@@ -2126,6 +2134,47 @@ def test_deepseek_launch_argv_runs_the_tui(deepseek):
     assert store.parse_session_id(cmdline("dsh", "tui")) is None
     # A flag with its value missing must not swallow the next flag as an id.
     assert store.parse_session_id(cmdline("dsh", "tui", "--resume", "--verbose")) is None
+
+
+def test_deepseek_launch_refuses_without_the_tui_profile(deepseek):
+    """A harness with no `tui` profile refuses the launch in words the user
+    can act on: the community bundle's real name and the exact mount command,
+    where dsh's own failure names only its literal `<package>` placeholder
+    under a stack trace. The preflight is a directory check, so a file
+    squatting on the profile's name mounts nothing either."""
+    store, root = deepseek
+    session = _dsh_id()
+    write_deepseek_tree(root, [{"id": session}])
+    profile = root / "profiles" / "tui"
+    shutil.rmtree(profile)
+
+    with pytest.raises(LaunchRefused) as refusal:
+        store.launch_argv("/bin/dsh")
+    assert "@deepseek-harness-tui/dsh-tui" in str(refusal.value)
+    assert (
+        "dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui"
+        in str(refusal.value)
+    )
+    # Short enough that the panel's copy plus this text fits a JupyterLab
+    # toast: it clips at its first 140 characters with an ellipsis
+    # (``jp-toast-message``); the longest copy the panel can prepend, with
+    # its ``": "`` separator, takes 43 of those, and the panel side pins
+    # that budget in src/__tests__/panel.spec.ts. A message over 97
+    # characters showed the row-click toast cut off mid-bundle-name in a
+    # browser, the name gone from the message that exists to carry it.
+    assert len(str(refusal.value)) <= 97
+    # The refusal is about the harness, not the verb: a resume meets it too.
+    with pytest.raises(LaunchRefused):
+        store.launch_argv("/bin/dsh", session_id=session)
+
+    profile.write_text("")
+    with pytest.raises(LaunchRefused):
+        store.launch_argv("/bin/dsh")
+
+    # Mounted as a directory, the same launches run.
+    profile.unlink()
+    profile.mkdir()
+    assert store.launch_argv("/bin/dsh") == ["/bin/dsh", "tui"]
 
 
 def test_deepseek_owns_pid_needs_the_harness_in_the_argv(deepseek, monkeypatch):

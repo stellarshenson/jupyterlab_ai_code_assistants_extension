@@ -154,12 +154,19 @@ export async function requestAPI<T>(
   }
 
   if (!response.ok) {
-    // `data.error` before `data`: every refusal this extension authors is
-    // `{"error": "<code>"}` (14 sites in `core/routes.py`, none of which
-    // writes `message`), so falling through to the object itself stringified
-    // it and the user read the literal `[object Object]`. Tornado's own 500s
-    // carry `message` and were never affected, which is why it survived - the
-    // messages that broke were exactly the ones this server chose to send.
+    // `message`, then `error`, then `data`, because the server authors two
+    // refusal shapes. Every refusal in `core/routes.py` but one is
+    // `{"error": "<code>"}` - the `bad_request` helper plus its inline writes
+    // - and a code is a handle, not copy: the panel holds the words for the
+    // codes it knows (`cli_not_found`, `rename_failed`) and its own copy
+    // around the rest, so the chain's job there is only to keep `data` itself
+    // from being picked - falling to it stringified the object into the
+    // literal `[object Object]`. The holdout carries words: the launch
+    // preflight's 409 (`LaunchRefused`, the DeepSeek harness with no `tui`
+    // profile) answers `{"message": <the refusal in words for the user>}`
+    // with no code, and the panel prints it verbatim because it is already
+    // the sentence. Hence `message` outranks `error`; jupyter_server's own
+    // error bodies carry `message` too and need the same read.
     throw new ServerConnection.ResponseError(
       response,
       data?.message ?? data?.error ?? data

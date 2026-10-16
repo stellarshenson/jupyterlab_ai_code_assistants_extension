@@ -1,8 +1,13 @@
+import * as path from 'path';
+
 import { expect, test } from '@jupyterlab/galata';
 
 import { openPanelTab, panelId, waitForApplication } from './shared';
 
 test.use({ autoGoto: false, waitForApplication });
+
+const shotPath = (name: string): string =>
+  path.join(test.info().project.outputDir, 'screenshots', `${name}.png`);
 
 const PANEL = `#${panelId('claude')}`;
 const MENU = '.lm-Menu.jp-AiAssistantsContextMenu';
@@ -57,6 +62,11 @@ test('a branch takes the parent name with the next free suffix, and twice gives 
     .poll(() => sessionRow(page, '/native-branch').then(row => row?.name))
     .toBe('Native branch_2');
 
+  // The row wearing the server-minted name. One row per project, so the
+  // parent is not a second row beside it; the switch submenu (shot from
+  // `switchTo` below) is where both names are on screen at once.
+  await page.screenshot({ path: shotPath('panel-row-native-branch_2') });
+
   // The branch pins the child as the project's current conversation, so the
   // parent is reached through the switch submenu, which lists branches - and
   // the parent IS one now that the child is current.
@@ -102,6 +112,19 @@ test('the branch opens a terminal on the returned child, carrying the parent col
     .not.toBeNull();
   const probe = await probeChild(page, child?.session_id);
   expect(probe.colour).toBe('sky');
+
+  // The inherited tint on the terminal's own tab, as the colourful-tab
+  // extension paints it. Opening the row's menu runs the panel's colour pass
+  // (the menu build reconciles), which paints the tint now rather than at the
+  // loop's next 30 s tick; the class is waited for, not assumed from the
+  // probe above - the probe speaks for the server's record, not the tab.
+  await row(page, 'Manual branch_2').click({ button: 'right' });
+  await expect(page.locator(MENU).first()).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(
+    page.locator('.lm-TabBar-tab.jp-colourful-tab-sky').first()
+  ).toBeVisible({ timeout: 45000 });
+  await page.screenshot({ path: shotPath('branch-terminal-tab-sky') });
 });
 
 /** The row whose name LINE reads exactly `name`. The name node carries the
@@ -189,6 +212,9 @@ async function switchTo(page: any, name: string, label: RegExp) {
     .last()
     .locator('.lm-Menu-item[data-type="command"]', { hasText: label });
   await expect(item.first()).toBeVisible({ timeout: 10000 });
+  // Both names at once: the child is the row the menu was opened on, the
+  // parent is this entry.
+  await page.screenshot({ path: shotPath('switch-menu-parent-entry') });
   await item.first().click();
 }
 

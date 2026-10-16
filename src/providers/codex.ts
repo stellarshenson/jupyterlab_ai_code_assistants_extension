@@ -6,9 +6,9 @@
 //
 // The three divergences that matter are capability flags, not code:
 //
-// * `forkStrategy: 'native-command'` - `codex fork <parent>` mints the fork's
-//   id itself, so the panel snapshots the branch list, launches, and diffs to
-//   discover the id (the shared 2s x 90 discovery watcher)
+// * `forkStrategy: 'server-native'` - the store forks through Codex's own
+//   app-server (`thread/fork` plus `thread/name/set`) before its terminal
+//   opens, so the panel resumes the id the server answered with
 // * `colourSource: 'none'` - Codex has no colour concept at all, so a tab tint
 //   only ever comes from the extension's own write-back store
 // * `hasLiveProcess: true` - a project row shows a dot when a `codex` process
@@ -44,8 +44,8 @@ export const descriptor: IProviderDescriptor = {
   // No `/color` equivalent, and nothing in the thread store records one.
   colourSource: 'none',
   terminalScope: 'conversation',
-  // Forks are unnamed - Codex has no naming flag and no writable title field,
-  // so the panel never asks for a name it could not stamp anywhere.
+  // The branch is named server-side - numbered `<parent>_n` and stamped
+  // through `thread/name/set` - so no name dialog is raised here.
   promptsForBranchName: false,
   // The server writes the name through the app-server method `thread/name/set`
   // - the same experimental stdio channel its fork already speaks - and the

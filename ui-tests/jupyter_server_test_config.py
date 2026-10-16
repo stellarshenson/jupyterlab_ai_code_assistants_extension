@@ -259,10 +259,24 @@ _codex_root = Path(os.environ["CODEX_HOME"])
 _codex_root.mkdir(parents=True)
 _codex_cwd = _root / "codex-branch"
 _codex_cwd.mkdir()
+# A second Codex project, owned by `codex-rename.spec.ts` alone: a rename
+# mutates the store for the rest of the run - the suite runs one worker against
+# one server - so the spec that does it gets a thread no other spec looks at,
+# rather than leaving `codex-branch` under a name `codex-reuse.spec.ts` no
+# longer matches (the same shape as the Claude side's `renamable` above). Older
+# `updated_at_ms` than the reuse thread, for the reason the wide and rename
+# Claude projects have old mtimes: newest-first row order is not part of any
+# Codex locator today, and keeping this one older leaves `Codex branch` the
+# newest Codex row.
+_codex_rename_cwd = _root / "codex-renamable"
+_codex_rename_cwd.mkdir()
 with sqlite3.connect(_codex_root / "state_5.sqlite") as _connection:
     _connection.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT, name TEXT, updated_at_ms INTEGER, has_user_event INTEGER)")
     _connection.execute("INSERT INTO threads VALUES (?, ?, ?, ?, 1)", (
         "11111111-1111-4111-8111-111111111111", str(_codex_cwd), "Codex branch", int((_now - 1200) * 1000),
+    ))
+    _connection.execute("INSERT INTO threads VALUES (?, ?, ?, ?, 1)", (
+        "22222222-2222-4222-8222-222222222222", str(_codex_rename_cwd), "Codex renamable", int((_now - 1500) * 1000),
     ))
 
 # One DeepSeek project with a titled conversation, so its panel has a row to
@@ -299,6 +313,14 @@ _dsh_session.mkdir(parents=True, exist_ok=True)
     ),
     encoding="utf-8",
 )
+# The TUI bundle, mounted as a directory, exactly as `dsh plugin --profile tui
+# add @deepseek-harness-tui/dsh-tui` leaves it: the DeepSeek launch preflights
+# ``$DSH_HOME/profiles/tui`` before a terminal opens and refuses launches
+# without it, so every DeepSeek spec that clicks a row runs against the mounted
+# shape. `deepseek.spec.ts`'s missing-profile test unmounts this directory for
+# its own run and makes it again in a `finally`, restoring the fixture for any
+# spec that runs after it.
+(Path(os.environ["DSH_HOME"]) / "profiles" / "tui").mkdir(parents=True, exist_ok=True)
 
 from jupyterlab.galata import configure_jupyter_server  # noqa: E402
 

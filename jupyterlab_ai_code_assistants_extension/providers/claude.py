@@ -1180,8 +1180,7 @@ class ClaudeStore(SessionStore):
         The label prefers the branch's own ``custom-title`` record, then the
         index summary, then the first 8 characters of its id. ``bg_id`` is
         filled only when ``include_extras`` is set, and then from the
-        poll-refreshed snapshot, so the context-menu open stays spawn-free; the
-        fork watcher polls without it and never pays for the CLI at all.
+        poll-refreshed snapshot, so the context-menu open stays spawn-free.
         """
         project_dir = self._project_dir(encoded_path)
         if project_dir is None:

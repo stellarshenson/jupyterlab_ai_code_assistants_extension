@@ -410,7 +410,8 @@ class SessionStore(ABC):
         current one excluded; each carries ``session_id``, ``file_mtime`` and
         ``label``. ``include_extras`` asks for the decorations only the
         user-facing fetches need (the base extension's background-agent
-        markers), so a 2s fork watcher never pays for them. None on an invalid
+        markers); the branch route's numbering lookup asks without them. None
+        on an invalid
         ``encoded_path`` or when no current conversation resolves.
         """
 
@@ -426,12 +427,11 @@ class SessionStore(ABC):
         conversation the panel chose. This releases the marks that OUTLIVE a
         later append; a store whose switch only touches a file to "now" needs
         nothing here, because the next append overtakes it on its own.
-        The core calls this on the two launch branches that move the pin off a
-        switched conversation - a launch that opens a new one, and a fork - and
-        a store that leaves a lasting mark releases its own previous one inside
-        ``switch``, since a second switch moves the pin without the core. The
-        server-minted fork branch does not call it, and needs not: no store
-        reaching that branch leaves a mark. Without this the mark outlives its
+        The core calls this when the pin moves off a switched conversation - a
+        launch that opens a new one (``routes.update_pin``) and a fork
+        (``BranchHandler``) - and a store that leaves a lasting mark releases
+        its own previous one inside ``switch``, since a second switch moves the
+        pin without the core. Without this the mark outlives its
         reason and the CLI keeps resuming a conversation the panel has moved
         off.
 

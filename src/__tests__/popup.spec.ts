@@ -26,19 +26,23 @@ function branch(sessionId: string, label: string): IBranch {
 }
 
 let onSwitch: jest.Mock;
+let onDelete: jest.Mock;
+// Each test opens a fresh popup in beforeEach; a describe that needs the
+// permanent mode flips this in its beforeAll, which runs ahead of it.
+let deleteToTrash = true;
 
 function open(): void {
   showManageSessionsPopup({
     branches: [branch(FIRST, 'first'), branch(SECOND, 'second')],
     current: 'session-00000000-0000-4000-8000-000000000000',
     currentName: 'proj (00000000)',
-    deleteToTrash: true,
+    deleteToTrash,
     branchName: b => b.label,
     formatTime: () => 'now',
     openTitle: () => 'Open',
     onSwitch,
     onOpen: jest.fn(),
-    onDelete: jest.fn(async () => 0),
+    onDelete,
     onRefetch: jest.fn(async () => [])
   });
 }
@@ -53,8 +57,15 @@ function checkbox(row: HTMLElement): HTMLInputElement {
   return row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 }
 
+function deleteButton(): HTMLButtonElement {
+  return document.querySelector<HTMLButtonElement>(
+    '.jp-AiAssistantsPanel-branchDelete'
+  )!;
+}
+
 beforeEach(() => {
   onSwitch = jest.fn();
+  onDelete = jest.fn(async () => 0);
   open();
 });
 
@@ -86,5 +97,70 @@ describe('Manage Sessions popup click zones', () => {
     expect(onSwitch).not.toHaveBeenCalled();
     expect(checkbox(first).checked).toBe(false);
     expect(document.querySelector('.jp-Dialog')).not.toBeNull();
+  });
+});
+
+describe('Manage Sessions popup Delete button (DEF-PANE-307)', () => {
+  it('sits in the dialog action row, after the list and before Close', () => {
+    const del = deleteButton();
+    const footer = document.querySelector('.jp-Dialog-footer')!;
+    expect(footer.contains(del)).toBe(true);
+    expect(document.querySelector('.jp-Dialog-body')!.contains(del)).toBe(
+      false
+    );
+    // Document order is tab order: the list, then Delete, then Close.
+    const list = document.querySelector('.jp-AiAssistantsPanel-branchList')!;
+    const close = footer.querySelector<HTMLButtonElement>('.jp-Dialog-button')!;
+    expect(close.textContent).toBe('Close');
+    expect(
+      list.compareDocumentPosition(del) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      del.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    // The counter sits beside the button it reports on.
+    expect(
+      footer.querySelector('.jp-AiAssistantsPanel-branchSelCount')
+    ).not.toBeNull();
+  });
+
+  it('is disabled with nothing selected and enabled once a row is', () => {
+    expect(deleteButton().disabled).toBe(true);
+    checkbox(rows()[1]).click();
+    expect(deleteButton().disabled).toBe(false);
+    expect(deleteButton().textContent).toBe('Delete (1)');
+  });
+
+  it('deletes without closing the dialog', async () => {
+    checkbox(rows()[1]).click();
+    deleteButton().click();
+    await Promise.resolve();
+    expect(onDelete).toHaveBeenCalledWith([FIRST]);
+    expect(document.querySelector('.jp-Dialog')).not.toBeNull();
+  });
+});
+
+describe('Manage Sessions popup permanent Delete', () => {
+  beforeAll(() => {
+    deleteToTrash = false;
+  });
+  afterAll(() => {
+    deleteToTrash = true;
+  });
+
+  it('arms first, and leaving the button disarms it', () => {
+    checkbox(rows()[1]).click();
+    const del = deleteButton();
+    del.focus();
+    del.click();
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(del.classList.contains('jp-mod-armed')).toBe(true);
+    expect(del.textContent).toBe('Confirm delete 1');
+
+    del.blur();
+
+    expect(del.classList.contains('jp-mod-armed')).toBe(false);
+    expect(del.textContent).toBe('Delete (1)');
+    expect(onDelete).not.toHaveBeenCalled();
   });
 });

@@ -72,6 +72,30 @@ function copyButton(
   return btn;
 }
 
+/** The default dialog renderer with one extra node leading the footer.
+ * JupyterLab builds the footer in the Dialog constructor through
+ * `renderer.createFooter`, and `IOptions.renderer` is the public hook for
+ * changing it; its only built-in extra, `checkbox`, renders a checkbox, not a
+ * button. Leading the footer puts the node before Close in tab order, so the
+ * keyboard reaches the list, then Delete, then Close - and the Dialog's own Tab
+ * wrap, keyed on its last button, still wraps from Close. */
+class FooterRenderer extends Dialog.Renderer {
+  constructor(private readonly _lead: HTMLElement) {
+    super();
+  }
+
+  createFooter(
+    buttons: ReadonlyArray<HTMLElement>,
+    checkbox: HTMLElement | null
+  ): Widget {
+    const footer = super.createFooter(buttons, checkbox);
+    // After super: its `Styling.styleNode` pass has run, so the lead keeps its
+    // own look instead of taking the `jp-mod-styled` dialog-button styling.
+    footer.node.prepend(this._lead);
+    return footer;
+  }
+}
+
 export function showManageSessionsPopup(
   options: ManageSessionsPopup.IOptions
 ): void {
@@ -120,14 +144,12 @@ export function showManageSessionsPopup(
   list.setAttribute('aria-label', trans.__('Conversations'));
   body.appendChild(list);
 
+  // Delete and its counter live in the dialog's own action row, not the body:
+  // a secondary destructive action sits on the left edge of the row that holds
+  // Close, as JupyterLab dialogs place one (DEF-PANE-307). It stays a plain
+  // button - a Dialog button resolves, and so closes, the dialog on click.
   const footer = document.createElement('div');
   footer.className = 'jp-AiAssistantsPanel-branchFooter';
-  // Plain visual counter (selection, or the last action). The screen-reader
-  // announcement lives in its own live region so per-checkbox ticks are not
-  // announced on top of the native checkbox.
-  const selCount = document.createElement('span');
-  selCount.className = 'jp-AiAssistantsPanel-branchSelCount';
-  footer.appendChild(selCount);
   const deleteBtn = document.createElement('button');
   deleteBtn.type = 'button';
   deleteBtn.className = 'jp-AiAssistantsPanel-branchDelete';
@@ -135,7 +157,13 @@ export function showManageSessionsPopup(
     ? 'Deleted conversations move to the trash (recoverable)'
     : 'Deleted conversations are removed permanently';
   footer.appendChild(deleteBtn);
-  body.appendChild(footer);
+  // Plain visual counter (selection, or the last action), beside the button
+  // whose count and result it reports. The screen-reader announcement lives in
+  // its own live region so per-checkbox ticks are not announced on top of the
+  // native checkbox.
+  const selCount = document.createElement('span');
+  selCount.className = 'jp-AiAssistantsPanel-branchSelCount';
+  footer.appendChild(selCount);
 
   // Visually hidden polite live region, announced only on delete.
   const srLive = document.createElement('div');
@@ -151,8 +179,11 @@ export function showManageSessionsPopup(
     // `Close`, not `Cancel`: deletions here are committed as they happen, so
     // the only exit must not read as an offer to undo them. The cleanup dialog
     // in the panel already says Close for the same reason.
-    buttons: [Dialog.okButton({ label: trans.__('Close') })]
+    buttons: [Dialog.okButton({ label: trans.__('Close') })],
+    renderer: new FooterRenderer(footer)
   });
+  // Scopes the action-row layout in base.css to this one dialog.
+  dialog.addClass('jp-AiAssistantsPanel-branchDialog');
 
   // Per-row "Open" launches that conversation in its own terminal and closes
   // the popup. stopPropagation keeps the click from toggling selection or
@@ -373,7 +404,8 @@ export function showManageSessionsPopup(
   // Busy-lock the whole body during the async delete, so a slow backend cannot
   // be double-clicked into deleting the same set twice and a mid-flight
   // selection cannot be silently discarded. The Dialog's Close button sits
-  // outside the body and stays usable.
+  // outside the body and stays usable; Delete sits outside it too, and is held
+  // by its own `disabled` while `deleting` is set.
   const setDeleting = (on: boolean): void => {
     deleting = on;
     body.classList.toggle('jp-mod-busy', on);
@@ -460,6 +492,16 @@ export function showManageSessionsPopup(
           updateControls();
         }
       });
+  });
+
+  // Leaving the armed button disarms it, as the device bridge's two-step
+  // buttons do: the second click must follow the first, not come back to it
+  // after the focus has been somewhere else.
+  deleteBtn.addEventListener('blur', () => {
+    if (armed) {
+      disarm();
+      updateControls();
+    }
   });
 
   search.addEventListener('input', () => {

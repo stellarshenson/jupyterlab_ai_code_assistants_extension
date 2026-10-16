@@ -1,6 +1,13 @@
+import * as path from 'path';
+
 import { expect, test } from '@jupyterlab/galata';
 
-import { openPanelTab, panelId, waitForApplication } from './shared';
+import {
+  openPanelTab,
+  panelId,
+  STATUS_URL,
+  waitForApplication
+} from './shared';
 
 /**
  * Feature-parity evidence against the extension this one retires.
@@ -31,6 +38,9 @@ test.use({ autoGoto: false, waitForApplication });
 const PANEL = `#${panelId('claude')}`;
 const NEW_BUTTON = 'button[title="New session in current folder"]';
 const MENU = '.lm-Menu.jp-AiAssistantsContextMenu';
+
+const shotPath = (name: string): string =>
+  path.join(test.info().project.outputDir, 'screenshots', `${name}.png`);
 
 test('should emit an activation console message', async ({ page }) => {
   const logs: string[] = [];
@@ -154,9 +164,8 @@ test('Open Branched Conversation lists branches and opening one launches a termi
   await expect(page.locator('.jp-Terminal')).toBeVisible({ timeout: 30000 });
 });
 
-test('Manage Sessions popup exposes a per-row Open button', async ({
-  page
-}) => {
+/** Open the Manage Sessions popup of the seeded "branchy" project. */
+async function openManageSessions(page: any) {
   const menu = await openBranchyMenu(page);
   await menu
     .locator('.lm-Menu-itemLabel', { hasText: 'Open Branched Conversation' })
@@ -177,6 +186,13 @@ test('Manage Sessions popup exposes a per-row Open button', async ({
 
   const popup = page.locator('.jp-AiAssistantsPanel-branchPopup');
   await expect(popup).toBeVisible({ timeout: 15000 });
+  return popup;
+}
+
+test('Manage Sessions popup exposes a per-row Open button', async ({
+  page
+}) => {
+  const popup = await openManageSessions(page);
   // Every row (current + branches) carries an Open button.
   const openButtons = popup.locator('.jp-AiAssistantsPanel-branchOpen');
   await expect(openButtons.first()).toBeVisible();
@@ -186,6 +202,96 @@ test('Manage Sessions popup exposes a per-row Open button', async ({
   // Opening from the popup launches a terminal and dismisses the popup.
   await openButtons.first().click();
   await expect(page.locator('.jp-Terminal')).toBeVisible({ timeout: 30000 });
+  await expect(popup).toBeHidden();
+});
+
+test('Manage Sessions Delete sits in the action row and follows the destructive style (DEF-PANE-307)', async ({
+  page
+}) => {
+  // The server's move-to-trash preference, reported as off. A permanent
+  // delete arms on the first click and only the second one deletes, so this
+  // test reaches the armed state without ever removing a seeded conversation;
+  // a trashed delete would execute on the first click.
+  await page.route(`**${STATUS_URL}*`, async (route: any) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.delete_to_trash = false;
+    await route.fulfill({ response, json: body });
+  });
+
+  const popup = await openManageSessions(page);
+  const dialog = page.locator('.jp-Dialog');
+  const footer = dialog.locator('.jp-Dialog-footer');
+  const del = footer.locator('.jp-AiAssistantsPanel-branchDelete');
+  const close = footer.locator('.jp-Dialog-button', { hasText: 'Close' });
+
+  // In the dialog's own action row, not the body: on its left edge, on the
+  // same line as Close.
+  await expect(del).toBeVisible();
+  await expect(
+    dialog.locator('.jp-Dialog-body .jp-AiAssistantsPanel-branchDelete')
+  ).toHaveCount(0);
+  const delBox = (await del.boundingBox())!;
+  const closeBox = (await close.boundingBox())!;
+  expect(delBox.x + delBox.width).toBeLessThan(closeBox.x);
+  expect(
+    Math.abs(delBox.y + delBox.height / 2 - (closeBox.y + closeBox.height / 2))
+  ).toBeLessThan(2);
+
+  /** The computed colours of Delete, beside the theme's error colour resolved
+   * in the same place, so the comparison holds in any theme. */
+  const colours = () =>
+    del.evaluate((node: HTMLElement) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--jp-error-color1)';
+      node.parentElement!.appendChild(probe);
+      const error = getComputedStyle(probe).color;
+      probe.remove();
+      const style = getComputedStyle(node);
+      return {
+        error,
+        border: style.borderTopColor,
+        background: style.backgroundColor,
+        opacity: style.opacity,
+        cursor: style.cursor
+      };
+    });
+
+  // Nothing selected: disabled, faded by opacity as JupyterLab's own disabled
+  // buttons are.
+  await expect(del).toBeDisabled();
+  let seen = await colours();
+  expect(seen.opacity).toBe('0.5');
+  expect(seen.cursor).toBe('not-allowed');
+  await page.screenshot({ path: shotPath('manage-sessions-delete-disabled') });
+
+  // One selected: enabled, an error-colour outline on an unfilled button.
+  await popup
+    .locator(
+      '.jp-AiAssistantsPanel-branchRow:not(.jp-mod-current) input[type="checkbox"]'
+    )
+    .first()
+    .check();
+  await expect(del).toBeEnabled();
+  await expect(del).toHaveText('Delete (1)');
+  seen = await colours();
+  expect(seen.opacity).toBe('1');
+  expect(seen.border).toBe(seen.error);
+  expect(seen.background).not.toBe(seen.error);
+  await page.screenshot({ path: shotPath('manage-sessions-delete-enabled') });
+
+  // Armed by the first click: filled with the error colour, label names the
+  // confirmation. The second click is never made.
+  await del.click();
+  await expect(del).toHaveClass(/jp-mod-armed/);
+  await expect(del).toHaveText('Confirm delete 1');
+  seen = await colours();
+  expect(seen.background).toBe(seen.error);
+  await page.screenshot({ path: shotPath('manage-sessions-delete-armed') });
+
+  // The click armed, it did not close the dialog.
+  await expect(popup).toBeVisible();
+  await close.click();
   await expect(popup).toBeHidden();
 });
 

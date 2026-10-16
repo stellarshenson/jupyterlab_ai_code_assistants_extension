@@ -660,7 +660,6 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   --aica-border: var(--jp-border-color2);
   --aica-border-subtle: var(--jp-border-color3);
   --aica-text: var(--jp-ui-font-color1);
-  --aica-text-muted: var(--jp-ui-font-color2);
 
   /* font-color3 is the disabled/hint level - too dim for content in some
      themes, so readable secondary labels (times, "current", counts) stay at
@@ -670,11 +669,6 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   --aica-accent-soft: color-mix(
     in srgb,
     var(--jp-brand-color1) 14%,
-    transparent
-  );
-  --aica-danger-soft: color-mix(
-    in srgb,
-    var(--jp-error-color1) 15%,
     transparent
   );
 
@@ -915,72 +909,90 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   accent-color: var(--jp-brand-color1);
 }
 
+/* The dialog's action row. JupyterLab stacks its footer as a column (a
+   checkbox above the buttons); this one dialog lays it out as one row, Delete
+   and its counter on the left edge, Close on the right. Two classes outrank
+   the footer's own container-query column at narrow widths too. */
+.jp-AiAssistantsPanel-branchDialog .jp-Dialog-footer {
+  flex-direction: row;
+  align-items: center;
+}
+
+.jp-AiAssistantsPanel-branchDialog .jp-Dialog-footerButtons {
+  width: auto;
+  margin-left: auto;
+}
+
+/* The footer sits outside the body, so the --aica-* tokens of the popup body
+   do not reach it: its rules name the --jp-* variables directly. */
 .jp-AiAssistantsPanel-branchFooter {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  min-height: 26px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .jp-AiAssistantsPanel-branchSelCount {
-  color: var(--aica-text-subtle);
+  color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size0);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* The post-delete feedback reads at full strength - it is the cue that stands
    in for a confirmation prompt. */
 .jp-AiAssistantsPanel-branchSelCount.jp-mod-deleted {
-  color: var(--aica-text);
+  color: var(--jp-ui-font-color1);
 }
 
 /* While a delete is in flight the whole body is scrimmed so a mid-flight tick,
-   a select-all, a search or a second delete cannot race the async refetch. The
-   Dialog's Cancel button is outside the body and stays usable. */
+   a select-all or a search cannot race the async refetch. Delete and Close are
+   in the footer, outside the scrim: Delete is held by its own disabled state,
+   Close stays usable. */
 .jp-AiAssistantsPanel-branchPopup.jp-mod-busy {
   pointer-events: none;
   opacity: 0.6;
 }
 
-/* Destructive: deletes immediately (no confirmation). Always an OUTLINE, never
-   a filled primary: a dim, inactive outline while nothing is selected, a lit
-   error outline once a selection arms it, and only a soft error tint on hover. */
+/* Destructive, on the device bridge extension's design language: a normal
+   button with an error outline, so that the fill of the armed state is the
+   one signal that the next click destroys. Height and font size match the
+   Close button beside it. */
 .jp-AiAssistantsPanel-branchDelete {
-  height: 26px;
+  box-sizing: border-box;
+  height: 32px;
   padding: 0 12px;
   border: 1px solid var(--jp-error-color1);
-  border-radius: var(--aica-radius);
-  background: transparent;
-  color: var(--jp-error-color1);
-  font-size: var(--jp-ui-font-size0);
-  font-weight: 500;
+  border-radius: var(--jp-border-radius);
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  white-space: nowrap;
   cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
 }
 
-/* Disabled = inactive outline: theme border plus muted text, plainly not
-   actionable, but still legible (no wash-out). */
+.jp-AiAssistantsPanel-branchDelete:focus-visible {
+  outline: 1px solid var(--jp-brand-color1);
+  outline-offset: 1px;
+}
+
+/* Faded by opacity, as the lab's own disabled buttons are. */
 .jp-AiAssistantsPanel-branchDelete:disabled {
-  cursor: default;
-  border-color: var(--aica-border);
-  color: var(--aica-text-muted);
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-/* Hover while armed stays an outline - a soft error tint, not a solid fill. */
 .jp-AiAssistantsPanel-branchDelete:hover:not(:disabled) {
-  background: var(--aica-danger-soft);
-  color: var(--jp-error-color1);
+  background: var(--jp-layout-color2);
 }
 
-/* Armed for a permanent delete: the filled state marks the click that actually
-   destroys, so the two steps cannot read alike. */
+/* Armed for a permanent delete: filled with the error colour, so the two
+   steps cannot read alike. */
 .jp-AiAssistantsPanel-branchDelete.jp-mod-armed,
 .jp-AiAssistantsPanel-branchDelete.jp-mod-armed:hover:not(:disabled) {
   background: var(--jp-error-color1);
-  color: var(--jp-layout-color1);
+  color: var(--jp-ui-inverse-font-color1);
 }
 
 /* Last-activity time on session rows - dim, minimum-width right-aligned column so

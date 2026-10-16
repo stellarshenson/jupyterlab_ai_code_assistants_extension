@@ -34,7 +34,7 @@
 
 ### Pending work, in order
 
-1. **FIRST ACTION** - push the brace commits and watch CI (`build`, `integration-tests`, `check_links`). The `integration-tests` job runs **all 17** ui-tests specs; only the four tonight's work touches have run locally, so it may report failures the local runs never saw.
+1. **FIRST ACTION** - read the CI run triggered by the push below (`build`, `integration-tests`, `check_links`; `gh run list --limit 3`), and fix the first red job. The push is **already done**: `bd19fd8..a8ba078` on `main`, so do not push again - just watch. The `integration-tests` job runs **all 17** ui-tests specs; only the four tonight's work touches have run locally, so it may report failures the local runs never saw.
 2. File and close the two accepted MINORs from the final confirming round, through pm-tools: (a) the success toasts that echo a stored name can overrun JupyterLab's 140-character clip; (b) the minted-branch path prints a raw server code for non-409 refusals. Both are recorded in the confirming-round transcripts at `.../workflows/wf_81c0247e-692/journal.jsonl`.
 3. Re-check the two corrected sentences with the ux and architect lenses (their agents never ran in the stopped workflow).
 4. Run the full Galata suite locally (script in 2 above) if CI is not reachable.

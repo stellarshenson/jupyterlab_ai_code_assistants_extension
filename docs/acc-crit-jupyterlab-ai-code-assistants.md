@@ -1475,7 +1475,7 @@ All routes are namespaced by provider id under the extension base `jupyterlab-ai
 - `POST providers/<id>/favourite` body `{project_path, favourite}` -> `{favourites: [...]}`
 - `POST providers/<id>/launch` body `{project_path, encoded_path?, session_id?, new_session_id?, mode?}` -> `{terminal_name}`; 404 `session_not_found`, 400 `mode_unsupported`, 503 `cli_not_found`
 - `POST providers/<id>/launch-argv` - same body and validator as `launch` -> `{argv}`; 404 `session_not_found`, 400 `mode_unsupported`, 503 `cli_not_found`
-- `POST providers/<id>/branch` body `{encoded_path, session_id, name?}` -> `{session_id}`; 400 `fork_unsupported`
+- `POST providers/<id>/branch` body `{encoded_path, session_id, name?, base_name?}` -> `{session_id}`; with `base_name` the server names the branch `<base_name>_<n>`, the next unused n; 400 `invalid_name`, `fork_unsupported`, `fork_failed`
 - `DELETE providers/<id>/sessions` body `{encoded_path, session_ids?}` -> `{removed_count}`
 - `GET providers/<id>/colours` -> `{colours: {session_id: colour}, overrides: [session_id]}`; `overrides` names the hand-set colours among them
 - `POST providers/<id>/colours` body `{session_id, colour, hand_set?}` -> the whole store; `colour` null drops the entry, `hand_set` false marks a fork's inherited tint; 400 `colour_invalid`, 500 `colour_store_unwritable`

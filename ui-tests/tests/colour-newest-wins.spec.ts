@@ -141,7 +141,8 @@ test('a /color run after a tab pick takes the tab and the row back', async ({
     await row.click({ button: 'right' });
     const menu = page.locator('.lm-Menu');
     await expect(menu).toBeVisible();
-    await page.keyboard.press('Escape');
+    // On the menu itself, as in panel-regressions.spec.ts (DEF-GUARD-284).
+    await menu.press('Escape');
     await expect(menu).toBeHidden();
     await expect(page.locator(CURRENT_TAB)).toHaveClass(
       /jp-colourful-tab-sky/,

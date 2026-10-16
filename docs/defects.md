@@ -100,6 +100,7 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - log: 2026-09-17T18:46:56Z @kj added
   - log: 2026-09-17T19:13:45Z @kj closed
   - log: 2026-10-15T17:43:33Z @kj superseded for Codex: new launches and forks mint the id through its own app-server before the terminal opens (test_native_branch.py test_codex_new_launch_carries_native_id, test_codex_fork_names_the_exact_child_without_starting_a_turn); the Kimi + case stands; README's exception sentence is superseded for Codex
+  - log: 2026-10-15T21:33:24Z @kj the DeepSeek bare launch is the same id-less class (filed DEF-PROV-302); README.md:32's exception sentence now names a Kimi or DeepSeek + conversation
 - [x] `DEF-SERV-219` **comm_name doubles as the probe-candidate flag** - MINOR; MINOR; the terminal probe treats a non-empty comm_name as 'this store can own a pid', so three stores set a decoy literal to be probed at all; affects the add-a-provider path only
   - evidence: wontfix: today's five providers are unaffected, the harm is on the add-a-provider path only; adjudicator round 1
   - repro: read routes.py:166-170 and the comm_name of deepseek, gemini and kimi
@@ -114,6 +115,7 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - root-cause: 2026-09-17T18:47:19Z @kj docstrings not updated when the strategies changed; architect lens, round 1
   - log: 2026-09-17T18:47:19Z @kj added
   - log: 2026-09-17T18:47:28Z @kj closed
+  - log: 2026-10-15T21:33:42Z @kj the fold-in landed in the working tree: fork docstrings in core/registry.py and core/store.py now name the server-native strategy and the frontend-minted id
 - [x] `DEF-SERV-231` **update_pin docstring named the Launcher tile as the argv route's only client** - MINOR; core/routes.py update_pin said the argv route's only client reaches neither pin branch; since DEF-FRONT-222 TerminalManager.launch POSTs the new-conversation shape to launch-argv to reach the clear branch, so both clauses were false; round-3 architect and slop-hunter lenses
   - evidence: docstring now names both clients and the branch each reaches; test_routes.py test_the_argv_route_answers_the_store_argv_and_clears_the_pin guards the clear branch; pytest 227 green
   - repro: read core/routes.py update_pin against src/core/terminals.ts launch()
@@ -287,21 +289,43 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - evidence: Galata ui-tests/tests/codex-reuse.spec.ts passed on this tree (report ui-tests/playwright-report/8899, screenshot codex-row-reuse.png): the first click launches one terminal carrying the row's id, the second click focuses the same widget with no new launch
   - root-cause: 2026-10-15T17:43:21Z @kj a new launch carried no conversation id on its command line, so parse_session_id answered None and the running terminal could not be matched to the row; the click opened a second one
   - related: ACC-SESS-54 - an already running conversation must reuse its terminal
-  - related: DEF-SERV-210 - earlier id-less launch exception; whether this report has that cause is unverified
   - related: DEF-SERV-210 - confirmed: this report has that cause; the app-server mint now supplies the id
   - repro: Open a Codex session in a terminal, then click its row in the Codex panel; another terminal opens for that same session
   - log: 2026-10-15T12:27:30Z @kj added
   - log: 2026-10-15T12:27:30Z @kj Reported 2026-10-15 at the end of Claude conversation 0257fef0-9212-4c10-ab11-3a300a3b5938; Claude hit its weekly limit before investigating
   - log: 2026-10-15T17:43:16Z @kj edited text "Clicking a Codex panel row whose session is already open starts another terminal with the same session; cause under investigation" -> "Clicking a Codex panel row whose session is already open starts another terminal for the same session; fix: a new launch mints its thread through the app-server and resumes it, so the running terminal is identifiable; `providers/codex.py`"
   - log: 2026-10-15T17:43:21Z @kj closed: fixed: launch_argv mints the thread through the app-server; the browser run shows the click focusing the open terminal
-- [ ] `DEF-PROV-301` **Codex conversation cannot be renamed** - MAJOR; no Rename item on a Codex row where other assistants have one; the descriptor sets can_rename=False and the store has no rename, so the core hides the action and the route answers 400 rename_unsupported; fix: write the name through Codex's app-server thread/name/set; `jupyterlab_ai_code_assistants_extension/providers/codex.py`
+  - log: 2026-10-15T21:33:24Z @kj scope: the codex-reuse.spec.ts closure covers a second click on the same page only and does not exercise the server's process probe - the path a terminal opened outside the panel (Launcher, or before a reload) must take
+  - log: 2026-10-15T21:34:09Z @kj repaired by acked hand edit: dropped the earlier related: DEF-SERV-210 line that still read 'whether this report has that cause is unverified'; the confirmed causality line stands; pm-tools cannot remove a relation line
+  - log: 2026-10-15T21:37:01Z @kj second acked hand edit: the repair had left the ACC-SESS-54 and DEF-SERV-210 relation links on one physical line; split apart, one relate per line
+- [x] `DEF-PROV-301` **Codex conversation cannot be renamed** - MAJOR; no Rename item on a Codex row where other assistants have one; the descriptor sets can_rename=False and the store has no rename, so the core hides the action and the route answers 400 rename_unsupported; fix: write the name through Codex's app-server thread/name/set; `jupyterlab_ai_code_assistants_extension/providers/codex.py`
+  - evidence: Galata ui-tests/tests/codex-rename.spec.ts passed on this tree, exit 0 (1 passed): Rename Session on the Codex row, dialog accepted, POST {session_id, name, encoded_path codex-renamable}, row redrawn under the new name, sessions route reads back ['Codex renamable renamed', 'session'], stub transcript thread/name/set; two deliberate severs redden it
   - repro: right-click a Codex panel row: no Rename item appears, though every other assistant's row offers one
   - test-tags: UNIT, E2E
   - root-cause: 2026-10-15T16:46:54Z @kj the store never implemented rename because a Codex thread name lives in Codex's own database; the app-server method thread/name/set is the writable path, enabled by the same experimental initialize handshake the fork already uses
-  - lock: 2026-10-16T16:46:58Z @kj implementing rename through the app-server
   - log: 2026-10-15T16:46:54Z @kj added
   - log: 2026-10-15T17:44:09Z @kj attempted: rename writes through the Codex app-server method thread/name/set (can_rename true); pytest -k codex_rename: 3 passed locally
   - log: 2026-10-15T17:44:09Z @kj verification pending: the implement lane's end-to-end report has not arrived; left open until it does
+  - log: 2026-10-15T21:33:13Z @kj closed: fixed: rename writes the conversation name through the Codex app-server method thread/name/set; the browser proof shows the menu item, the dialog, the POST and the redraw
+  - log: 2026-10-15T21:33:13Z @kj venv premise: the first browser run served the 1.2.75 bundle (codex canRename:!1); ui-tests/.venv was synced to 1.2.76 before the passing run, so the menu item came from the rename-enabled bundle
+- [x] `DEF-PROV-302` **Bare DeepSeek launch resumes in a second terminal** - MINOR; a DeepSeek conversation started with the bare launcher (`dsh tui`) mints no id on its process command line, so a click on its row while the terminal stays open opens a second terminal; README.md:32's 'One-click resume' states the exception; `jupyterlab_ai_code_assistants_extension/providers/deepseek.py`
+  - evidence: wontfix: same class as DEF-SERV-210; README.md:32's 'One-click resume' states the exception for a Kimi or DeepSeek + conversation
+  - related: DEF-SERV-210 - the class: the id-less launch; this is the DeepSeek instance, README's exception sentence now covers it
+  - related: ACC-SESS-54 - the reuse promise this path cannot keep
+  - related: ACC-CODE-201 - the Codex instance of this class, fixed tonight
+  - repro: DeepSeek panel, +, then click that conversation's row: a second terminal opens
+  - test-tags: MANUAL
+  - root-cause: 2026-10-15T21:50:36Z @kj probe: `dsh tui --resume <unseen-id>` answers `cannot resume session ... not found; no fresh session was started instead`, so the TUI offers no way to mint an id at launch and the launch cannot carry one
+  - root-cause: 2026-10-15T21:33:42Z @kj a bare launch is ['/home/lab/.local/bin/dsh', 'tui'] and parse_session_id answers None, so the process probe cannot match the open terminal to the row; the TUI mints the id server-side
+  - log: 2026-10-15T21:33:42Z @kj added
+  - log: 2026-10-15T21:33:46Z @kj closed: wontfix: the TUI mints the id server-side and takes none at launch, so the open terminal cannot be identified from its process
+- [x] `DEF-PROV-303` **DeepSeek launch with no `tui` profile dies naming only `<package>`** - MAJOR; a DeepSeek launch with the `tui` profile not mounted dies in a dsh Node stack trace that names the bundle only as `<package>`, nowhere the user would look; fix: `launch_argv` preflights `$DSH_HOME/profiles/tui` and refuses with the bundle name and mount command; `jupyterlab_ai_code_assistants_extension/providers/deepseek.py`
+  - evidence: Galata ui-tests/tests/deepseek.spec.ts "a launch without the mounted TUI bundle is refused in named words" passed, run 8899 3/3 expected 2026-10-15T21:43:16Z: the toast carries the bundle name and `dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui`, no terminal opens; screenshot deepseek-missing-tui-refusal.png; `launch_argv` raises LaunchRefused
+  - repro: unmount $DSH_HOME/profiles/tui, click a DeepSeek row: the terminal dies in a dsh Node stack trace naming `<package>`, not the bundle
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-10-15T21:50:38Z @kj launch_argv spawned `dsh tui` with no check that `$DSH_HOME/profiles/tui` is mounted; the dsh boot failure names the bundle only as the literal `<package>`
+  - log: 2026-10-15T21:50:38Z @kj added
+  - log: 2026-10-15T21:50:48Z @kj closed: fixed: `launch_argv` preflights `$DSH_HOME/profiles/tui` and refuses in named words before any terminal opens
 
 ## Frontend / server contract `FRONT`
 

@@ -1077,6 +1077,7 @@ Ported from `jupyterlab_codex_extension` v0.6.12. Capabilities - no colour sourc
   - mechanism: 2026-09-19T20:11:58Z @kj the descriptor declares no rename, so the command hides itself and the route refuses before the store is asked
   - log: 2026-09-19T20:11:58Z @kj added
   - log: 2026-09-19T20:30:47Z @kj closed
+  - log: 2026-10-15T21:33:15Z @kj correction: evidence cites test_codex_has_no_rename_at_all, which no longer exists; the live cover is ACC-CODE-206's test_codex_rename_sends_one_set_name_request (test_provider_stores.py) and the codex-rename.spec.ts click path; can_rename is true since ACC-CODE-206
 - [x] `ACC-CODE-201` **Codex reuses an already open session terminal** - CRITICAL; Clicking a Codex panel row for a session already running in a terminal focuses that terminal instead of opening another terminal for the same session
   - evidence: Galata ui-tests/tests/codex-reuse.spec.ts passed on this tree (report ui-tests/playwright-report/8899, screenshot codex-row-reuse.png): the first click launches one terminal carrying the row's id, the second click focuses the same widget with no new launch
   - related: DEF-PROV-300, ACC-SESS-54
@@ -1085,12 +1086,14 @@ Ported from `jupyterlab_codex_extension` v0.6.12. Capabilities - no colour sourc
   - log: 2026-10-15T12:28:02Z @kj added
   - log: 2026-10-15T17:43:36Z @kj edited test "Open a Codex session, click its row again, assert the existing terminal is activated and the terminal count is unchanged" -> "Galata ui-tests/tests/codex-reuse.spec.ts: open a Codex session, click its row again, assert the existing terminal is activated and the terminal count unchanged"; test-tags "MANUAL" -> "E2E"
   - log: 2026-10-15T17:43:36Z @kj closed: closed: the browser click path focuses the open terminal; the id-carrying launch is pinned by tests/test_native_branch.py
-- [ ] `ACC-CODE-206` **Rename lands through the Codex app-server** - HIGH; Renaming a Codex row writes the thread's name through the app-server method thread/name/set on the same stdio channel fork speaks, so the CLI and the panel read back one name; an id outside the project, an empty name, or an app-server refusal answers none
+- [x] `ACC-CODE-206` **Rename lands through the Codex app-server** - HIGH; Renaming a Codex row writes the thread's name through the app-server method thread/name/set on the same stdio channel fork speaks, so the CLI and the panel read back one name; an id outside the project, an empty name, or an app-server refusal answers none
+  - evidence: Galata ui-tests/tests/codex-rename.spec.ts passed on this tree, exit 0 (1 passed): Rename Session on the Codex row, dialog, POST {session_id, name, encoded_path codex-renamable}, row redrawn, sessions route ['Codex renamable renamed', 'session'], stub transcript thread/name/set; the negative clauses answer None under pytest -k codex_rename (3 passed)
   - related: DEF-PROV-301 - the rename defect
   - overrides: ACC-CODE-178
   - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_provider_stores.py -k codex_rename
   - test-tags: UNIT
   - log: 2026-10-15T17:44:05Z @kj added
+  - log: 2026-10-15T21:33:15Z @kj closed: closed: the click path and the read-back are browser-proven; the negative clauses stay at the store tier
 
 ## Kimi Provider `KIMI`
 
@@ -1622,6 +1625,7 @@ New provider - no extension to port from. DeepSeek Harness (`@deepseek-ai/dsh` 0
   - mechanism: 2026-09-17T17:26:34Z @kj DeepSeekStore.launch_argv checks _find_log for a session_id and answers the fixed web argv; hooks.resumeLabel
   - log: 2026-09-17T17:26:34Z @kj added
   - log: 2026-09-17T17:35:16Z @kj closed
+  - log: 2026-10-15T21:33:24Z @kj correction: evidence cites test_deepseek_launch_argv_serves_the_web_ui and Galata 'a DeepSeek row opens the web UI terminal once', both retired with the TUI launch; live: test_deepseek_launch_argv_runs_the_tui (test_provider_stores.py:2100) and 'a DeepSeek row opens the TUI terminal once' (ui-tests/tests/deepseek.spec.ts:39)
 - [x] `ACC-DEEP-168` **Server-side fork in the harness layout** - HIGH; branching re-encodes the log into a sibling directory under a fresh session-<uuid>: the header carries the new id, the newest session/title event carries the given name, the first Zstandard frame holds the header line alone and a second frame the events, both checksummed; the parent is untouched
   - evidence: test_deepseek_fork_copies_the_log_in_the_harness_layout and test_deepseek_fork_of_an_untitled_conversation_writes_no_event pass; pytest 227 green, jest 205 green, Galata 44/44 at 1.2.20
   - test: pytest -k deepseek_fork

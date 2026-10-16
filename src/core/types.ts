@@ -6,11 +6,6 @@
 
 /** How a conversation is branched.
  *
- * - `native-flag` - the CLI forks in-process from a flag pair, and the new
- *   conversation id is minted by the frontend, so the launch carries it and
- *   the branch is watched for until its store entry materialises
- * - `native-command` - the CLI owns the fork verb AND mints the id itself, so
- *   the id has to be discovered by diffing the branch list after launch
  * - `server-copy` - the CLI has no fork at all; the server copies the store
  *   entry, answers with the new id, and the launch resumes that id
  * - `server-native` - the store drives the CLI's own non-interactive fork
@@ -23,11 +18,7 @@
  * about it - and the flag never crosses the wire, so no TS code could produce
  * or read that value.
  */
-export type ForkStrategy =
-  'native-flag' | 'native-command' | 'server-copy' | 'server-native';
-
-/** See `IProviderDescriptor.terminalScope`. */
-export type TerminalScope = 'conversation' | 'project';
+export type ForkStrategy = 'server-copy' | 'server-native';
 
 /** Where a conversation's DEFAULT tab tint comes from. A user-set colour in
  * the extension's own write-back store wins over `derived` and `none`. Over
@@ -74,17 +65,6 @@ export interface IProviderDescriptor {
   cliBinary: string;
   forkStrategy: ForkStrategy;
   colourSource: ColourSource;
-  /** What one terminal of this assistant holds. `conversation`: the process
-   * runs exactly one conversation, so a terminal is reused only when the
-   * server reads the wanted id off it. `project`: the process serves every
-   * conversation of the project (a web UI chosen in the browser), so the
-   * project's one running terminal is the answer to every open - a row click,
-   * `+`, a fork, a Launcher tile - and a second process on the same project
-   * is always a duplicate. */
-  terminalScope: TerminalScope;
-  /** Whether the branch flow asks the user to name the new conversation.
-   * Where that name then GOES is `forkStrategy`'s job. */
-  promptsForBranchName: boolean;
   /** The assistant keeps a conversation name this extension can write where
    * the assistant itself reads it back. False hides the rename action rather
    * than offering one that cannot land - which is the honest answer for an
@@ -238,26 +218,19 @@ export interface IRenameResponse {
 export interface ILaunchRequest {
   project_path: string;
   /** The project's store key. Carrying it arms the server's launch-time pin
-   * bookkeeping (a native-flag fork pins itself current, a new session clears
-   * a stale pin) and the session_not_found pre-flight - without it both are
-   * silently skipped. Send it whenever the session row is in hand. */
+   * bookkeeping (a new session clears a stale pin) and the session_not_found
+   * pre-flight - without it both are silently skipped. Send it whenever the
+   * session row is in hand. */
   encoded_path?: string;
   /** Conversation to open. Omit to start a brand-new one. */
   session_id?: string;
   /** Frontend-minted id for a brand-new conversation, when the CLI accepts
    * one, so the terminal is identifiable from its argv on the first poll. */
   new_session_id?: string;
-  /** Frontend-minted id for the fork (`forkStrategy: 'native-flag'`). */
-  fork_session_id?: string;
-  /** Parent conversation to fork from (`forkStrategy: 'native-command'`). */
-  fork_from?: string;
-  /** Name to stamp on the new conversation (`promptsForBranchName: true`). */
-  name?: string;
   /** The launch mode this action runs under, as one token in the assistant's
-   * own terminology: a boolean mode is its bare `ILaunchMode.id`, an enum mode
-   * is `<id>=<value>`. One token, not a set - the server maps a single mode to
-   * a single flag, and refuses any token the descriptor does not declare with
-   * 400 `mode_unsupported`. */
+   * own terminology: the bare `ILaunchMode.id`. One token, not a set - the
+   * server maps a single mode to a single flag, and refuses any token the
+   * descriptor does not declare with 400 `mode_unsupported`. */
   mode?: string;
 }
 

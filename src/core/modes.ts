@@ -25,7 +25,7 @@ export interface IResolvedLaunchMode {
  */
 export function resolveLaunchMode(
   launchModes: ILaunchMode[],
-  values: Record<string, boolean | string>,
+  values: Record<string, boolean>,
   force?: string
 ): string | undefined {
   if (force) {
@@ -51,7 +51,7 @@ export function resolveLaunchMode(
  */
 export function resolvedLaunchModeEntry(
   launchModes: ILaunchMode[],
-  values: Record<string, boolean | string>
+  values: Record<string, boolean>
 ): IResolvedLaunchMode | null {
   const token = resolveLaunchMode(launchModes, values);
   if (!token) {

@@ -75,10 +75,8 @@ const DESCRIPTOR: IProviderDescriptor = {
   iconName: 'testbed-launcher-spec',
   iconSvg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"></svg>',
   cliBinary: 'testbed',
-  forkStrategy: 'native-flag',
+  forkStrategy: 'server-native',
   colourSource: 'derived',
-  terminalScope: 'conversation',
-  promptsForBranchName: true,
   canRename: true,
   mintsNewSessionId: true,
   launchModes: [

@@ -524,8 +524,7 @@ class BranchesHandler(_ProviderHandler):
     """List a project's other conversations.
 
     Off the IOLoop on its own merits: the listing opens and stats every
-    conversation to read its label, unbounded by conversation count, and the
-    frontend's fork watcher polls it every 2s for up to three minutes.
+    conversation to read its label, unbounded by conversation count.
     """
 
     @tornado.web.authenticated
@@ -534,8 +533,6 @@ class BranchesHandler(_ProviderHandler):
         if provider is None:
             return
         encoded_path = self.get_query_argument("encoded_path", default="")
-        # The decorations only the user-facing fetches need; the fork watcher
-        # asks without them so its 2s cadence never pays for a CLI spawn.
         include_extras = self.get_query_argument("include_extras", default="") == "1"
         result = await asyncio.get_running_loop().run_in_executor(
             None, provider.store.list_branches, encoded_path, include_extras
@@ -681,8 +678,9 @@ class ColoursHandler(_ProviderHandler):
             # failure - the 500 below means the state dir could not be written.
             self.bad_request("colour_invalid")
             return
-        # A fork writes its inherited tint through this same route; only the
-        # tab write-back is the user's own choice.
+        # A fork inherits its tint server-side, in ``BranchHandler``, never
+        # through this route. ``hand_set`` false here is a test-seeding path
+        # for an inherited entry; the tab write-back is the user's own choice.
         hand_set = body.get("hand_set", True)
         if not isinstance(hand_set, bool):
             self.bad_request()
@@ -723,10 +721,9 @@ class BranchHandler(_ProviderHandler):
     """Fork a conversation into a new one.
 
     Serves only the strategies whose new id the SERVER knows
-    (``registry.SERVER_MINTED_FORKS``). A ``native-command`` provider mints its
-    fork id inside the launched terminal, so its branch is created by a
-    ``fork_from`` launch instead and this route answers 400 ``fork_unsupported``
-    rather than a 400 ``fork_failed`` from a store that never implemented it
+    (``registry.SERVER_MINTED_FORKS``). Any other provider is answered 400
+    ``fork_unsupported`` rather than a 400 ``fork_failed`` from a store that
+    never implemented it
     (docs/defects.md DEF-1).
 
     The new branch becomes the project's current conversation immediately - the
@@ -879,8 +876,6 @@ class _LaunchRequest:
     project_path: str
     encoded_path: str | None
     session_id: str | None
-    fork_session_id: str | None
-    fork_from: str | None
     argv: list[str]
 
 
@@ -902,10 +897,7 @@ class _LaunchBase(_ProviderHandler):
         encoded_path = body.get("encoded_path")
         session_id = body.get("session_id")
         new_session_id = body.get("new_session_id")
-        fork_session_id = body.get("fork_session_id")
-        fork_from = body.get("fork_from")
         mode = body.get("mode")
-        name = body.get("name")
 
         if not isinstance(project_path, str) or not os.path.isdir(project_path):
             self.bad_request("invalid_project_path")
@@ -921,44 +913,14 @@ class _LaunchBase(_ProviderHandler):
             return None
         # ``new_session_id`` starts a fresh conversation under a caller-chosen
         # id, so the launched terminal is identifiable from its argv. Mutually
-        # exclusive with the other two.
+        # exclusive with ``session_id``.
         if new_session_id is not None and (
             not isinstance(new_session_id, str)
             or not new_session_id
             or "/" in new_session_id
             or session_id is not None
-            or fork_session_id is not None
         ):
             self.bad_request("invalid_new_session_id")
-            return None
-        # ``fork_session_id`` is the id a native fork will run under - only
-        # meaningful alongside the conversation being branched.
-        if fork_session_id is not None and (
-            not isinstance(fork_session_id, str)
-            or not fork_session_id
-            or "/" in fork_session_id
-            or session_id is None
-        ):
-            self.bad_request("invalid_fork_session_id")
-            return None
-        # ``fork_from`` names the conversation the CLI is to branch, for a
-        # provider that owns both the fork verb and the new id
-        # (``fork_strategy: native-command``). The launch carries the PARENT and
-        # the terminal runs a conversation whose id only exists once the CLI has
-        # minted it, which is why it excludes the other three ids rather than
-        # riding alongside them.
-        if fork_from is not None and (
-            not isinstance(fork_from, str)
-            or not fork_from
-            or "/" in fork_from
-            or session_id is not None
-            or new_session_id is not None
-            or fork_session_id is not None
-        ):
-            self.bad_request("invalid_fork_from")
-            return None
-        if name is not None and (not isinstance(name, str) or not name.strip()):
-            self.bad_request("invalid_name")
             return None
         if mode is not None and mode not in provider.descriptor.capabilities.launch_modes:
             self.bad_request("mode_unsupported")
@@ -989,10 +951,7 @@ class _LaunchBase(_ProviderHandler):
                     project_path=project_path,
                     session_id=session_id,
                     new_session_id=new_session_id,
-                    fork_session_id=fork_session_id,
-                    fork_from=fork_from,
                     mode=mode,
-                    name=name.strip() if isinstance(name, str) else None,
                 ),
             )
         except SessionNotFound:
@@ -1025,8 +984,6 @@ class _LaunchBase(_ProviderHandler):
             project_path=project_path,
             encoded_path=encoded_path,
             session_id=session_id,
-            fork_session_id=fork_session_id,
-            fork_from=fork_from,
             argv=argv,
         )
 
@@ -1037,27 +994,21 @@ class _LaunchBase(_ProviderHandler):
 
         Shared rather than copied per route, so the two cannot drift. The argv
         route runs the launch route's validator and accepts its full body, so
-        it settles the pin the same way. The Launcher tile reaches neither
-        branch - it resumes with a session id or starts new without an encoded
-        path (docs/design-launcher.md); a project-scoped ``+`` on a running
-        terminal (``TerminalManager.launch``) POSTs the new-conversation shape
-        to the argv route to reach the clear branch without spawning
-        (DEF-FRONT-222).
+        it settles the pin the same way. The Launcher tile never clears a pin:
+        it resumes with a session id or starts new without an encoded path
+        (docs/design-launcher.md).
         """
         if not (isinstance(request.encoded_path, str) and request.encoded_path):
             return
         # A new conversation supersedes a prior switch and becomes current
-        # by recency on its own; a fork needs the pin to beat the parent.
+        # by recency on its own.
         # ANY launch that opens no existing conversation is a new one -
         # keying this on ``new_session_id`` would never fire for an
         # assistant whose CLI mints its own id, leaving the row stuck on
         # the conversation the user last switched to.
-        if request.session_id is None and request.fork_from is None:
-            state.clear_pin(provider.id, request.encoded_path)
-        elif request.fork_session_id:
-            state.write_pin(provider.id, request.encoded_path, request.fork_session_id)
-        else:
+        if request.session_id is not None:
             return
+        state.clear_pin(provider.id, request.encoded_path)
         # The pin has stopped naming whatever the user last switched to, so
         # anything the store left outside its state to steer the assistant's own
         # CLI has to go with it - or the terminal keeps resuming the abandoned

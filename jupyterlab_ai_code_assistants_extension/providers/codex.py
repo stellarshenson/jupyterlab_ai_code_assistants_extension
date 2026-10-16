@@ -394,8 +394,9 @@ def _is_visible(thread: dict) -> bool:
 
     A thread that never saw a user event and has no preview is an empty husk
     (started and abandoned before the first turn) - hidden from the project
-    rows, but still enumerable as a branch so the fork watcher can discover a
-    thread before its first turn.
+    rows, but still enumerable as a branch, because a `+` launch creates its
+    thread through ``thread/start`` and that thread is a husk until its first
+    turn.
     """
     return bool(
         thread["has_user_event"]
@@ -446,8 +447,7 @@ class CodexStore(SessionStore):
 
         Archived and sub-agent threads are excluded, exactly as
         ``list_sessions`` excludes them. Husks stay in because this is the
-        ENUMERATION population: the fork watcher must see a new thread before
-        its first turn lands, and cleanup must be able to sweep abandoned ones.
+        ENUMERATION population: cleanup must be able to sweep abandoned ones.
         Which of them is *current* is a separate question - use
         ``_resolve_project_current``, never ``threads[0]``.
         """
@@ -544,8 +544,9 @@ class CodexStore(SessionStore):
     ) -> dict | None:
         """A project's other conversations, newest first, the current excluded.
 
-        Unlike ``list_sessions`` this does NOT hide empty husks: the fork
-        watcher must see a new thread before its first turn lands.
+        Unlike ``list_sessions`` this does NOT hide empty husks: a `+` launch
+        creates its thread through ``thread/start``, and that conversation must
+        stay reachable from the branch lists before its first turn lands.
         ``include_extras`` is inert - Codex has no background agents, so there
         are no decorations to pay for.
         """
@@ -769,10 +770,7 @@ class CodexStore(SessionStore):
         *,
         session_id: str | None = None,
         new_session_id: str | None = None,
-        fork_session_id: str | None = None,
         mode: str | None = None,
-        name: str | None = None,
-        fork_from: str | None = None,
         project_path: str | None = None,
     ) -> list[str]:
         """Create new threads before launch so every terminal carries its id.
@@ -784,8 +782,6 @@ class CodexStore(SessionStore):
         argv = [cli_path]
         if session_id and is_thread_id(session_id):
             argv += ["resume", session_id]
-        elif fork_from and is_thread_id(fork_from):
-            argv += ["fork", fork_from]
         elif project_path:
             try:
                 with _app_server(cli_path) as request:

@@ -201,9 +201,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     /** Launch-mode values for one provider, keyed by the mode ids the
      * assistant itself uses. */
-    const modesFor = (id: string): Record<string, boolean | string> => {
+    const modesFor = (id: string): Record<string, boolean> => {
       const descriptor = registry.get(id)?.descriptor;
-      const modes: Record<string, boolean | string> = {};
+      const modes: Record<string, boolean> = {};
       for (const mode of descriptor?.launchModes ?? []) {
         modes[mode.id] = setting(`providers.${id}.${mode.id}`, mode.default);
       }

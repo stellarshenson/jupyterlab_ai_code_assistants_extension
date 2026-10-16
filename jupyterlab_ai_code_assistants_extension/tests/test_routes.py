@@ -817,81 +817,6 @@ async def test_probing_a_terminal_running_another_assistant_says_nothing(
     assert answer["colour"] is None
 
 
-async def test_a_native_command_fork_launches_with_fork_from(
-    jp_fetch, jp_serverapp, tmp_path, present, monkeypatch
-):
-    """The parent id reaches the store, which builds the CLI's own fork verb.
-
-    A ``native-command`` provider mints the fork id itself, inside the launched
-    terminal, so branching it is a launch carrying the PARENT - the core had no
-    such path at all and the branch route answered 400 ``fork_failed``
-    (docs/defects.md DEF-1).
-    """
-    manager = _FakeTerminalManager()
-    monkeypatch.setitem(jp_serverapp.web_app.settings, "terminal_manager", manager)
-    parent = "11111111-2222-3333-4444-555555555555"
-    response = await jp_fetch(
-        URL,
-        "providers",
-        "codex",
-        "launch",
-        method="POST",
-        body=json.dumps({"project_path": str(tmp_path), "fork_from": parent}),
-    )
-    assert json.loads(response.body)["terminal_name"] == "term-1"
-    assert manager.created[0]["shell_command"][-3:] == [
-        "/usr/bin/codex",
-        "fork",
-        parent,
-    ]
-
-
-async def test_fork_from_excludes_the_other_launch_ids(jp_fetch, tmp_path, present):
-    """The CLI mints the fork id, so no other id may ride alongside the parent."""
-    status, error = await error_of(
-        jp_fetch,
-        URL,
-        "providers",
-        "codex",
-        "launch",
-        method="POST",
-        body=json.dumps(
-            {
-                "project_path": str(tmp_path),
-                "session_id": "11111111-2222-3333-4444-555555555555",
-                "fork_from": "22222222-3333-4444-5555-666666666666",
-            }
-        ),
-    )
-    assert (status, error) == (400, "invalid_fork_from")
-
-
-async def test_a_native_command_provider_has_no_server_side_branch(
-    jp_fetch, present, monkeypatch
-):
-    """Its fork id exists only inside the terminal, so the branch route refuses.
-
-    400 ``fork_unsupported`` rather than the 400 ``fork_failed`` a store that
-    never implemented ``fork`` used to answer.
-    """
-    provider = registry.get("codex")
-    monkeypatch.setattr(provider, "descriptor", dataclasses.replace(
-        provider.descriptor, capabilities=dataclasses.replace(
-            provider.descriptor.capabilities, fork_strategy="native-command"
-        )
-    ))
-    status, error = await error_of(
-        jp_fetch,
-        URL,
-        "providers",
-        "codex",
-        "branch",
-        method="POST",
-        body=json.dumps({"encoded_path": "/tmp", "session_id": "x"}),
-    )
-    assert (status, error) == (400, "fork_unsupported")
-
-
 async def test_a_new_session_launch_clears_a_pin_without_minting_an_id(
     jp_fetch, jp_serverapp, tmp_path, present, monkeypatch
 ):
@@ -1066,43 +991,6 @@ async def test_the_argv_route_resumes_without_touching_the_pin(
     argv = json.loads(response.body)["argv"]
     assert argv == ["/usr/bin/kimi", "-S", pinned]
     assert state.read_pin("kimi", encoded) == pinned
-
-
-async def test_the_argv_route_pins_a_fork_the_same_way_the_launch_route_does(
-    jp_fetch, tmp_path, present
-):
-    """A fork pins the branch on this route as on the launch route.
-
-    Parity for a route that runs the launch route's validator and accepts its
-    full body; the pin bookkeeping is one shared method so the two routes
-    cannot drift. On the native-flag provider the argv carries the fork too,
-    which is what makes the pinned id the conversation that actually runs.
-    No client sends a fork to this route today.
-    """
-    encoded = "wd-demo"
-    parent = "11111111-2222-3333-4444-555555555555"
-    fork = "99999999-8888-7777-6666-555555555555"
-
-    response = await jp_fetch(
-        URL,
-        "providers",
-        "claude",
-        "launch-argv",
-        method="POST",
-        body=json.dumps(
-            {
-                "project_path": str(tmp_path),
-                "encoded_path": encoded,
-                "session_id": parent,
-                "fork_session_id": fork,
-            }
-        ),
-    )
-    assert response.code == 200
-    argv = json.loads(response.body)["argv"]
-    assert argv[1:3] == ["--resume", parent]
-    assert argv[argv.index("--fork-session") + 2] == fork
-    assert state.read_pin("claude", encoded) == fork
 
 
 async def test_the_argv_route_refuses_an_undeclared_mode(jp_fetch, tmp_path, present):

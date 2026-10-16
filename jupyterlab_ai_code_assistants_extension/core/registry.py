@@ -40,13 +40,7 @@ class ProviderError(ValueError):
 #: Fork strategies whose new conversation id is known to the SERVER, so
 #: ``POST providers/<id>/branch`` can create the branch and answer with its id:
 #: ``server-copy`` has the store copy the conversation on disk, and
-#: ``server-native`` has it drive the CLI's own non-interactive fork path.
-#: The other two mint their id elsewhere and never reach this route.
-#: ``native-flag`` has the FRONTEND mint the id and carry it on the launch, so
-#: a server-side mint would be a second, competing id for one branch;
-#: ``native-command`` has the CLI own the fork verb AND the id, minted inside
-#: the launched terminal, so its branch is created by a ``fork_from`` LAUNCH
-#: and the id is discovered afterwards by the frontend's branch watcher. The
+#: ``server-native`` has it drive the CLI's own non-interactive fork path. The
 #: vocabulary is shared verbatim with the frontend descriptor's
 #: ``forkStrategy``.
 SERVER_MINTED_FORKS = frozenset({"server-copy", "server-native"})
@@ -58,10 +52,8 @@ class Capabilities:
 
     Core code reads these; it never reads a provider id to decide behaviour.
 
-    * ``fork_strategy`` - ``native-flag`` (the CLI forks from a flag pair and
-      the FRONTEND mints the id), ``native-command`` (the CLI owns both the
-      fork verb and the id, reached through a ``fork_from`` launch),
-      ``server-copy`` (the store copies the conversation itself),
+    * ``fork_strategy`` - ``server-copy`` (the store copies the conversation
+      itself),
       ``server-native`` (the store drives the CLI's own non-interactive fork
       path) or ``none`` (the assistant has no fork at all, which is the
       default)

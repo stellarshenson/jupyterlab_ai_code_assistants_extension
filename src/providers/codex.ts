@@ -43,10 +43,6 @@ export const descriptor: IProviderDescriptor = {
   forkStrategy: 'server-native',
   // No `/color` equivalent, and nothing in the thread store records one.
   colourSource: 'none',
-  terminalScope: 'conversation',
-  // The branch is named server-side - numbered `<parent>_n` and stamped
-  // through `thread/name/set` - so no name dialog is raised here.
-  promptsForBranchName: false,
   // The server writes the name through the app-server method `thread/name/set`
   // - the same experimental stdio channel its fork already speaks - and the
   // sqlite index the CLI reads follows it.

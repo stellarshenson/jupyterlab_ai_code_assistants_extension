@@ -491,10 +491,10 @@ class SessionStore(ABC):
         """Branch ``session_id``, returning the new conversation id.
 
         Unsupported by default: a store that cannot fork inherits this and the
-        route answers 400 ``fork_unsupported``. A
-        ``native`` store mints the id the CLI will be handed at launch without
-        touching disk; a ``server`` store copies the conversation on disk and
-        returns the copy's id. None means the copy failed, which the core
+        route answers 400 ``fork_unsupported``. A ``server-native`` store
+        drives the CLI's own non-interactive fork and returns the child's id; a
+        ``server-copy`` store copies the conversation on disk and returns the
+        copy's id. None means the fork failed, which the core
         turns into 400 ``fork_failed``; ``fork_unsupported`` is answered from
         the descriptor before the store is asked.
         """
@@ -525,24 +525,18 @@ class SessionStore(ABC):
         *,
         session_id: str | None = None,
         new_session_id: str | None = None,
-        fork_session_id: str | None = None,
-        fork_from: str | None = None,
         mode: str | None = None,
-        name: str | None = None,
         project_path: str | None = None,
     ) -> list[str]:
         """The argv that opens a conversation in a terminal.
 
-        Exactly one of the four ids applies: ``session_id`` opens an existing
-        conversation, ``new_session_id`` starts a fresh one under an id the
-        caller chose (so the terminal is identifiable from its argv),
-        ``fork_session_id`` branches the resumed one under a frontend-minted
-        id, and ``fork_from`` names the conversation a
-        ``fork_strategy: native-command`` CLI is to branch into an id it mints
-        itself inside the terminal. ``mode`` is a launch mode
+        At most one of the two ids applies: ``session_id`` opens an existing
+        conversation, and ``new_session_id`` starts a fresh one under an id the
+        caller chose (so the terminal is identifiable from its argv). A fork is
+        on disk under its own id before any launch, so it arrives as
+        ``session_id``. ``mode`` is a launch mode
         from the descriptor's ``launch_modes`` - the core has already rejected
-        any the provider does not declare. ``name`` is the display name, for
-        assistants that take one.
+        any the provider does not declare.
 
         Resolved here rather than by the caller: the panel's view of a
         conversation is only as fresh as its last poll, so a verb chosen in the

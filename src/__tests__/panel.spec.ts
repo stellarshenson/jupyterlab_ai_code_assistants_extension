@@ -52,7 +52,6 @@ jest.mock('../core/request', () => ({
 
 import { Clipboard, Notification } from '@jupyterlab/apputils';
 import { CommandRegistry } from '@lumino/commands';
-import { TAB_COLOUR_IDS, fnv1aColour } from '../core/colour';
 import { addIcon, branchIcon, cleanupIcon, shieldIcon } from '../core/icons';
 import {
   AssistantSessionsPanel,
@@ -74,10 +73,8 @@ const DESCRIPTOR: IProviderDescriptor = {
   iconName: 'testbed-panel-spec',
   iconSvg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"></svg>',
   cliBinary: 'testbed',
-  forkStrategy: 'native-flag',
+  forkStrategy: 'server-native',
   colourSource: 'derived',
-  terminalScope: 'conversation',
-  promptsForBranchName: true,
   canRename: true,
   mintsNewSessionId: true,
   launchModes: [
@@ -424,8 +421,6 @@ describe('DEF-45 - both destructive menu entries are marked alike', () => {
   });
 });
 
-// --------------------------------------------------------------- DEF-31
-
 describe('ACC-SESS-203 - automatic branch names', () => {
   it.each(['server-copy', 'server-native'] as const)(
     '%s requests a numbered name and resumes the returned child without a dialog',
@@ -532,219 +527,6 @@ describe('a branch whose terminal launch was refused after the mint', () => {
       errored.mockRestore();
       target.dispose();
       request.mockImplementation(() => Promise.resolve({}));
-    }
-  });
-});
-
-describe('DEF-31 - a fork started inside the parent capture window', () => {
-  /** The parent's conversation and the colour ladder around it. `picked` is
-   * deliberately NOT the colour the parent's id hashes to, so "inherited the
-   * new colour" can never be satisfied by the derived fallback. */
-  const parent = session();
-  const derived = fnv1aColour(parent.session_id);
-  const picked = TAB_COLOUR_IDS.find(c => c !== derived)!;
-
-  /** The same provider with the assistant's own colour at the top of the
-   * ladder - the branch of `_inheritColour` that copies only what this
-   * extension's store holds, and never the parent's native tint. */
-  const NATIVE_DESCRIPTOR: IProviderDescriptor = {
-    ...DESCRIPTOR,
-    iconName: 'testbed-native-panel-spec',
-    colourSource: 'native'
-  };
-
-  /** A promise the test answers by hand, to hold one request unanswered. */
-  const deferred = <T>(): { promise: Promise<T>; settle: (v: T) => void } => {
-    let settle!: (v: T) => void;
-    const promise = new Promise<T>(resolve => {
-      settle = resolve;
-    });
-    return { promise, settle };
-  };
-
-  /** What the server's colour store holds. Empty until a write is answered,
-   * which is what lets a panel built INSIDE a test start with a cache that does
-   * not already know the colour the fork is meant to wait for. */
-  let stored: Record<string, string>;
-  /** Colour writes for anything other than the parent - i.e. the fork's
-   * inherited colour, which is what every assertion here is about. */
-  let childWrites: Array<Record<string, unknown>>;
-  let capture: { promise: Promise<unknown>; settle: (v: unknown) => void };
-  let launch: jest.Mock;
-  let reloads: number;
-
-  beforeEach(() => {
-    stored = {};
-    childWrites = [];
-    reloads = 0;
-    capture = deferred<unknown>();
-    launch = jest.fn(() => Promise.resolve());
-    request.mockImplementation(
-      (_id: string, path: string, _settings: unknown, init: any) => {
-        if (path !== 'colours') {
-          return Promise.resolve({ branches: [] });
-        }
-        if (init?.method !== 'POST') {
-          reloads += 1;
-          return Promise.resolve({
-            colours: { ...stored },
-            overrides: Object.keys(stored)
-          });
-        }
-        const body = JSON.parse(init.body);
-        if (body.session_id === parent.session_id) {
-          // The parent's capture - held open until `answerCapture` below.
-          return capture.promise;
-        }
-        childWrites.push(body);
-        return Promise.resolve({ colours: { [body.session_id]: body.colour } });
-      }
-    );
-    arm(panel);
-  });
-
-  afterEach(() => {
-    // Put the inert default back. The NEXT test's panel loads its colour store
-    // from its constructor, and the outer `beforeEach` flushes that load before
-    // this one replaces the implementation - so a routing mock left installed
-    // here hands that panel a cache that already holds the parent's new colour,
-    // and the assertions below pass for the wrong reason. Measured, not feared:
-    // without this line the no-capture test inherits `picked` rather than the
-    // hash, which is the one case where the hash is the right answer.
-    request.mockImplementation(() => Promise.resolve({}));
-  });
-
-  /** Point a panel at the parent row and stub the launch. The terminal is not
-   * what is under test - each panel is driven to the point where it writes the
-   * fork's colour, and no further. */
-  const arm = (target: AssistantSessionsPanel): void => {
-    (target as any)._terminals.launch = launch;
-    (target as any)._activeSession = parent;
-  };
-
-  /** Answer the parent's capture, the way the server would: it persists first,
-   * so a reload issued after it sees the new colour too. */
-  const answerCapture = (): void => {
-    stored[parent.session_id] = picked;
-    capture.settle({ colours: { ...stored } });
-  };
-
-  /** Answer the name dialog `_branchSession` raises, so the fork proceeds. */
-  const acceptName = async (): Promise<void> => {
-    await flush();
-    const dialog = document.querySelector('.jp-Dialog');
-    expect(dialog).not.toBeNull();
-    dialog!.querySelector<HTMLInputElement>('input')!.value = 'fork';
-    const buttons = Array.from(
-      dialog!.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
-    );
-    // Cancel first, Ok second - `InputDialog.getText`'s own button order.
-    buttons[buttons.length - 1].click();
-    await flush();
-  };
-
-  /** The single write the fork made, with the minted id folded back in from
-   * the launch so the assertion does not have to know the UUID. */
-  const forkWrite = (colour: string | null): Record<string, unknown>[] =>
-    colour === null
-      ? []
-      : [{ session_id: launch.mock.calls[0][1], colour, hand_set: false }];
-
-  it('inherits the colour of a capture that is still unanswered', async () => {
-    // The user picks a colour on the parent's tab; the write goes out and hangs.
-    void (panel as any)._colours.set(parent.session_id, picked);
-    expect((panel as any)._colours.isPending(parent.session_id)).toBe(true);
-
-    const branched = (panel as any)._branchSession() as Promise<void>;
-    await acceptName();
-    expect(launch).toHaveBeenCalledTimes(1);
-    // Still unanswered here, so the colour is in no cache the fork can read -
-    // it has to wait for it rather than settle for the hash.
-    expect(childWrites).toEqual([]);
-
-    answerCapture();
-    await branched;
-
-    expect(childWrites).toEqual(forkWrite(picked));
-  });
-
-  it('inherits a capture that landed while the name dialog was open', async () => {
-    // The other half of the window, and the half a pending-write check alone
-    // misses: nothing is pending by the time the fork writes, and the colour
-    // read at click time is stale all the same.
-    void (panel as any)._colours.set(parent.session_id, picked);
-    const branched = (panel as any)._branchSession() as Promise<void>;
-    await flush();
-    answerCapture();
-    await flush();
-    expect((panel as any)._colours.isPending(parent.session_id)).toBe(false);
-
-    await acceptName();
-    await branched;
-
-    expect(childWrites).toEqual(forkWrite(picked));
-    // No reload was needed to answer it - the cache already held the capture.
-    expect(reloads).toBe(0);
-  });
-
-  it('costs no reload, and still inherits the derived tint, with no capture in flight', async () => {
-    // The ordinary fork. Holds the two above to account for their cost, and
-    // holds the click-time value to account as the fallback: a conversation the
-    // store has no colour for inherits the tint its id hashes to, which is the
-    // only tint it has.
-    const branched = (panel as any)._branchSession() as Promise<void>;
-    await acceptName();
-    await branched;
-
-    expect(childWrites).toEqual(forkWrite(derived));
-    expect(reloads).toBe(0);
-  });
-
-  it('waits for the capture on a native-colour provider too', async () => {
-    // Named in the defect as the second site: there the fork copies only what
-    // this extension's store holds, so an unanswered capture left it copying
-    // NOTHING - a fork with no inherited entry at all, not merely a stale one.
-    const native = makePanel(NATIVE_DESCRIPTOR);
-    try {
-      arm(native);
-      await flush();
-      void (native as any)._colours.set(parent.session_id, picked);
-
-      const branched = (native as any)._branchSession() as Promise<void>;
-      await acceptName();
-      expect(childWrites).toEqual([]);
-
-      answerCapture();
-      await branched;
-
-      expect(childWrites).toEqual(forkWrite(picked));
-    } finally {
-      native.dispose();
-    }
-  });
-
-  it('never copies the parent native tint onto a native-colour fork', async () => {
-    // The other half of that branch, and why it cannot simply fall back to the
-    // click-time value: the parent's own tint belongs to the parent. Copying it
-    // would pin the fork to it and shadow the fork's own colour command for
-    // good, so a parent this extension holds no colour for hands its fork
-    // nothing.
-    const native = makePanel(NATIVE_DESCRIPTOR);
-    try {
-      arm(native);
-      (native as any)._activeSession = { ...parent, colour: 'sky' };
-      await flush();
-
-      const branched = (native as any)._branchSession() as Promise<void>;
-      await acceptName();
-      await branched;
-
-      // The fork happened - "no colour was written" is the finding, not a
-      // dialog that was never answered.
-      expect(launch).toHaveBeenCalledTimes(1);
-      expect(childWrites).toEqual([]);
-    } finally {
-      native.dispose();
     }
   });
 });
@@ -1030,13 +812,7 @@ describe('the Manage Sessions popup is handed the current row name', () => {
   });
 });
 
-describe('DEF-PANE-211 - per-conversation open surfaces on a project-scoped assistant', () => {
-  const projectScoped: IProviderDescriptor = {
-    ...DESCRIPTOR,
-    iconName: 'testbed-project-scope-panel-spec',
-    terminalScope: 'project'
-  };
-
+describe('per-conversation open surfaces', () => {
   function submenuLabels(p: AssistantSessionsPanel): string[] {
     (p as any)._rebuildContextMenu(true);
     const menu = (p as any)._contextMenu;
@@ -1045,41 +821,12 @@ describe('DEF-PANE-211 - per-conversation open surfaces on a project-scoped assi
       .map((item: any) => item.submenu.title.label);
   }
 
-  it('offers no Open Branched Conversation submenu - one terminal serves every conversation', () => {
-    const p = makePanel(projectScoped);
-    try {
-      expect(submenuLabels(p)).not.toContain('Open Branched Conversation');
-      expect(submenuLabels(p)).toContain('Switch and Manage Sessions');
-    } finally {
-      p.dispose();
-    }
-  });
-
-  it('keeps the submenu for a conversation-scoped assistant', () => {
+  it('offers the Open Branched Conversation submenu', () => {
     expect(submenuLabels(panel)).toContain('Open Branched Conversation');
   });
 
-  it("titles the popup Open button with the provider's own verb, not a terminal of its own", () => {
-    const p = new AssistantSessionsPanel({
-      app: {
-        serviceManager: { serverSettings: {} },
-        commands: { execute: jest.fn() }
-      } as any,
-      descriptor: projectScoped,
-      hooks: { resumeLabel: () => 'Open Web UI' },
-      rootDir: '/home/user'
-    });
-    try {
-      const s = session();
-      expect((p as any)._openBranchTitle(s, s.session_id)).toEqual(
-        'Open Web UI'
-      );
-      expect((panel as any)._openBranchTitle(s, s.session_id)).toContain(
-        'in its own terminal'
-      );
-    } finally {
-      p.dispose();
-    }
+  it('titles the popup Open button as a terminal of its own', () => {
+    expect((panel as any)._openBranchTitle()).toContain('in its own terminal');
   });
 });
 
@@ -1987,7 +1734,7 @@ describe('ACC-SESS-190..192 - opening a session moves the file browser', () => {
       ).toHaveLength(1);
       expect(moves(p)).toEqual([MOVE_TO_NESTED, MOVE_TO_NESTED]);
     } finally {
-      // Restore the default answer, as the DEF-31 block does.
+      // Restore the default answer.
       request.mockImplementation(() => Promise.resolve({}));
       p.dispose();
     }

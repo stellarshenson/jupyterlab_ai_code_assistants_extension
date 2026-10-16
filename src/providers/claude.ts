@@ -44,8 +44,6 @@ export const descriptor: IProviderDescriptor = {
   // user sets on the tab overrides it and is remembered, until a later
   // `/color` takes over (`colour_choice_ms` in providers/claude.py).
   colourSource: 'native',
-  terminalScope: 'conversation',
-  promptsForBranchName: false,
   // `/rename` writes a `custom-title` record into the transcript, and the
   // store writes the same record.
   canRename: true,

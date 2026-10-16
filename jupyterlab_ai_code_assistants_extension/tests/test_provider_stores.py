@@ -493,20 +493,9 @@ def test_claude_delete_never_touches_the_current_conversation(claude):
     assert store.delete_branches(CLAUDE_ENCODED, [drop]) == []
 
 
-def test_claude_has_no_server_side_fork(claude):
-    """The FRONTEND mints a native-flag fork id and carries it on the launch.
-
-    A store-side mint would be a second, competing id for one branch, so the
-    branch route serves ``server-copy`` only and this store keeps the contract
-    default (unsupported).
-    """
-    store, _root = claude
-    assert store.fork(CLAUDE_ENCODED, new_uuid()) is None
-
-
 def test_claude_launch_argv(claude):
     store, _root = claude
-    session_id, fork_id = new_uuid(), new_uuid()
+    session_id = new_uuid()
     assert store.launch_argv("/bin/claude") == ["/bin/claude"]
     assert store.launch_argv("/bin/claude", session_id=session_id) == [
         "/bin/claude",
@@ -517,18 +506,6 @@ def test_claude_launch_argv(claude):
         "/bin/claude",
         "--session-id",
         session_id,
-    ]
-    assert store.launch_argv(
-        "/bin/claude", session_id=session_id, fork_session_id=fork_id, name="Branch"
-    ) == [
-        "/bin/claude",
-        "--resume",
-        session_id,
-        "--fork-session",
-        "--session-id",
-        fork_id,
-        "-n",
-        "Branch",
     ]
     assert "--dangerously-skip-permissions" in store.launch_argv(
         "/bin/claude", mode="dangerouslySkipPermissions"
@@ -575,7 +552,7 @@ def test_claude_a_failed_stop_attaches_with_no_mode_and_no_name(claude, monkeypa
     """A conversation whose agent could not be stopped refuses ``--resume``, so
     it is still reached through the agent. ``claude attach`` answers an extra
     argument with a warning it prints into the user's terminal, and the running
-    agent already owns both."""
+    agent already owns its permission mode."""
     store, _root = claude
     session_id = new_uuid()
     short = session_id[:8]
@@ -586,32 +563,9 @@ def test_claude_a_failed_stop_attaches_with_no_mode_and_no_name(claude, monkeypa
         "/bin/claude",
         session_id=session_id,
         mode="dangerouslySkipPermissions",
-        name="Renamed",
     )
     assert argv == ["/bin/claude", "attach", short]
     assert "--dangerously-skip-permissions" not in argv
-    assert "-n" not in argv
-
-
-def test_claude_a_fork_of_an_agent_owned_conversation_still_forks(
-    claude, monkeypatch
-):
-    """Forking is Claude's own escape from an agent-owned conversation."""
-    store, _root = claude
-    session_id, fork_id = new_uuid(), new_uuid()
-    monkeypatch.setattr(
-        claude_provider, "bg_agents", lambda _b=None: {session_id: session_id[:8]}
-    )
-    calls = stop_records(monkeypatch, succeeds=True)
-
-    argv = store.launch_argv(
-        "/bin/claude", session_id=session_id, fork_session_id=fork_id
-    )
-    # The fork is a new conversation, so the agent keeps running.
-    assert calls == []
-    assert "attach" not in argv
-    assert argv[:3] == ["/bin/claude", "--resume", session_id]
-    assert argv[3:] == ["--fork-session", "--session-id", fork_id]
 
 
 def test_claude_the_launch_verb_is_read_at_launch_time_not_carried_from_the_panel(
@@ -861,11 +815,6 @@ def test_codex_launch_argv(codex):
     assert store.launch_argv("/bin/codex", session_id=thread) == [
         "/bin/codex",
         "resume",
-        thread,
-    ]
-    assert store.launch_argv("/bin/codex", fork_from=thread) == [
-        "/bin/codex",
-        "fork",
         thread,
     ]
     assert store.launch_argv(

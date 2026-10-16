@@ -15,12 +15,7 @@ import { PROVIDERS } from '../providers';
 // fails here rather than silently costing the user a panel.
 const EXPECTED_IDS = ['claude', 'codex', 'deepseek', 'kimi', 'gemini'];
 
-const FORK_STRATEGIES = [
-  'native-flag',
-  'native-command',
-  'server-copy',
-  'server-native'
-];
+const FORK_STRATEGIES = ['server-copy', 'server-native'];
 const COLOUR_SOURCES = ['native', 'derived', 'none'];
 
 function stub(id: string): IProviderModule {
@@ -34,8 +29,6 @@ function stub(id: string): IProviderModule {
       cliBinary: id,
       forkStrategy: 'server-copy',
       colourSource: 'none',
-      terminalScope: 'conversation',
-      promptsForBranchName: false,
       canRename: false,
       mintsNewSessionId: false,
       launchModes: [],
@@ -71,7 +64,6 @@ describe('the providers barrel', () => {
       expect(descriptor.iconSvg).toContain('<svg');
       expect(FORK_STRATEGIES).toContain(descriptor.forkStrategy);
       expect(COLOUR_SOURCES).toContain(descriptor.colourSource);
-      expect(typeof descriptor.promptsForBranchName).toBe('boolean');
       expect(typeof descriptor.canRename).toBe('boolean');
       expect(typeof descriptor.mintsNewSessionId).toBe('boolean');
       expect(typeof descriptor.hasRemoteControl).toBe('boolean');

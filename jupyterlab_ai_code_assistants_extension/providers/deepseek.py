@@ -625,10 +625,7 @@ class DeepSeekStore(SessionStore):
         *,
         session_id: str | None = None,
         new_session_id: str | None = None,
-        fork_session_id: str | None = None,
-        fork_from: str | None = None,
         mode: str | None = None,
-        name: str | None = None,
         project_path: str | None = None,
     ) -> list[str]:
         """``dsh tui``, with ``--resume <id>`` when a conversation is named.

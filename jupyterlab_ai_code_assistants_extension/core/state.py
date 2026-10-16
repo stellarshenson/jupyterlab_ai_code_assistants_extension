@@ -147,7 +147,7 @@ def write_pin(provider_id: str, encoded_path: str, session_id: str) -> None:
     """Pin ``session_id`` as a project's current conversation.
 
     Best-effort: pins are written after an irreversible action (a fork, a
-    spawned terminal), so a failure must leave resolution to fall back to
+    switch), so a failure must leave resolution to fall back to
     recency rather than surface as an error.
     """
     if not encoded_path or not _is_pin(session_id):

@@ -207,8 +207,7 @@ export class ColourStore {
    * times it, not it.
    *
    * An op must never call `load`, `set` or `forget` - it would wait on a chain
-   * that is waiting on it. `inherit` delegates to `set` from OUTSIDE the queue,
-   * which is why it is not itself queued. */
+   * that is waiting on it. */
   private _run<T>(op: () => Promise<T>): Promise<T> {
     const result = this._chain.then(op);
     const settled = () => undefined;
@@ -239,8 +238,6 @@ export class ColourStore {
 
   /** Record a colour as this conversation's own. Passing null drops the entry,
    * which is also how a deleted conversation leaves no orphan key behind.
-   * `handSet` false marks it inherited - written on a fork's behalf rather
-   * than chosen on its tab.
    *
    * Answers whether the store now HOLDS the colour, which is what the capture
    * of a colour picked on a tab gates its repaint on - see `_captureColour`.
@@ -254,11 +251,7 @@ export class ColourStore {
    * "Did not throw" is not the test - the answer carries the whole store, so
    * it is checked for the value that was just written. A server that accepted
    * the request and then failed to persist it would otherwise be believed. */
-  async set(
-    sessionId: string,
-    colour: string | null,
-    handSet = true
-  ): Promise<boolean> {
+  async set(sessionId: string, colour: string | null): Promise<boolean> {
     if (!sessionId) {
       return false;
     }
@@ -277,7 +270,7 @@ export class ColourStore {
             body: JSON.stringify({
               session_id: sessionId,
               colour,
-              hand_set: handSet
+              hand_set: true
             })
           }
         );
@@ -293,7 +286,7 @@ export class ColourStore {
           this._colours.delete(sessionId);
         }
         this._overrides.delete(sessionId);
-        if (colour && handSet) {
+        if (colour) {
           this._overrides.add(sessionId);
         }
         return true;
@@ -347,17 +340,6 @@ export class ColourStore {
         this._closeWrite(present);
       }
     });
-  }
-
-  /** Copy the parent's EFFECTIVE colour onto a fresh branch, so a branch of a
-   * branch inherits whatever its immediate parent actually shows, user-set
-   * override included. Called at the fork sites, once the new id is known.
-   */
-  async inherit(parentColour: string | null, childId: string): Promise<void> {
-    if (!parentColour || !childId) {
-      return;
-    }
-    await this.set(childId, parentColour, false);
   }
 
   private readonly _providerId: string;

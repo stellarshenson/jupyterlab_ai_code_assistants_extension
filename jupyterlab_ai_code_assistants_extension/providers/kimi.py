@@ -712,19 +712,15 @@ class KimiStore(SessionStore):
         *,
         session_id: str | None = None,
         new_session_id: str | None = None,
-        fork_session_id: str | None = None,
-        fork_from: str | None = None,
         mode: str | None = None,
-        name: str | None = None,
         project_path: str | None = None,
     ) -> list[str]:
         """``kimi -S <id>`` to resume, bare ``kimi`` to start fresh.
 
-        ``new_session_id``, ``fork_session_id`` and ``fork_from`` are not
-        reachable for this assistant - it accepts no id for a new conversation
-        and has no fork verb at all, so the server copies the session directory
-        and the branch opens as an ordinary resume. ``name`` has no CLI surface
-        either: a fork's title is stamped into the copied ``state.json``.
+        ``new_session_id`` is not reachable for this assistant - it accepts no
+        id for a new conversation and has no fork verb at all, so the server
+        copies the session directory and the branch opens as an ordinary
+        resume.
         """
         argv = [cli_path]
         if session_id and SESSION_ID_RE.fullmatch(session_id):

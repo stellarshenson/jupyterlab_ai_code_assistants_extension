@@ -27,7 +27,7 @@ EXPECTED_IDS = {"claude", "codex", "deepseek", "gemini", "kimi"}
 # The same vocabulary the frontend descriptor's ``forkStrategy`` uses - the two
 # registries describe one assistant, so a strategy named differently on each
 # side is a divergence waiting to be branched on.
-FORK_STRATEGIES = {"native-flag", "native-command", "server-copy", "server-native", "none"}
+FORK_STRATEGIES = {"server-copy", "server-native", "none"}
 COLOUR_SOURCES = {"native", "derived", "none"}
 
 _counter = itertools.count()
@@ -143,12 +143,11 @@ def test_capability_flags_match_the_store(provider_id):
     """A flag the core reads must be backed by an implementation.
 
     ``colour_source: derived`` promises a ``default_colour``, and each fork
-    strategy promises the surface the core reaches it through: the two
-    server-minted ones (``native-flag`` mints the id, ``server-copy`` writes the
-    copy) promise ``fork``, while ``native-command`` promises a ``launch_argv``
-    that takes the parent as ``fork_from``, since its id is minted by the CLI
-    inside the terminal. A descriptor claiming one without the other is the
-    shape of docs/defects.md DEF-1 - a 400 ``fork_failed`` on every branch.
+    strategy promises the surface the core reaches it through: both
+    server-minted ones (``server-copy`` writes the copy, ``server-native``
+    drives the CLI's own fork) promise ``fork``. A descriptor claiming one
+    without the other is the shape of docs/defects.md DEF-1 - a 400
+    ``fork_failed`` on every branch.
     """
     provider = registry.get(provider_id)
     caps = provider.descriptor.capabilities
@@ -157,10 +156,6 @@ def test_capability_flags_match_the_store(provider_id):
         assert store_type.default_colour is not SessionStore.default_colour
     if caps.fork_strategy in registry.SERVER_MINTED_FORKS:
         assert store_type.fork is not SessionStore.fork
-    elif caps.fork_strategy == "native-command":
-        parent = "11111111-2222-3333-4444-555555555555"
-        argv = provider.store.launch_argv(f"/usr/bin/{provider_id}", fork_from=parent)
-        assert parent in argv
 
 
 def test_every_store_accepts_the_whole_launch_contract():
@@ -175,10 +170,7 @@ def test_every_store_accepts_the_whole_launch_contract():
             f"/usr/bin/{provider_id}",
             session_id=None,
             new_session_id=None,
-            fork_session_id=None,
-            fork_from=None,
             mode=None,
-            name=None,
         )
         assert argv[0] == f"/usr/bin/{provider_id}"
 

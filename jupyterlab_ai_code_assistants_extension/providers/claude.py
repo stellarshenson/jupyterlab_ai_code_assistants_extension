@@ -1524,19 +1524,14 @@ class ClaudeStore(SessionStore):
         *,
         session_id: str | None = None,
         new_session_id: str | None = None,
-        fork_session_id: str | None = None,
-        fork_from: str | None = None,
         mode: str | None = None,
-        name: str | None = None,
         project_path: str | None = None,
     ) -> list[str]:
         """The argv that opens a conversation.
 
-        ``fork_from`` is never consumed: the store forks through Claude's own
-        non-interactive commands and mints the child id itself
-        (``fork_strategy: server-native``), so a branch arrives as
-        ``session_id``. The ``--fork-session`` pair serves a frontend-minted
-        ``fork_session_id``, the ``native-flag`` shape.
+        The store forks through Claude's own non-interactive commands and mints
+        the child id itself (``fork_strategy: server-native``), so a branch
+        arrives as ``session_id``.
 
         Whether a live background agent holds the conversation is decided
         HERE rather than by the caller: an agent can start or finish inside the
@@ -1547,13 +1542,11 @@ class ClaudeStore(SessionStore):
         agent would leave the conversation with it however long the user works
         in that terminal (DEF-PROV-272). ``claude attach`` remains the answer
         only when the stop fails, because the conversation is then still
-        reachable through the agent and through nothing else. Only a plain open
-        stops an agent - a fork is Claude's own documented escape from an
-        agent-owned conversation and leaves the agent running, and a new
-        conversation has no agent yet.
+        reachable through the agent and through nothing else. Only an open
+        stops an agent - a new conversation has no agent yet.
         """
         attach_id: str | None = None
-        if session_id and not fork_session_id:
+        if session_id:
             attach_id = bg_agents(cli_path).get(session_id)
             if attach_id and stop_bg_agent(cli_path, attach_id, session_id):
                 attach_id = None
@@ -1579,18 +1572,14 @@ class ClaudeStore(SessionStore):
             argv = [cli_path, "--session-id", new_session_id]
         else:
             argv = [cli_path]
-        if fork_session_id:
-            argv += ["--fork-session", "--session-id", fork_session_id]
         # ``attach`` takes no options - it answers an extra argument with
         # "warning: extra arguments ignored". The running agent already owns its
-        # permission mode and its name, so passing either would print that
-        # warning into the user's terminal and promise something it never did.
+        # permission mode, so passing it would print that warning into the
+        # user's terminal and promise something it never did.
         if attach_id:
             return argv
         if mode == MODE_SKIP_PERMISSIONS:
             argv.append("--dangerously-skip-permissions")
-        if isinstance(name, str) and name.strip():
-            argv += ["-n", name.strip()]
         return argv
 
     # -- terminal identity ----------------------------------------------
@@ -1627,8 +1616,8 @@ class ClaudeStore(SessionStore):
     def parse_session_id(self, cmdline: bytes) -> str | None:
         """The conversation a Claude cmdline is running, from its flags.
 
-        A forked launch is ``claude --resume <parent> --fork-session
-        --session-id <fork>`` - the running conversation is the FORK, so
+        A cmdline carrying both ``--resume <a>`` and ``--session-id <b>``
+        runs ``<b>`` (``--fork-session`` forks ``<a>`` into it), so
         ``--session-id`` wins over ``--resume`` when both are present. Both the
         ``--flag <value>`` and ``--flag=<value>`` forms are understood; a
         cmdline with neither flag is a brand-new conversation (None).

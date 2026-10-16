@@ -868,10 +868,7 @@ class GeminiStore(SessionStore):
         *,
         session_id: str | None = None,
         new_session_id: str | None = None,
-        fork_session_id: str | None = None,
-        fork_from: str | None = None,
         mode: str | None = None,
-        name: str | None = None,
         project_path: str | None = None,
     ) -> list[str]:
         """``gemini --session-file <chat>`` to resume, ``--session-id`` to start.
@@ -892,9 +889,7 @@ class GeminiStore(SessionStore):
         store cannot enumerate" and is let through.
 
         A fork is an ordinary resume - the copy is already on disk under its own
-        id by the time this runs, so ``fork_session_id`` and ``fork_from`` never
-        reach here. ``name`` has no CLI surface either: a fork's name is stamped
-        into the copied file.
+        id by the time this runs.
         """
         argv = [cli_path]
         if session_id:

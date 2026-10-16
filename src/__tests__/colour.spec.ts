@@ -198,17 +198,6 @@ describe('ColourStore origins', () => {
 
   beforeEach(() => request.mockReset());
 
-  it('does not count an inherited tint as the user own', async () => {
-    const colours = store();
-    request.mockResolvedValue({
-      colours: { [SESSION_B]: 'sky' },
-      overrides: []
-    } as any);
-    await colours.inherit('sky', SESSION_B);
-    expect(colours.get(SESSION_B)).toEqual('sky');
-    expect(colours.isOverride(SESSION_B)).toBe(false);
-  });
-
   it('treats a store with no origins recorded as holding none', async () => {
     // Both writers predate the marker, so a legacy entry could be either. The
     // wrong guesses are not symmetrical: offering an inherited tint for
@@ -534,9 +523,6 @@ describe('sessionForCwds', () => {
  *
  * So it is enforced the way this repository already enforces its other
  * unrunnable invariant (see `core-neutrality.spec.ts`): by reading the source.
- * `inherit` is deliberately absent from the queued set - it delegates to `set`
- * from OUTSIDE the queue, which is the whole reason it is not queued itself,
- * and a future edit that queues it would deadlock.
  */
 describe('ColourStore queue re-entrancy', () => {
   const QUEUED = ['load', 'set', 'forget'];
@@ -578,9 +564,11 @@ describe('ColourStore queue re-entrancy', () => {
     for (const name of QUEUED) {
       expect(bodyOf(source, name).length).toBeGreaterThan(200);
     }
-    // ...and the scan finds what it is looking for when it IS there: `inherit`
-    // calls `set`, from outside the queue, which is exactly the shape that
-    // would deadlock inside one.
-    expect(bodyOf(source, 'inherit')).toContain('this.set(');
+    // ...and the scan finds what it is looking for when it IS there: an op
+    // that calls back into the queue, which is exactly the shape that would
+    // deadlock.
+    const reentrant =
+      'async load() { return this._run(async () => { await this.set(id, c); }); }';
+    expect(bodyOf(reentrant, 'load')).toContain('this.set(');
   });
 });

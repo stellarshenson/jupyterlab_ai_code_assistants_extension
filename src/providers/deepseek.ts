@@ -12,14 +12,8 @@
 // * `colourSource: 'none'` - no colour command, and nothing in the log records
 //   one, so a tab tint only ever comes from the extension's own write-back
 //   store
-// * `promptsForBranchName: false` - no name dialog is raised: the server names
-//   the branch `<parent>_<n>` and writes that into the copied log's title
-//   event, the field the harness itself displays a conversation under
 // * `mintsNewSessionId: false` - a bare `dsh tui` starts a conversation whose
 //   id the TUI mints itself; nothing on the command line takes one
-// * `terminalScope: 'conversation'` - a terminal runs the conversation its
-//   command line names, so a row's Open resumes that row's conversation and
-//   another row opens a terminal of its own
 // * `sessionIdPrefix: 'session-'` - every id is `session-<uuid>`, so the short
 //   id shown in menus is sliced past the constant part
 // * no launch modes: the TUI has no approval switch on its command line
@@ -43,8 +37,6 @@ export const descriptor: IProviderDescriptor = {
   cliBinary: 'dsh',
   forkStrategy: 'server-copy',
   colourSource: 'none',
-  terminalScope: 'conversation',
-  promptsForBranchName: false,
   // The name is the newest `session/title` event of the log.
   canRename: true,
   mintsNewSessionId: false,

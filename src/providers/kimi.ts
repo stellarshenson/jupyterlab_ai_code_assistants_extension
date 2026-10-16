@@ -9,9 +9,6 @@
 // * `colourSource: 'derived'` - kimi has no `/color`, so the default tint is a
 //   stable hash of the conversation id (a user-set colour still wins, per the
 //   Colour section of the acceptance criteria)
-// * `promptsForBranchName: false` - no name dialog is raised: the server names
-//   the branch `<parent>_<n>` and stamps that into the copied `state.json`,
-//   not passed to the CLI
 // * one launch mode, `--yolo`, under kimi's own name
 // * `sessionIdPrefix: 'session_'` - every id carries it, so the short id the
 //   panel shows is sliced past it
@@ -46,10 +43,6 @@ export const descriptor: IProviderDescriptor = {
   // The core's own FNV-1a is the same hash over the same six ids the retired
   // extension used, so every conversation keeps the colour it already had.
   colourSource: 'derived',
-  terminalScope: 'conversation',
-  // The fork's name is written into the copy's `state.json` by the server; the
-  // CLI has no naming flag to take it.
-  promptsForBranchName: false,
   // The name is `title` in the conversation's `state.json`.
   canRename: true,
   // A bare `kimi` mints its own id and writes it on the first turn, and `-S`

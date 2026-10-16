@@ -96,10 +96,6 @@ const MENU_STATE_BUDGET_MS = 800;
  * without a floor the spinner shows for a frame and the click reads as
  * "nothing happened". */
 const REFRESH_SPIN_FLOOR_MS = 500;
-// After a fork is requested, watch for its lazily-written store entry at this
-// faster cadence (bounded) so a new branch surfaces in seconds.
-const BRANCH_WATCH_INTERVAL_MS = 2_000;
-const BRANCH_WATCH_MAX_ATTEMPTS = 90; // ~3 minutes
 /** Conversations listed inline in a branch submenu before the popup takes over. */
 const INLINE_BRANCH_LIMIT = 5;
 /** Command id of the sibling extension that spawns a shell-less terminal on a
@@ -296,7 +292,7 @@ export class AssistantSessionsPanel extends Widget {
 
   /** Current values of this provider's launch modes, read from settings. Each
    * key is an `ILaunchMode.id` in the assistant's own terminology. */
-  setModes(modes: Record<string, boolean | string>): void {
+  setModes(modes: Record<string, boolean>): void {
     this._modes = { ...modes };
     // Menu labels are lazy and re-read this on every open; the button's title
     // is a written string, so it has to be rewritten here. The glyph needs no
@@ -1061,10 +1057,7 @@ export class AssistantSessionsPanel extends Widget {
       if (row) {
         // A terminal already holding that conversation IS the answer: a second
         // process on one history is never what the click meant (ACC-LNCH-152).
-        const found = await this._terminals.findForSession(
-          row.session_id,
-          folder
-        );
+        const found = await this._terminals.findForSession(row.session_id);
         if (found) {
           this._terminals.focus(found.widget);
           return found.widget;
@@ -1159,125 +1152,20 @@ export class AssistantSessionsPanel extends Widget {
     }
   }
 
-  /**
-   * Branch the active row's current conversation, by the descriptor's
-   * `forkStrategy`.
-   *
-   * The strategies differ only in who mints the new id and when it
-   * becomes knowable - so the shared part (ask for a name, launch a terminal
-   * on the fork, inherit the parent's tint, surface the branch) lives here
-   * once, and the strategy decides the payload and the discovery.
-   */
+  /** Branch the active row's current conversation. Every `forkStrategy` has
+   * the server mint the fork, so this is the one path. */
   private async _branchSession(force?: string): Promise<void> {
     const session = this._activeSession;
     if (!session) {
       return;
     }
-    if (
-      this._descriptor.forkStrategy === 'server-copy' ||
-      this._descriptor.forkStrategy === 'server-native'
-    ) {
-      await this._branchByServerCopy(session, undefined, force);
-      return;
-    }
-    const parentColour = this._terminals.colourFor(session);
-
-    let name: string | undefined;
-    if (this._descriptor.promptsForBranchName) {
-      const named = await InputDialog.getText({
-        title: 'Branch Session',
-        label: 'Name for the new session',
-        placeholder: this._lookupName(session)
-      });
-      if (!named.button.accept) {
-        return;
-      }
-      name = (named.value ?? '').trim();
-      if (!name) {
-        // Reported, not swallowed. The placeholder shows the parent's name,
-        // which reads as the "press Ok for the default" idiom, so Ok on an
-        // empty field was a closed dialog with no POST and no word (DEF-43).
-        // A notification rather than a disabled Ok because that is how this
-        // panel refuses everywhere else - Open Terminal and Show in File
-        // Browser on a folder outside the root - and `InputDialog.getText`
-        // offers no hook to disable Ok while the field is empty; getting one
-        // means replacing the dialog with a hand-built body widget.
-        Notification.warning(
-          'Enter a name for the new session - nothing was branched.',
-          { autoClose: 4000 }
-        );
-        return;
-      }
-    }
-
-    if (this._descriptor.forkStrategy === 'native-command') {
-      await this._branchByNativeCommand(session, force, parentColour);
-      return;
-    }
-    await this._branchByNativeFlag(session, name, force, parentColour);
-  }
-
-  /** The CLI forks from a flag pair and takes the new id from us, so the fork
-   * is known before it exists. Its store entry is written lazily, on the first
-   * turn, so the branch is watched for rather than expected at once. */
-  private async _branchByNativeFlag(
-    session: ISession,
-    name: string | undefined,
-    force: string | undefined,
-    parentColour: string | null
-  ): Promise<void> {
-    const forkId = UUID.uuid4();
-    const request: ILaunchRequest = {
-      project_path: session.project_path,
-      // Arms the server's fork pin - without it the fork never becomes the
-      // row's current conversation and recency drags the row back (DEF-9).
-      encoded_path: session.encoded_path,
-      session_id: session.session_id,
-      fork_session_id: forkId,
-      name,
-      mode: this._launchMode(force)
-    };
-    try {
-      await this._terminals.launch(request, forkId);
-    } catch (err) {
-      this._showActionError('Could not branch this session - try again.', err);
-      return;
-    }
-    await this._inheritColour(parentColour, forkId, session.session_id);
-    this._watchForBranch(session.encoded_path, forkId);
-  }
-
-  /** The CLI owns both the fork verb and the id, so the id has to be
-   * discovered: snapshot the branch ids first, then diff after launch. */
-  private async _branchByNativeCommand(
-    session: ISession,
-    force: string | undefined,
-    parentColour: string | null
-  ): Promise<void> {
-    const known = new Set(
-      (await this._fetchBranches(session).catch(() => null))?.branches.map(
-        b => b.session_id
-      ) ?? []
-    );
-    known.add(session.session_id);
-    try {
-      await this._terminals.launch({
-        project_path: session.project_path,
-        fork_from: session.session_id,
-        mode: this._launchMode(force)
-      });
-    } catch (err) {
-      this._showActionError('Could not branch this session - try again.', err);
-      return;
-    }
-    this._watchForNewBranch(session, known, parentColour);
-    void this._fetch().catch(() => undefined);
+    await this._branchByServerCopy(session, undefined, force);
   }
 
   /** The server mints the new id and answers with it before the terminal
    * opens - `server-copy` copies the store entry, `server-native` drives the
    * assistant's own non-interactive fork path - so one refresh surfaces the
-   * branch and no discovery watcher is needed. */
+   * branch. */
   private async _branchByServerCopy(
     session: ISession,
     name: string | undefined,
@@ -1287,11 +1175,11 @@ export class AssistantSessionsPanel extends Widget {
     // server copies the store entry while minting the fork, so a colour picked
     // on the parent's tab moments earlier - still queued in this store's
     // request chain, unsent - is not in the server's store yet and the branch
-    // is born wearing the PREVIOUS tint. Same gate as `_inheritColour`
-    // (DEF-31): a reload is a queued request like every other of this store's
-    // (DEF-30), so it is not sent until the capture ahead of it has been
-    // answered, and awaiting it is what makes the server's read fresh. Only
-    // inside the capture window, so an ordinary fork still costs no request.
+    // is born wearing the PREVIOUS tint. A reload is a queued request like
+    // every other of this store's (DEF-30), so it is not sent until the
+    // capture ahead of it has been answered, and awaiting it is what makes the
+    // server's read fresh. Only inside the capture window, so an ordinary fork
+    // still costs no request.
     if (this._colours.isPending(session.session_id)) {
       await this._colours.load();
     }
@@ -1388,131 +1276,6 @@ export class AssistantSessionsPanel extends Widget {
     await this._fetch().catch(() => undefined);
   }
 
-  /** Copy the parent's tint onto a fresh branch.
-   *
-   * A native-colour assistant hands every conversation its own colour, so a
-   * fork already arrives correctly tinted: only what this extension's own
-   * store holds for the parent is inherited there - an entry the parent itself
-   * inherited counts, which is what makes a branch of a branch take what its
-   * parent actually shows. Copying the parent's native tint instead would pin
-   * the fork to it in this store: the copy is written after the fork's own
-   * `/color`, so it would stand over that colour until the fork's next
-   * `/color`.
-   * Every other assistant inherits the parent's effective colour, which is the
-   * only tint it has. */
-  private async _inheritColour(
-    parentColour: string | null,
-    childId: string,
-    parentId: string
-  ): Promise<void> {
-    // The project gained a conversation, so a listing kept from before it is
-    // short by one.
-    this._branchCache = null;
-    // Let the parent's colour settle before copying it (DEF-31). The store
-    // holds only server-confirmed values, so a colour picked on the parent's
-    // tab moments earlier is not in it yet, and a fork started in that window
-    // was born wearing the PREVIOUS tint - stored as inherited, so never
-    // offered for release and corrected by no later pass.
-    //
-    // A reload is a queued request like every other of this store's (DEF-30):
-    // it is not sent until the capture ahead of it has been answered, which is
-    // what makes the re-read below current. It runs only inside the capture
-    // window, so an ordinary fork still costs no request, and the wait is
-    // bounded - every request is capped at REQUEST_TIMEOUT_MS (DEF-72). A
-    // reload that fails keeps the cache, which by then holds whatever the
-    // capture confirmed, so the re-read is current either way.
-    if (this._colours.isPending(parentId)) {
-      await this._colours.load();
-    }
-    // Re-read rather than trust `parentColour`, which was taken at click time -
-    // before the name dialog. A capture in flight at click time may well have
-    // landed while that dialog was open, which leaves nothing pending and the
-    // snapshot stale all the same. It stays as the fallback everywhere but a
-    // `native` provider - it is the only value here in which the derived hash
-    // is resolved, so a parent this store holds no colour for still hands its
-    // fork the tint it actually shows. `native` takes no fallback at all, for
-    // the reason above.
-    const stored = this._colours.get(parentId);
-    const inherited =
-      this._descriptor.colourSource === 'native'
-        ? stored
-        : (stored ?? parentColour);
-    await this._colours.inherit(inherited, childId);
-  }
-
-  /** Poll fast for a fork whose id we already know, then refresh once. The
-   * panel is never updated before the branch genuinely exists - it cannot list
-   * a store entry that has not been written. */
-  private _watchForBranch(encodedPath: string, forkId: string): void {
-    let attempts = 0;
-    const tick = async (): Promise<void> => {
-      // dispose() can land between an await and this callback; the widget must
-      // not keep polling off a dead object.
-      if (this.isDisposed) {
-        return;
-      }
-      attempts += 1;
-      try {
-        const data = await requestProvider<IBranchesResponse>(
-          this._descriptor.id,
-          withQuery('branches', { encoded_path: encodedPath }),
-          this._serverSettings,
-          { cache: 'no-store' }
-        );
-        if (
-          data.current === forkId ||
-          data.branches.some(b => b.session_id === forkId)
-        ) {
-          await this._fetch();
-          return;
-        }
-      } catch {
-        // Transient - keep watching until the attempt budget runs out.
-      }
-      if (attempts < BRANCH_WATCH_MAX_ATTEMPTS) {
-        window.setTimeout(() => void tick(), BRANCH_WATCH_INTERVAL_MS);
-      }
-    };
-    window.setTimeout(() => void tick(), BRANCH_WATCH_INTERVAL_MS);
-  }
-
-  /** Poll fast for a fork whose id the CLI minted: whichever conversation the
-   * snapshot did not hold is the fork. It is then pinned as current (recency
-   * alone would not - the actively written parent overtakes it) and inherits
-   * the parent's tint. */
-  private _watchForNewBranch(
-    session: ISession,
-    known: Set<string>,
-    parentColour: string | null
-  ): void {
-    let attempts = 0;
-    const tick = async (): Promise<void> => {
-      if (this.isDisposed) {
-        return;
-      }
-      attempts += 1;
-      try {
-        const data = await this._fetchBranches(session);
-        const fresh = data.branches.find(b => !known.has(b.session_id));
-        if (fresh) {
-          await this._inheritColour(
-            parentColour,
-            fresh.session_id,
-            session.session_id
-          );
-          await this._switchBranch(session, fresh.session_id);
-          return;
-        }
-      } catch {
-        // Transient - keep watching.
-      }
-      if (attempts < BRANCH_WATCH_MAX_ATTEMPTS) {
-        window.setTimeout(() => void tick(), BRANCH_WATCH_INTERVAL_MS);
-      }
-    };
-    window.setTimeout(() => void tick(), BRANCH_WATCH_INTERVAL_MS);
-  }
-
   /** Name the row's current conversation, in the assistant's own store.
    *
    * Only ever offered where the descriptor says the assistant keeps a name
@@ -1534,9 +1297,8 @@ export class AssistantSessionsPanel extends Widget {
     }
     const name = (named.value ?? '').trim();
     if (!name) {
-      // Refused the way Branch Session refuses an empty name (DEF-43): the
-      // placeholder shows the current name, which reads as "press Ok for the
-      // default", so an empty Ok has to say that nothing happened.
+      // The placeholder shows the current name, which reads as "press Ok for
+      // the default", so an empty Ok has to say that nothing happened.
       Notification.warning('Enter a name - nothing was renamed.', {
         autoClose: 4000
       });
@@ -2322,9 +2084,7 @@ export class AssistantSessionsPanel extends Widget {
 
   /** Whether a forced variant would build the launch the plain item already
    * builds - a mode left on in settings makes the plain item carry it, so the
-   * variant beside it would be a second entry for one outcome. Only a boolean
-   * variant can match: a forced token is the bare mode id, so an enum sitting
-   * on a widening value is a launch no variant duplicates. */
+   * variant beside it would be a second entry for one outcome. */
   private _buildsSameLaunch(mode: ILaunchMode): boolean {
     const forced = resolveLaunchMode(
       this._descriptor.launchModes,
@@ -2753,14 +2513,10 @@ export class AssistantSessionsPanel extends Widget {
     add('reset-colour');
     this._contextMenu.addItem({ type: 'separator' });
     if (withBranches) {
-      // A project-scoped assistant has one terminal for every conversation,
-      // so opening a branch in its own terminal is not an action it has.
-      if (this._descriptor.terminalScope === 'conversation') {
-        this._contextMenu.addItem({
-          type: 'submenu',
-          submenu: this._openBranchSubmenu
-        });
-      }
+      this._contextMenu.addItem({
+        type: 'submenu',
+        submenu: this._openBranchSubmenu
+      });
       this._contextMenu.addItem({
         type: 'submenu',
         submenu: this._switchSubmenu
@@ -2947,7 +2703,7 @@ export class AssistantSessionsPanel extends Widget {
       branchName: b => this._branchDisplayName(b),
       formatTime: ms => this._formatRelativeTime(ms),
       branchBadge: b => this._bgBadgeFor(b),
-      openTitle: () => this._openBranchTitle(session),
+      openTitle: () => this._openBranchTitle(),
       onSwitch: id => void this._switchBranch(session, id),
       onOpen: id => void this._openSession(session, undefined, id),
       onDelete: ids => this._deleteBranches(session, ids),
@@ -2961,14 +2717,7 @@ export class AssistantSessionsPanel extends Widget {
   /** Tooltip for one Open button in the Manage Sessions popup. Same rule as the
    * Open Branched Conversation submenu: the button launches a terminal, so it
    * names the mode that launch carries. */
-  private _openBranchTitle(session: ISession): string {
-    // One terminal serves a project-scoped assistant, so the button focuses
-    // or starts it, under the provider's own verb for that.
-    if (this._descriptor.terminalScope === 'project') {
-      return (
-        this._hooks.resumeLabel?.(session) ?? "Open the project's terminal"
-      );
-    }
+  private _openBranchTitle(): string {
     const base = 'Open this conversation in its own terminal';
     const variant = this._resolvedVariant();
     return variant ? `${base} (${variant.label})` : base;
@@ -3074,7 +2823,7 @@ export class AssistantSessionsPanel extends Widget {
   private _polling: Promise<void> | null = null;
   private _presentationMode: PresentationMode = DEFAULT_PRESENTATION_MODE;
   private _recentLimit: number = DEFAULT_RECENT_LIMIT;
-  private _modes: Record<string, boolean | string> = {};
+  private _modes: Record<string, boolean> = {};
   private _displayNames: Map<string, string> = new Map();
   private _filter = '';
 }

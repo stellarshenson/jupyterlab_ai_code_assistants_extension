@@ -1140,6 +1140,36 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-10-10T02:11:29Z @kj edited repro "traced from source, not run: of two overlapping filebrowser:go-to-path calls, delay the server answer to the first call's contents.get" -> "browser probe tmp/adv-review/sync-header/probes/def298-probe.spec.ts: hold the server answer to the first move's contents.get, open a second session from another panel, release the answer"; test-tags added "UNIT"
   - log: 2026-10-10T02:11:29Z @kj closed: fixed
   - log: 2026-10-10T02:36:57Z @kj review note, no change: the queue runs only while _moveFileBrowserTo never rejects; a non-string project_path is the only way, and the type and all five providers exclude it; with the catch rethrowing, the ACC-SESS-192 rejected-move test and DEF-PANE-298 both fail
+- [x] `DEF-PANE-304` **Success toast clips a long stored name** - MINOR; rename toast `Renamed to ` (11 chars) plus stored name passes JupyterLab's 140-char toast clip for names over 129 chars; server accepts 200 (`RenameHandler.MAX_NAME_CHARS`); switcher toast `<project>: switched to <label>` same shape; row text and tooltip show the full name; `src/core/panel.ts`
+  - evidence: verified on HEAD 5bc8bb0: `Renamed to ${result.name}` at src/core/panel.ts:1560, MAX_NAME_CHARS = 200 at core/routes.py:781, 140-char truncation documented in @jupyterlab/apputils notification.js:186; no code change
+  - repro: rename a conversation to a 200-char name, read the success toast
+  - test-tags: MANUAL
+  - root-cause: 2026-10-16T05:37:25Z @kj toast text echoes the stored name unbounded; `Notification.success` truncates past 140 chars; nothing caps the name to the toast window
+  - log: 2026-10-16T05:37:25Z @kj added
+  - log: 2026-10-16T05:37:31Z @kj closed: accepted, logged not fixed: display only, no state lost, full name visible on the row; MINOR policy - code not touched for it
+- [x] `DEF-PANE-305` **Branch launch refusal shows raw server code** - MINOR; minted-branch launch refused with a status other than 409 toasts `Branch created; its terminal did not open: cli_not_found`; the Launcher path holds words for `cli_not_found` but this branch does not use them; branch and row are correct; `src/core/panel.ts`
+  - evidence: verified on HEAD 5bc8bb0: minted branch calls _notifyLaunchError at src/core/panel.ts:1347, which appends err.message verbatim (panel.ts:671); cli_not_found copy only at panel.ts:641 and :1096; no code change
+  - repro: remove the assistant binary from the server PATH, branch a conversation, read the error toast
+  - test-tags: MANUAL
+  - root-cause: 2026-10-16T05:37:25Z @kj minted branch calls `_notifyLaunchError`, which appends `err.message` verbatim; the 503 `cli_not_found` copy lives only in `_showError` and the Launcher catch
+  - log: 2026-10-16T05:37:25Z @kj added
+  - log: 2026-10-16T05:37:31Z @kj closed: accepted, logged not fixed: branch is created and the row is correct, only the wording is less helpful; MINOR policy - code not touched for it
+- [x] `DEF-PANE-307` **Manage Sessions delete sits outside the action row, styled as inert text** - MEDIUM; Delete (n) renders in the dialog body on its own row above Close, as faint grey text that reads as disabled even with conversations selected; fix: move it into the dialog's action row as the device bridge's destructive button - error outline, faded when disabled, error fill once armed; `src/core/popup.ts`
+  - evidence: 1.2.79: Galata claude-regression.spec.ts:208 'Manage Sessions Delete sits in the action row and follows the destructive style (DEF-PANE-307)' passed (3.6s); screenshots disabled/enabled/armed show Delete left of Close in the action row; jest popup.spec.ts 'sits in the dialog action row, after the list and before Close' within 347 passed; Galata 72 passed
+  - related: ACC-SESS-209
+  - repro: right-click a row with several conversations, Manage Sessions: Delete (0) appears as grey text on a row of its own above Close
+  - test-tags: E2E
+  - root-cause: 2026-10-16T05:48:33Z @kj the delete button is appended to a footer div inside the dialog body, not the Dialog's own footer, and .jp-AiAssistantsPanel-branchDelete styles it as text rather than a jp-mod-warn button
+  - log: 2026-10-16T05:48:33Z @kj added
+  - log: 2026-10-16T06:18:54Z @kj closed
+- [x] `DEF-PANE-312` **Enter does not press Delete in Manage Sessions** - MINOR; with Delete focused in the dialog action row, Enter does nothing; Space and a click work; the per-row Open buttons behave the same; `src/core/popup.ts`
+  - evidence: wontfix: true before Delete moved into the action row, and the per-row Open buttons share it; making Enter work means taking over the JupyterLab Dialog's key handling
+  - related: DEF-PANE-307
+  - repro: open Manage Sessions, select a conversation, Tab to Delete, press Enter: nothing happens
+  - test-tags: MANUAL
+  - root-cause: 2026-10-16T06:37:02Z @kj the JupyterLab Dialog handles Enter in the capture phase and acts only on its own buttons, so Enter never reaches a button the extension adds
+  - log: 2026-10-16T06:37:02Z @kj added
+  - log: 2026-10-16T06:37:42Z @kj closed: accepted and logged, not fixed
 
 ## Colour store `COLO`
 
@@ -1228,6 +1258,56 @@ Client colour store ordering, inheritance on fork and tint lifecycle
   - root-cause: 2026-09-04T23:56:01Z @kj Supersession is keyed on whether the newer choice could be filed rather than on the newer choice having been made
   - log: 2026-09-04T23:56:01Z @kj added
   - log: 2026-09-17T17:25:02Z @kj closed
+- [x] `DEF-COLO-306` **/color after a hand-set tab colour does not change the tab** - MEDIUM; running /color in a Claude conversation leaves its tab on an older colour; cause: the store's hand-set override beats the conversation's /color colour unconditionally, though /color is then the later choice; seen on two live sessions holding override sky after /color orange; `jupyterlab_ai_code_assistants_extension/core/routes.py` _effective_colour
+  - related: ACC-COLO-208
+  - evidence: 1.2.79: Galata colour-newest-wins.spec.ts:99 'a /color run after a tab pick takes the tab and the row back' passed (32.0s): sky picked, /color run after it, tab peach and rowColour 'peach', pick released; pytest test_a_color_run_after_a_pick_takes_over_and_releases_it within 365 passed; jest 347 passed; Galata suite 72 passed
+  - repro: set a colour on a Claude terminal tab by hand, then run /color with another colour in that conversation: the tab keeps the hand-set colour
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-10-16T05:43:53Z @kj precedence is fixed, not by recency: a stored hand-set override always wins over the transcript's newest agent-color record, so a /color run after the pick is shadowed until Reset Tab Colour
+  - log: 2026-10-16T05:43:53Z @kj added
+  - log: 2026-10-16T06:18:48Z @kj closed
+- [x] `DEF-COLO-308` **A rejected /color still releases the hand-set tab colour** - MEDIUM; a /color Claude rejects (`/color sky` answers `Invalid color "sky"`) counts as a newer colour choice, so the hand pick is released and the tab falls back to the last colour Claude accepted; fix: count only a command record answered by a `Session color ` stdout record; `providers/claude.py` `_read_tail`
+  - evidence: claude 2.1.301 probe on a scratch CLAUDE_CONFIG_DIR: teal and sky rejected, red accepted, default reset, only red and default appended agent-color; test_a_rejected_color_run_does_not_release_a_pick and test_an_accepted_color_run_after_a_rejected_one_releases_the_pick pass; mutation M1 (command record counts) reddens the rejected test; pytest 367 passed, 4 lib/ parity fails
+  - related: ACC-COLO-208
+  - repro: pick a colour on a Claude terminal tab, then run /color sky in that conversation: the pick is released
+  - test-tags: UNIT
+  - root-cause: 2026-10-16T06:36:32Z @kj the /color command record is written whether or not Claude accepts the colour, and _read_tail counted that record as the choice; only the stdout record parented to it tells accepted, reset and rejected apart
+  - log: 2026-10-16T06:36:32Z @kj added
+  - log: 2026-10-16T06:36:45Z @kj amended text "a /color that Claude rejects (`/color sky` answers `Invalid color "sky"`) counts as a newer colour choice, so the hand pick is released and the tab drops to the conversation default; fix: count only a command record answered by a `Session color ` stdout record; `jupyterlab_ai_code_assistants_extension/providers/claude.py` `_read_tail`" -> "a /color Claude rejects (`/color sky` answers `Invalid color "sky"`) counts as a newer colour choice, so the hand pick is released and the tab falls back to the last colour Claude accepted; fix: count only a command record answered by a `Session color ` stdout record; `providers/claude.py` `_read_tail`"
+  - log: 2026-10-16T06:37:41Z @kj closed: fixed: _read_tail counts a /color only from the stdout record parented to it that starts with _COLOUR_ACCEPTED_PREFIX
+- [x] `DEF-COLO-309` **/color pink and /color cyan leave the tab with no colour** - MINOR; both are colours Claude accepts; each releases the hand pick, then the tab shows no colour because `_TAB_COLOUR_ID` has no entry for either; fix: pink maps to rose, cyan to sky, both placed last so `fork()` still maps rose and sky back to red and blue; `providers/claude.py`
+  - evidence: test_pink_and_cyan_show_their_nearest_palette_colour[pink-rose] and [cyan-sky] and test_a_fork_maps_rose_and_sky_back_to_red_and_blue pass; mutation M4 (unmapped) reddens both parametrized tests, M5 (placed before red and blue) reddens the fork reverse-map test; pytest 367 passed, 4 lib/ parity fails
+  - related: ACC-COLO-208
+  - repro: run /color pink in a Claude conversation with a terminal tab open: the tab loses its colour
+  - test-tags: UNIT
+  - root-cause: 2026-10-16T06:37:01Z @kj _TAB_COLOUR_ID mapped only six of Claude's eight colours to tab ids, so an accepted pink or cyan resolved to no tab colour
+  - log: 2026-10-16T06:37:01Z @kj added
+  - log: 2026-10-16T06:37:41Z @kj closed: fixed: _TAB_COLOUR_ID maps pink to rose and cyan to sky, both placed last
+- [x] `DEF-COLO-310` **Colour comments still say a hand pick always beats /color** - MINOR; comments and docstrings stated that a stored tab colour always wins over /color, or described a colour-store entry written for a Claude fork that is never written; corrected at nine sites, comments only; `src/core/types.ts`, `src/providers/claude.ts`, `src/core/panel.ts`, `core/routes.py`, `providers/claude.py`
+  - evidence: git diff of types.ts and claude.ts filtered to non-comment lines is empty; tsc exit 0, eslint exit 0, prettier exit 0, jest 347 passed, routes.py ast.parse ok
+  - related: DEF-COLO-306
+  - repro: read the ColourSource doc in src/core/types.ts against colour_store.judge: the doc says a stored entry wins over native, judge releases it after a newer /color
+  - test-tags: MANUAL
+  - root-cause: 2026-10-16T06:37:01Z @kj the newest-wins rule (DEF-COLO-306) changed colour_store.judge and routes._effective_colour but not the comments that described the old fixed precedence
+  - log: 2026-10-16T06:37:01Z @kj added
+  - log: 2026-10-16T06:37:13Z @kj amended text "five comments and one docstring stated that a stored tab colour always wins over /color, or described a colour-store entry written for a Claude fork that is never written; seven sites corrected, comments only; `src/core/types.ts`, `src/providers/claude.ts`, `src/core/panel.ts`, `core/routes.py`, `providers/claude.py`" -> "comments and docstrings stated that a stored tab colour always wins over /color, or described a colour-store entry written for a Claude fork that is never written; corrected at nine sites, comments only; `src/core/types.ts`, `src/providers/claude.ts`, `src/core/panel.ts`, `core/routes.py`, `providers/claude.py`"
+  - log: 2026-10-16T06:37:42Z @kj closed: fixed: nine comment and docstring sites restated as newest choice wins; no code changed
+- [x] `DEF-COLO-311` **A /color that scrolls out of the transcript tail is never seen** - MEDIUM; a /color is seen only while its record sits in the last 128 KiB of the transcript (`_TAIL_BYTES = 131072`); if more is written before a sessions listing or terminal probe judges the conversation, the run is never seen and the older hand pick stands; `providers/claude.py` `_read_tail`
+  - evidence: wontfix: the terminal probe runs every 30 seconds while JupyterLab is open (COLOUR_INTERVAL_MS = 30_000), so this needs 128 KiB of transcript written within 30 seconds of the /color; reading whole transcripts instead would read files of 100 MB and more on every poll
+  - related: ACC-COLO-208
+  - repro: pick a tab colour, run /color red, then write over 128 KiB to the transcript within 30 seconds before any probe: the pick stands
+  - test-tags: MANUAL
+  - root-cause: 2026-10-16T06:37:01Z @kj colour_choice_ms reads only the transcript tail, so a /color record older than the last _TAIL_BYTES is invisible to colour_store.judge
+  - log: 2026-10-16T06:37:01Z @kj added
+  - log: 2026-10-16T06:37:42Z @kj closed: accepted and logged, not fixed; reason: the wontfix reason must carry both the 30-second window and the cost of the alternative
+- [x] `DEF-COLO-313` **An older server sharing the colour store drops every pick time** - MINOR; a server older than 1.2.79 that writes the same colour store drops the `stamps` field; the newer server then reads every hand pick as untimed and releases each one whose conversation has a /color in its transcript tail; `core/colour_store.py`
+  - evidence: wontfix: needs two JupyterLab servers of different versions sharing one Jupyter data directory
+  - related: ACC-COLO-208
+  - repro: run 1.2.78 and 1.2.79 servers on one Jupyter data directory, pick a colour on each, let 1.2.78 write the store: 1.2.79 releases picks in conversations with a /color in the tail
+  - test-tags: MANUAL
+  - root-cause: 2026-10-16T06:37:02Z @kj a pre-1.2.79 server rewrites the store from its own schema, which has no stamps key, and colour_store.judge treats an untimed entry as older than any /color
+  - log: 2026-10-16T06:37:02Z @kj added
+  - log: 2026-10-16T06:37:42Z @kj closed: accepted and logged, not fixed
 
 ## Guards, tests and tooling `GUARD`
 

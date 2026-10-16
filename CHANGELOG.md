@@ -8,6 +8,8 @@
 - DeepSeek panel icon replaced with the official DeepSeek whale mark, rendered monochrome in the theme foreground
 - Codex conversations can be renamed from the panel. The name is written through Codex's own app-server, so Codex's CLI lists the same name the panel shows; the Rename item was previously absent for Codex
 - Branching a named conversation names the branch after its parent with the next free number, `analysis_1` then `analysis_2`, without asking for a name, and the branch inherits the parent's tab colour
+- A Claude terminal tab follows your newest colour choice. Running `/color` in the conversation after picking a colour on its tab now changes the tab, where the tab pick used to win until `Reset Tab Colour`; a tab pick made after `/color` still stands, also when the conversation is opened again. A `/color` that Claude rejects does not count, and `/color pink` and `/color cyan` show as rose and sky
+- The Manage Sessions dialog shows `Delete` in its action row beside `Close`, as an outlined red button that fills red once armed for the second click, instead of as grey text on a row of its own
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 

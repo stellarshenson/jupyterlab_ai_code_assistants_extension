@@ -1,5 +1,9 @@
 # Recovery State - jupyterlab_ai_code_assistants_extension
 
+## 2026-10-16 07:40 - RESUMED
+
+The brace below is closed. Same session returned; no job had died. CI on `5bc8bb0` is green in every job - Build, Check Links, Integration tests (`Running 70 tests` -> `70 passed (4.2m)`, the sum of the `test(` declarations across all 17 spec files) and test_isolated, plus Check Release. That run answers pending item 1 and item 4 below, so `wf_00698ace-52c` was dropped rather than relaunched. `wf_322da9c6-751` was resumed from cache to file the two MINORs and run the two re-checks.
+
 ## 2026-10-16 06:45 - BRACE (reason: usage limits)
 
 **HORIZON: LIMIT** - taken from the Star Colonel's stated reason, not from the probe. `brace-horizon` printed `CLEAR` (no Claude usage window near its ceiling); the cap being braced for is not the one that probe reads. Consequences: the host is fine, detached compute is not at risk, and this session should return after the cap resets. Workflows below are **paused, not killed** - resume them in this session and their completed agents replay from cache.

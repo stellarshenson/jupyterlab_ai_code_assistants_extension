@@ -701,6 +701,15 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-10-15T12:28:03Z @kj added
   - log: 2026-10-15T17:43:48Z @kj edited test "Branch a session named analysis twice; assert analysis_1 and analysis_2 in the panel and conversation list after reopening; an existing suffix must not be reused" -> "Galata ui-tests/tests/native-branch.spec.ts: branch the seeded parent twice and assert the children read <parent>_2 then <parent>_4, skipping the seeded _1 and _3, with no name dialog"; test-tags "MANUAL" -> "E2E"
   - log: 2026-10-15T17:43:48Z @kj closed: closed: browser-verified in ui-tests/tests/native-branch.spec.ts
+- [x] `ACC-SESS-209` **Manage Sessions Delete in the action row** - MEDIUM; Delete (n) sits at the left of the Manage Sessions dialog's action row with its selection counter, Close at the right; device bridge destructive style: error-colour outline, faded when disabled, error fill when armed as 'Confirm delete N'; a permanent delete arms first, deletes on the next click, disarms on blur
+  - related: DEF-PANE-307
+  - related: ACC-SESS-56 - the popup this places Delete in
+  - evidence: 1.2.79: Galata claude-regression.spec.ts:208 'Manage Sessions Delete sits in the action row and follows the destructive style (DEF-PANE-307)' passed (3.6s); screenshots manage-sessions-delete-disabled.png (Delete (0) left of Close, faded red outline), -enabled.png (Delete (1), full error-red outline), -armed.png ('Confirm delete 1', solid error-red fill); jest popup.spec.ts within 347 passed; Galata suite 72 passed
+  - test: jlpm jest src/__tests__/popup.spec.ts and cd ui-tests && JLAB_TEST_PORT=8899 jlpm playwright test claude-regression.spec.ts -g DEF-PANE-307
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-10-16T06:18:33Z @kj a Dialog.Renderer subclass prepends the Delete button and its counter to the dialog footer
+  - log: 2026-10-16T06:18:33Z @kj added; reason: position, three style states and the two-step arming are one action-row criterion as specified
+  - log: 2026-10-16T06:18:38Z @kj closed; reason: names the Galata check and all three screenshots with what each shows
 
 ## Colour `COLO`
 
@@ -735,6 +744,7 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
   - log: 2026-09-17T17:25:59Z @kj edited importance
   - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-COLO-72` **Override precedence** - HIGH; a user-set colour beats every default: the derived hash (Kimi), the empty default (Codex, Gemini) AND the assistant's own colour (Claude's `/color`). Releasing the override hands the conversation back to its default
+  - overridden-by: ACC-COLO-208
   - evidence: test_colour_store.py test_user_set_colour_beats_the_derived_hash, test_a_hand_set_colour_beats_the_assistants_own, test_user_set_colour_supplies_the_tint_where_there_is_none and test_dropping_the_override_hands_a_native_conversation_back_to_the_assistant cover all four defaults and the release; colour.spec.ts effectiveColour 'lets a user-set colour beat every default' holds the frontend ladder
   - test-tags: UNIT
   - test: PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py and jlpm jest src/__tests__/colour.spec.ts
@@ -850,6 +860,18 @@ Terminal tab tint per conversation. The `colourSource` capability flag names whe
   - log: 2026-10-15T12:28:03Z @kj added
   - log: 2026-10-15T17:43:49Z @kj edited test "Branch parents with an assistant-selected colour and a manual tab override; inspect each branch tab, reload, then reopen and verify the inherited colour" -> "Galata ui-tests/tests/native-branch.spec.ts: the branch row carries the parent's colour (sky) and the terminal probe answers the child with it"; test-tags "MANUAL" -> "E2E"
   - log: 2026-10-15T17:43:49Z @kj closed: closed: browser-verified; the /color argv is pinned by tests/test_native_branch.py
+- [x] `ACC-COLO-208` **Newest colour choice wins on a Claude tab** - HIGH; /color and a hand pick on the tab are equal; an accepted /color after a hand pick takes the tab and panel row, also when it repeats the colour or resets it; a rejected /color changes nothing; a hand pick after /color stands on tab and row, also after the session is opened again
+  - overrides: ACC-COLO-72
+  - overrides: ACC-CLAU-98
+  - related: DEF-COLO-306
+  - evidence: 1.2.79: Galata colour-newest-wins.spec.ts:99 'a /color run after a tab pick takes the tab and the row back' passed (32.0s), tab peach, sessions API rowColour 'peach', sky pick released, screenshot colour-newest-wins-peach.png; pytest 365 passed incl. test_a_color_run_after_a_pick_takes_over_and_releases_it, test_the_same_colour_run_again_still_takes_over, test_a_color_reset_after_a_pick_releases_it (modelled as /color default), test_a_pick_after_color_stands, test_an_untimed_pick_loses_to_a_color_in_the_tail, test_a_pick_with_no_color_in_the_tail_stands; reopen half rests on the kept store entry, no browser reopen run; jest 347 passed; Galata suite 72 passed
+  - test: cd ui-tests && JLAB_TEST_PORT=8899 jlpm playwright test colour-newest-wins.spec.ts and PYTHONPATH=$PWD python3 -m pytest jupyterlab_ai_code_assistants_extension/tests/test_colour_store.py
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-10-16T06:17:58Z @kj colour store stamps each write; Claude store reads the newest /color run time from the transcript tail (system/local_command record; agent-color re-stamps carry no time); sessions listing and terminal probe release an older or unstamped entry; no /color run found keeps it; frontend reloads its cache when a probe disagrees
+  - log: 2026-10-16T06:17:58Z @kj added
+  - log: 2026-10-16T06:18:07Z @kj closed; reason: one line names each of the four clauses' tests and the gap on the reopen clause
+  - log: 2026-10-16T06:37:22Z @kj narrowed to an accepted /color (DEF-COLO-308); held by test_a_rejected_color_run_does_not_release_a_pick and test_an_accepted_color_run_after_a_rejected_one_releases_the_pick, test_colour_store.py 49 passed on 2026-10-16
+  - log: 2026-10-16T06:37:31Z @kj amended text "/color and a hand pick on the tab are equal; a /color run after a hand pick takes the tab and panel row, also when it repeats the colour or resets it; a hand pick after /color stands on tab and row, also after the session is opened again" -> "/color and a hand pick on the tab are equal; an accepted /color after a hand pick takes the tab and panel row, also when it repeats the colour or resets it; a rejected /color changes nothing; a hand pick after /color stands on tab and row, also after the session is opened again"; reason: adds the accepted-only rule from DEF-COLO-308 to a body whose other clauses all still hold
 
 ## Retirement and Migration `RETI`
 
@@ -992,6 +1014,7 @@ Ported from `jupyterlab_claude_code_extension` v1.2.73, the architectural base. 
   - log: 2026-09-28T10:46:29Z @kj amended text "the server decides resume-versus-attach at launch time, so a stale panel cannot pick the wrong one" -> "HIGH; the server decides at launch time whether a background agent holds the conversation and must be stopped first, so a stale panel cannot pick the wrong verb"
   - log: 2026-09-28T11:26:29Z @kj closed
 - [x] `ACC-CLAU-98` **Coloured tabs from `/color`** - HIGH; the terminal tab tint comes from the session's own colour, via `jupyterlab_colourful_tab_extension`, unless the user set a colour on the tab by hand (see Colour / Override precedence)
+  - overridden-by: ACC-COLO-208
   - evidence: test_claude_default_colour_reads_the_conversation_not_the_row takes the tint from the conversation's own agentColor; test_colour_store.py test_a_hand_set_colour_beats_the_assistants_own and test_dropping_the_override_hands_a_native_conversation_back_to_the_assistant hold the precedence; ui-tests/tests/tab-colour-ownership.spec.ts and colour-override.spec.ts cover it in a running JupyterLab
   - test-tags: UNIT, E2E
   - test: PYTHONPATH=$PWD python3 -m pytest -k "claude_default_colour or hand_set_colour" and jlpm jest src/__tests__/colour.spec.ts

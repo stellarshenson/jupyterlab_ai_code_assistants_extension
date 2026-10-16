@@ -139,7 +139,10 @@ test('a /color run after a tab pick takes the tab and the row back', async ({
     // holds it, which is the state the defect painted from. The row menu runs
     // a colour pass now rather than at the loop's next tick.
     await row.click({ button: 'right' });
+    const menu = page.locator('.lm-Menu');
+    await expect(menu).toBeVisible();
     await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
     await expect(page.locator(CURRENT_TAB)).toHaveClass(
       /jp-colourful-tab-sky/,
       { timeout: 45000 }

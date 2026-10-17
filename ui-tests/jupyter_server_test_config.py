@@ -255,6 +255,22 @@ for _project, _title in (("native-branch", "Native branch"), ("manual-branch", "
         )))
         os.utime(_file, (_now - 1200 + _index, _now - 1200 + _index))
 
+# A Claude project owned by `click-spinner.spec.ts` alone: one conversation,
+# second newest so it stays alongside `branchy` at the top of the list, and
+# touched by no other spec, so that spec can hold the branch and probe routes
+# open without disturbing another spec's row history.
+_spinner_cwd = _root / "spinner-fixture"
+_spinner_cwd.mkdir()
+_spinner_dir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(str(_spinner_cwd))
+_spinner_dir.mkdir(parents=True)
+_spinner_file = _spinner_dir / "spinner-fixture.jsonl"
+_spinner_file.write_text("".join(json.dumps(record) + "\n" for record in (
+    {"cwd": str(_spinner_cwd)},
+    {"type": "custom-title", "customTitle": "Spinner fixture"},
+    {"type": "agent-color", "agentColor": "blue"},
+)))
+os.utime(_spinner_file, (_now - 300, _now - 300))
+
 # A Claude project owned by `colour-newest-wins.spec.ts` alone: it stores a pick
 # against this conversation and appends a `/color` run to this transcript, then
 # puts the transcript back. Seeded with Claude's own colour already set and no

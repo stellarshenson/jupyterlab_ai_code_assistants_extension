@@ -467,6 +467,29 @@ export class AssistantSessionsPanel extends Widget {
       'jp-aiAssistants-spinner jp-AiAssistantsPanel-loadingSpinner';
     loading.appendChild(loadingSpinner);
 
+    // Click-time busy overlay: raised synchronously when a row is opened or
+    // branched, before the terminal probe or the branch request, so the click
+    // never reads as ignored (DEF-PANE-318). Unlike the refresh veil it takes
+    // no pointer events and no focus: the context menu that launched a branch
+    // stays open until its command runs, and a focus change would close it.
+    const busy = document.createElement('div');
+    busy.className = 'jp-AiAssistantsPanel-busyOverlay';
+    busy.hidden = true;
+    const busySpinner = document.createElement('div');
+    busySpinner.className =
+      'jp-aiAssistants-spinner jp-AiAssistantsPanel-busySpinner';
+    busySpinner.setAttribute('aria-hidden', 'true');
+    busy.appendChild(busySpinner);
+    // The spinner is decoration; a screen-reader user hears the action
+    // instead. The region sits on the root, always rendered and outside the
+    // overlay and the aria-busy body: a live region created inside a
+    // display:none container, or one whose update lands in an aria-busy
+    // subtree, can be withheld by assistive technology.
+    const busyText = document.createElement('div');
+    busyText.className = 'jp-AiAssistantsPanel-srOnly';
+    busyText.setAttribute('role', 'status');
+    busyText.setAttribute('aria-live', 'polite');
+
     // Inline error strip - a failed poll reports here and keeps retrying,
     // rather than tearing the panel down or raising a modal that would also
     // interrupt the other providers' panels.
@@ -482,10 +505,44 @@ export class AssistantSessionsPanel extends Widget {
     root.appendChild(error);
     root.appendChild(body);
     root.appendChild(loading);
+    root.appendChild(busy);
+    root.appendChild(busyText);
 
     this._bodyEl = body;
     this._loadingEl = loading;
+    this._busyEl = busy;
+    this._busyTextEl = busyText;
     this._errorEl = error;
+  }
+
+  /** Raise the click-time busy overlay. Counted, because an open and a branch
+   * can overlap; the overlay clears when the last one ends. */
+  private _beginBusy(message: string): void {
+    this._busyCount += 1;
+    if (this._busyEl) {
+      this._busyEl.hidden = false;
+      if (this._busyTextEl) {
+        this._busyTextEl.textContent = message;
+      }
+      // The body is what the action changes; the root stays outside the
+      // busy subtree so the live region above is not withheld.
+      if (this._bodyEl) {
+        this._bodyEl.setAttribute('aria-busy', 'true');
+      }
+    }
+  }
+
+  private _endBusy(): void {
+    this._busyCount = Math.max(0, this._busyCount - 1);
+    if (this._busyCount === 0 && this._busyEl) {
+      this._busyEl.hidden = true;
+      if (this._busyTextEl) {
+        this._busyTextEl.textContent = '';
+      }
+      if (this._bodyEl) {
+        this._bodyEl.removeAttribute('aria-busy');
+      }
+    }
   }
 
   /** Show / hide the filter input. Hiding also clears the active filter, so
@@ -885,6 +942,9 @@ export class AssistantSessionsPanel extends Widget {
     force?: string,
     sessionId?: string
   ): Promise<void> {
+    // The click's own feedback, raised before the terminal walk and the
+    // launch - both can take seconds (DEF-PANE-318).
+    this._beginBusy(this._trans.__('Opening conversation'));
     try {
       await this._terminals.openSession(
         session,
@@ -905,6 +965,7 @@ export class AssistantSessionsPanel extends Widget {
         this._notifyLaunchError('Could not open that conversation', err);
       }
     } finally {
+      this._endBusy();
       // Reuse or fresh launch, either way the picture changed. Pull fresh
       // state; a poll tick retries if this one fails.
       void this._fetch().catch(() => undefined);
@@ -1159,7 +1220,15 @@ export class AssistantSessionsPanel extends Widget {
     if (!session) {
       return;
     }
-    await this._branchByServerCopy(session, undefined, force);
+    // Raised on the click: the branch POST mints the fork server-side (for
+    // Claude and Codex by running their own CLI) and can take seconds
+    // (DEF-PANE-318).
+    this._beginBusy(this._trans.__('Branching conversation'));
+    try {
+      await this._branchByServerCopy(session, undefined, force);
+    } finally {
+      this._endBusy();
+    }
   }
 
   /** The server mints the new id and answers with it before the terminal
@@ -2785,6 +2854,9 @@ export class AssistantSessionsPanel extends Widget {
   private readonly _removingPaths: Set<string> = new Set();
   private _bodyEl!: HTMLDivElement;
   private _loadingEl: HTMLElement | null = null;
+  private _busyEl: HTMLElement | null = null;
+  private _busyTextEl: HTMLElement | null = null;
+  private _busyCount = 0;
   private _errorEl: HTMLElement | null = null;
   private _refreshBtn: HTMLButtonElement | null = null;
   private _filterBtn: HTMLButtonElement | null = null;

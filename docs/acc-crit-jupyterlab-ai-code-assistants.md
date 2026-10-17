@@ -528,6 +528,16 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - log: 2026-10-09T14:40:28Z @kj edited evidence "panel.spec.ts and index.spec.ts ACC-PANE-200 cases pass, red under 3 source mutations; Galata test 8 passes at 1.2.65, red under bundle mutations M11 and M12; screenshot move-keeps-own-panel.png shows the Codex panel on screen" -> "panel.spec.ts 1 case and index.spec.ts 3 cases pass, red under source mutations U1 and N1 to N4; Galata test 8 passes at 1.2.66, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen"
   - log: 2026-10-10T01:19:52Z @kj edited evidence "panel.spec.ts 1 case and index.spec.ts 3 cases pass, red under source mutations U1 and N1 to N4; Galata test 8 passes at 1.2.66, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen" -> "panel.spec.ts 1 case red under source mutation P10, index.spec.ts 3 cases red under I2, I3, I4; Galata test 8 passes at 1.2.69, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen"
   - log: 2026-10-10T02:29:37Z @kj edited evidence "panel.spec.ts 1 case red under source mutation P10, index.spec.ts 3 cases red under I2, I3, I4; Galata test 8 passes at 1.2.69, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen" -> "panel.spec.ts 1 case red under source mutation P10, index.spec.ts 3 cases red under I2, I3, I4; Galata test 8 passes at 1.2.70, red under bundle mutations M11, M13, M14; screenshot move-keeps-own-panel.png shows the Codex panel on screen"
+- [x] `ACC-PANE-210` **Immediate busy state on branching and opening** - HIGH; a Branch Session click and a row click raise the panel's busy overlay on the click, before the terminal probe or the branch request, and clear it when the open or branch settles; the overlay takes no pointer events and no focus; `src/core/panel.ts`
+  - evidence: Jest 339 and pytest 365 at 1.2.98; Galata 74/74; every assertion mutation-checked (overlay raise, aria-busy, counter, region placement/role/hiding, pointer-events, spinner paint, failure clears); survived adversarial review with a panel of architect, bug-hunter and ux-designer, last round SHIP
+  - related: DEF-PANE-318
+  - test: hold the branch route and the terminal probe route open; assert the overlay is visible within 1.5 s; stop raising the overlay and both tests redden
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-10-17T16:00:50Z @kj the overlay is raised synchronously at the start of _openSession and _branchSession and cleared in their finally; a counter keeps it up while either is in flight
+  - log: 2026-10-17T16:00:50Z @kj added
+  - log: 2026-10-17T16:00:58Z @kj closed
+  - log: 2026-10-17T17:27:53Z @kj reopened; evidence retired: Jest 337 and pytest 365 at 1.2.89; Galata 74/74, click-spinner.spec.ts both tests pass and redden when the overlay is not raised; panel.spec.ts click-time busy state mutation-checked
+  - log: 2026-10-17T17:27:53Z @kj closed
 
 ## Sessions `SESS`
 

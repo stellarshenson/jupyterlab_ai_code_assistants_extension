@@ -4,6 +4,12 @@
 
 <!-- <END NEW CHANGELOG ENTRY> -->
 
+## [1.2.99] - 2026-10-17
+
+### Fixed
+
+- A Branch Session click or a row click raises the panel's spinner at once and keeps it until the terminal opens, instead of staying silent while the extension decides
+
 ## [1.2.83] - 2026-10-16
 
 ### Changed

@@ -559,6 +559,13 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
     animation: none;
     opacity: 0.5;
   }
+
+  /* The click-time busy spinner is the only thing on screen while a click is
+     being handled, so it keeps full opacity: dimmed, its brand arc measures
+     1.74:1 on the light panel, below the 3:1 minimum for a non-text cue. */
+  .jp-AiAssistantsPanel-busySpinner {
+    opacity: 1;
+  }
 }
 
 /* Full-panel veil shown only during an explicit refresh (refresh button or
@@ -576,6 +583,26 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
 }
 
 .jp-AiAssistantsPanel-loadingSpinner {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+}
+
+/* Click-time busy overlay (DEF-PANE-318): raised on the click, before the
+   terminal probe or the branch request. No pointer events and no focus - the
+   context menu that launched a branch stays open until its command runs, and
+   a focus change would close it. */
+.jp-AiAssistantsPanel-busyOverlay:not([hidden]) {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.jp-AiAssistantsPanel-busySpinner {
   width: 24px;
   height: 24px;
   border-width: 3px;
@@ -740,7 +767,7 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   border-radius: var(--aica-radius-lg);
 }
 
-/* Visually hidden polite live region (delete announcements). */
+/* Visually hidden polite live region (polite announcements). */
 .jp-AiAssistantsPanel-srOnly {
   position: absolute;
   width: 1px;

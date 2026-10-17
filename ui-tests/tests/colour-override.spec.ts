@@ -34,7 +34,10 @@ const coloursUrl =
 const sessionsUrl =
   '/jupyterlab-ai-code-assistants-extension/providers/claude/sessions';
 
-/** The seeded conversation the panel shows as claude's current one. */
+/** The seeded conversation the panel shows as claude's current one for the
+ * `branchy` project, which is the row every menu in this spec is opened on.
+ * Named rather than taken as the first row: another fixture project sorting
+ * above it must not move this spec to a conversation its menu never reaches. */
 async function seededSession(page: any): Promise<{
   session_id: string;
   colour: string | null;
@@ -43,7 +46,12 @@ async function seededSession(page: any): Promise<{
   const response = await page.request.get(sessionsUrl);
   expect(response.ok()).toBe(true);
   const rows = ((await response.json()) as any).sessions as any[];
-  const row = rows.find(r => typeof r.session_id === 'string' && r.session_id);
+  const row = rows.find(
+    r =>
+      typeof r.session_id === 'string' &&
+      r.session_id &&
+      String(r.project_path).endsWith('/branchy')
+  );
   if (!row) {
     throw new Error('no seeded claude conversation to colour');
   }

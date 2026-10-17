@@ -455,6 +455,146 @@ describe('ACC-SESS-203 - automatic branch names', () => {
   );
 });
 
+describe('click-time busy state (DEF-PANE-318)', () => {
+  it('raises the overlay and the body busy state on the click, before the open settles', async () => {
+    const target = makePanel(DESCRIPTOR);
+    const parent = session();
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    (target as any)._terminals.openSession = jest.fn(() => pending);
+    (target as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    const overlay = (): HTMLElement =>
+      target.node.querySelector('.jp-AiAssistantsPanel-busyOverlay')!;
+    const body = (): HTMLElement =>
+      target.node.querySelector('.jp-AiAssistantsPanel-body')!;
+
+    const live = target.node.querySelector(
+      '.jp-AiAssistantsPanel-srOnly'
+    ) as HTMLElement;
+    // Rendered at build, not created on demand: the region must be in the
+    // accessibility tree before the click, so its first update is announced.
+    expect(live).not.toBeNull();
+    expect(live.textContent).toBe('');
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+
+    expect(overlay().hidden).toBe(true);
+    // Root placement is load-bearing: _render wipes the body on every fetch,
+    // including the 30 s poll, which would delete an overlay kept there.
+    expect(overlay().parentElement).toBe(target.node);
+    // The overlay takes no focus, so the context menu that launched an action
+    // cannot be closed by an element inside it taking the focus.
+    expect(overlay().hasAttribute('tabindex')).toBe(false);
+    expect(
+      overlay().querySelectorAll(
+        'a[href], button, input, select, textarea, [tabindex]'
+      )
+    ).toHaveLength(0);
+
+    const call = (target as any)._openSession(parent);
+    // The click's own task, before the open settles.
+    expect(overlay().hidden).toBe(false);
+    expect(body().getAttribute('aria-busy')).toBe('true');
+    // Outside both the hidden overlay and the busy body, so assistive
+    // technology is not told to withhold the announcement.
+    expect(live.parentElement).toBe(target.node);
+    expect(body().contains(live)).toBe(false);
+    expect(overlay().contains(live)).toBe(false);
+    expect(live.textContent).toBe('Opening conversation');
+
+    release();
+    await call;
+    expect(overlay().hidden).toBe(true);
+    expect(body().getAttribute('aria-busy')).toBeNull();
+    // Cleared, so an identical action can announce again.
+    expect(live.textContent).toBe('');
+
+    target.dispose();
+  });
+
+  it('keeps the overlay up while a second action is still running', async () => {
+    const target = makePanel(DESCRIPTOR);
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const first = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    const second = new Promise<void>(resolve => {
+      releaseSecond = resolve;
+    });
+    const requests = [first, second];
+    (target as any)._terminals.openSession = jest.fn(() => requests.shift());
+    (target as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    const overlay = (): HTMLElement =>
+      target.node.querySelector('.jp-AiAssistantsPanel-busyOverlay')!;
+    const body = (): HTMLElement =>
+      target.node.querySelector('.jp-AiAssistantsPanel-body')!;
+
+    const callOne = (target as any)._openSession(
+      session({ session_id: 'one' })
+    );
+    const callTwo = (target as any)._openSession(
+      session({ session_id: 'two' })
+    );
+    expect(overlay().hidden).toBe(false);
+
+    releaseFirst();
+    await callOne;
+    expect(overlay().hidden).toBe(false);
+    expect(body().getAttribute('aria-busy')).toBe('true');
+
+    releaseSecond();
+    await callTwo;
+    expect(overlay().hidden).toBe(true);
+    expect(body().getAttribute('aria-busy')).toBeNull();
+
+    target.dispose();
+  });
+
+  it('announces the branch action while the request is pending', async () => {
+    const target = makePanel(DESCRIPTOR);
+    const parent = session({ name: 'analysis', name_source: 'session' });
+    const launch = jest.fn().mockResolvedValue({});
+    (target as any)._terminals.launch = launch;
+    (target as any)._activeSession = parent;
+    (target as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    let release!: (value: unknown) => void;
+    const pending = new Promise(resolve => {
+      release = resolve;
+    });
+    request.mockImplementation((_provider, path) =>
+      path === 'branch' ? pending : Promise.resolve({})
+    );
+    const body = (): HTMLElement =>
+      target.node.querySelector('.jp-AiAssistantsPanel-body')!;
+    const live = target.node.querySelector(
+      '.jp-AiAssistantsPanel-srOnly'
+    ) as HTMLElement;
+    let call: Promise<void> | undefined;
+    try {
+      call = (target as any)._branchSession();
+      expect(body().getAttribute('aria-busy')).toBe('true');
+      expect(live.textContent).toBe('Branching conversation');
+
+      release({ session_id: 'child' });
+      await call;
+      expect(body().getAttribute('aria-busy')).toBeNull();
+      expect(live.textContent).toBe('');
+    } finally {
+      // A failed assertion must not leave the mock unresolved for the next
+      // test; resolving twice is harmless.
+      release({ session_id: 'child' });
+      if (call) {
+        await call.catch(() => undefined);
+      }
+      target.dispose();
+      request.mockImplementation(() => Promise.resolve({}));
+    }
+  });
+});
+
 describe('a branch whose terminal launch was refused after the mint', () => {
   it('says the branch was created and still lists it when the launch is refused', async () => {
     // The DeepSeek preflight refuses the follow-up launch with a 409 whose
@@ -492,6 +632,15 @@ describe('a branch whose terminal launch was refused after the mint', () => {
       .mockImplementation(() => '');
     try {
       await (target as any)._branchSession();
+
+      // The refused launch still clears the click-time busy state.
+      expect(
+        (
+          target.node.querySelector(
+            '.jp-AiAssistantsPanel-busyOverlay'
+          ) as HTMLElement
+        ).hidden
+      ).toBe(true);
 
       // What the user is told: the branch was created, its terminal did not
       // open, and the refusal's own words - neither sentence that blames the
@@ -1820,6 +1969,14 @@ describe('ACC-SESS-190..192 - opening a session moves the file browser', () => {
 
     expect(opened).toHaveBeenCalledTimes(1);
     expect(moves(panel)).toEqual([]);
+    // The failed open clears the click-time busy state.
+    expect(
+      (
+        panel.node.querySelector(
+          '.jp-AiAssistantsPanel-busyOverlay'
+        ) as HTMLElement
+      ).hidden
+    ).toBe(true);
     // One notification, and it is the one the failed open raises itself.
     expect(notified()).toHaveLength(1);
     expect(notified()[0]).toContain('Could not open that conversation');

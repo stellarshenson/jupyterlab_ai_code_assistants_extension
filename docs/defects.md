@@ -1319,6 +1319,15 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-10-16T11:33:44Z @kj added
   - log: 2026-10-16T12:14:11Z @kj amended text "text typed straight after opening Manage Sessions goes to the Close button and is dropped, and Enter closes the dialog; the filter must be clicked first; src/core/popup.ts" -> "text typed straight after opening Manage Sessions goes to the Close button and is dropped; the filter must be clicked first; src/core/popup.ts"
   - log: 2026-10-16T13:58:21Z @kj closed
+- [x] `DEF-PANE-318` **No spinner on branching or opening until the launch starts** - MEDIUM; a Branch Session click and a row click show no busy state for several seconds while the extension resolves its next step, so the click reads as ignored; root cause recorded below; fix: raise the panel's busy overlay on the click, before any store or route work; `src/core/panel.ts`
+  - root-cause: 2026-10-17T17:28:28Z @kj the only busy indicator was raised inside launch(), after the terminal walk and the branch mint; the click itself raised nothing until those answered
+  - related: ACC-PANE-210
+  - evidence: Jest 337 and pytest 365 at 1.2.89; Galata 74/74, click-spinner.spec.ts both tests pass and redden when the overlay is not raised; panel.spec.ts click-time busy state mutation-checked
+  - repro: right-click a session row, Branch Session: the menu closes and nothing shows for several seconds before a spinner; a plain row click behaves the same
+  - test-tags: E2E
+  - log: 2026-10-17T15:04:39Z @kj added
+  - log: 2026-10-17T16:00:58Z @kj closed
+  - log: 2026-10-17T17:28:36Z @kj amended text "a Branch Session click and a row click show no busy state for several seconds while the extension resolves its next step, so the click reads as ignored; cause under investigation; fix: raise the spinner on the click, before any store or route work; `src/core/panel.ts`" -> "a Branch Session click and a row click show no busy state for several seconds while the extension resolves its next step, so the click reads as ignored; root cause recorded below; fix: raise the panel's busy overlay on the click, before any store or route work; `src/core/panel.ts`"
 
 ## Colour store `COLO`
 

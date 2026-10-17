@@ -235,6 +235,11 @@ export class AssistantSessionsPanel extends Widget {
 
   dispose(): void {
     this._stopPolling();
+    // The busy overlay lives on the shell, outside this widget's tree, so
+    // removing the panel does not remove it. Left behind it would show a
+    // spinner for a panel that no longer exists.
+    this._busyEl?.remove();
+    this._busyEl = null;
     // Disabling a provider must leave its running terminals alive and only
     // drop the tint this panel applied.
     void this._terminals.clearColours();
@@ -469,15 +474,18 @@ export class AssistantSessionsPanel extends Widget {
 
     // Click-time busy overlay: raised synchronously when a row is opened or
     // branched, before the terminal probe or the branch request, so the click
-    // never reads as ignored (DEF-PANE-318). Unlike the refresh veil it takes
-    // no pointer events and no focus: the context menu that launched a branch
-    // stays open until its command runs, and a focus change would close it.
+    // never reads as ignored (DEF-PANE-318). It sits on the LAB SHELL, not on
+    // the panel: the feedback belongs in the main working area, where the
+    // launch spinner appears, and a panel that is hidden or scrolled must not
+    // keep it out of sight (DEF-PANE-318-1). It takes no pointer events and no
+    // focus: the context menu that launched a branch stays open until its
+    // command runs, and a focus change would close it.
     const busy = document.createElement('div');
-    busy.className = 'jp-AiAssistantsPanel-busyOverlay';
+    busy.className = 'jp-AiAssistants-busyOverlay';
     busy.hidden = true;
     const busySpinner = document.createElement('div');
     busySpinner.className =
-      'jp-aiAssistants-spinner jp-AiAssistantsPanel-busySpinner';
+      'jp-aiAssistants-spinner jp-AiAssistants-busySpinner';
     busySpinner.setAttribute('aria-hidden', 'true');
     busy.appendChild(busySpinner);
     // The spinner is decoration; a screen-reader user hears the action
@@ -505,8 +513,10 @@ export class AssistantSessionsPanel extends Widget {
     root.appendChild(error);
     root.appendChild(body);
     root.appendChild(loading);
-    root.appendChild(busy);
     root.appendChild(busyText);
+    // The shell carries the visible feedback; the panel carries the
+    // announcement.
+    this._app.shell.node.appendChild(busy);
 
     this._bodyEl = body;
     this._loadingEl = loading;
@@ -1118,7 +1128,13 @@ export class AssistantSessionsPanel extends Widget {
       if (row) {
         // A terminal already holding that conversation IS the answer: a second
         // process on one history is never what the click meant (ACC-LNCH-152).
-        const found = await this._terminals.findForSession(row.session_id);
+        // The folder is required as well: a transcript re-homed into another
+        // project keeps its id, and that terminal is not this folder's
+        // (DEF-PANE-319).
+        const found = await this._terminals.findForSession(
+          row.session_id,
+          folder
+        );
         if (found) {
           this._terminals.focus(found.widget);
           return found.widget;
@@ -1437,19 +1453,6 @@ export class AssistantSessionsPanel extends Widget {
         Notification.warning(
           'That conversation could not be made the current one.',
           { autoClose: 4000 }
-        );
-      } else {
-        // The re-render is the only other signal, and it can read as the
-        // opposite of success: the row now reports the conversation's true
-        // last activity, so switching to an old one dims the row and drops
-        // it out of Recent (DEF-PANE-181).
-        const target = this._lastBranches.find(b => b.session_id === sessionId);
-        const label =
-          target?.label ??
-          shortSessionId(sessionId, this._descriptor.sessionIdPrefix);
-        Notification.success(
-          `${this._lookupName(session)}: switched to ${label}`,
-          { autoClose: 3000 }
         );
       }
     } catch (err) {

@@ -2,6 +2,19 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.105] - 2026-10-17
+
+### Changed
+
+- A successful conversation switch no longer raises a toast. The row's own update is the signal, and the warning for a switch the store refuses stays
+
+### Fixed
+
+- The click-time spinner for a row click and a Branch Session click now covers the main working area, centred on the lab shell, instead of sitting inside the assistant panel
+- A re-homed conversation reuses a terminal only when that terminal's working directory sits inside the clicked project; otherwise the click opens a terminal in the clicked folder
+- A real conversation whose first turn follows more than 256 KiB of file-history snapshots is no longer hidden as a metadata-only transcript
+- A project whose current conversation is a metadata-only transcript counts its other conversations correctly instead of one short
+
 <!-- <END NEW CHANGELOG ENTRY> -->
 
 ## [1.2.99] - 2026-10-17

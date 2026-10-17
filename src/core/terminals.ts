@@ -199,8 +199,9 @@ export class TerminalManager {
       return;
     }
 
-    // 2. Walk every live terminal, asking the server what each is running.
-    const found = await this.findForSession(wanted);
+    // 2. Walk every live terminal, asking the server what each is running in
+    // this project.
+    const found = await this.findForSession(wanted, session.project_path);
     if (found) {
       // Tag with the OBSERVED conversation, so a later reuse trusts a
       // confirmed identity rather than a wish.
@@ -282,27 +283,51 @@ export class TerminalManager {
     });
   }
 
-  /** Find an open terminal running exactly this conversation, or null.
+  /** Find an open terminal running exactly this conversation in this project,
+   * or null.
    *
-   * Matches on the conversation id ALONE. The server reads the true id from
-   * the running process, so a session the user started by hand is recognised
-   * too, not only launches that carry an argv id. An id is globally unique to
-   * one conversation, so a terminal holding it IS the one to focus, whatever
-   * cwd it reports - a process that changed directory, or whose project dir
-   * was recreated, must still be reused rather than duplicated. */
+   * The server reads the true id from the running process, so a session the
+   * user started by hand is recognised too, not only launches that carry an
+   * argv id. The terminal must ALSO work in the requested project. An id is
+   * not globally unique in the store: Claude re-homes a transcript into a
+   * second project under the same id, so an id match alone can name a process
+   * running it from another tree, and reusing that one opens nothing in the
+   * folder the user clicked (DEF-PANE-319). A process that changed directory
+   * WITHIN the project still matches - the probe lists every cwd in its
+   * tree. */
   async findForSession(
-    wantedSessionId: string | undefined
+    wantedSessionId: string | undefined,
+    projectPath: string
   ): Promise<{ widget: any; runningId: string | null } | null> {
     if (!this._tracker || !wantedSessionId) {
       return null;
     }
     for (const widget of this._liveTerminals()) {
       const info = await this.probe(widget);
-      if (info && info.session_id && info.session_id === wantedSessionId) {
+      if (
+        info &&
+        info.session_id &&
+        info.session_id === wantedSessionId &&
+        this._runsInProject(info.cwds, projectPath)
+      ) {
         return { widget, runningId: info.session_id };
       }
     }
     return null;
+  }
+
+  /** Whether any process in the terminal's tree works in `projectPath` or a
+   * directory under it. No cwds means nothing to prove the terminal belongs
+   * to this project, so it is not reused. */
+  private _runsInProject(
+    cwds: string[] | undefined,
+    projectPath: string
+  ): boolean {
+    const root = projectPath.replace(/\/+$/, '');
+    return (cwds ?? []).some(cwd => {
+      const path = cwd.replace(/\/+$/, '');
+      return path === root || path.startsWith(`${root}/`);
+    });
   }
 
   /** Ask the server what a terminal is running. Null when the widget has no

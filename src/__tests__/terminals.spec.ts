@@ -26,6 +26,7 @@ import {
 const request = requestProvider as jest.MockedFunction<typeof requestProvider>;
 
 const PROJECT = '/home/user/proj';
+const OTHER_PROJECT = '/home/user/other';
 const CURRENT = 'session-11111111-1111-4111-8111-111111111111';
 
 const DESCRIPTOR: IProviderDescriptor = {
@@ -85,6 +86,8 @@ const RUNNING_PROBE: ITerminalProbeResponse = {
 let terminals: any[];
 let launches: any[];
 let manager: TerminalManager;
+/** Per-terminal probe answers a test wants instead of the defaults below. */
+let probes: Record<string, ITerminalProbeResponse>;
 
 function makeManager(): TerminalManager {
   return new TerminalManager({
@@ -111,6 +114,7 @@ function makeManager(): TerminalManager {
 beforeEach(() => {
   terminals = [];
   launches = [];
+  probes = {};
   request.mockReset();
   request.mockImplementation((async (
     _providerId: string,
@@ -120,6 +124,9 @@ beforeEach(() => {
   ) => {
     if (path.startsWith('terminal/')) {
       const name = decodeURIComponent(path.slice('terminal/'.length));
+      if (probes[name]) {
+        return probes[name];
+      }
       return name === 'running'
         ? RUNNING_PROBE
         : { ...RUNNING_PROBE, terminal_name: name, running: false, cwds: [] };
@@ -140,6 +147,14 @@ afterEach(() => {
 });
 
 describe('terminal reuse', () => {
+  const READABLE: ITerminalProbeResponse = {
+    terminal_name: 'running',
+    running: true,
+    session_id: CURRENT,
+    cwds: [PROJECT],
+    colour: null
+  };
+
   it('never reuses a terminal whose conversation the server cannot read', async () => {
     manager = makeManager();
     manager.setSessions([session()]);
@@ -148,6 +163,43 @@ describe('terminal reuse', () => {
     await manager.openSession(session(), undefined, CURRENT);
 
     expect(launches).toHaveLength(1);
-    expect(await manager.findForSession(CURRENT)).toBeNull();
+    expect(await manager.findForSession(CURRENT, PROJECT)).toBeNull();
+  });
+
+  it('reuses a terminal running this conversation in this project', async () => {
+    manager = makeManager();
+    manager.setSessions([session()]);
+    terminals.push(terminal('running'));
+    probes.running = READABLE;
+
+    await manager.openSession(session(), undefined, CURRENT);
+
+    expect(launches).toHaveLength(0);
+    expect(await manager.findForSession(CURRENT, PROJECT)).not.toBeNull();
+  });
+
+  it('starts a terminal here when the conversation runs in another project', async () => {
+    manager = makeManager();
+    manager.setSessions([session()]);
+    terminals.push(terminal('running'));
+    // Same conversation id, different tree: Claude re-homed a copy of the
+    // transcript into another project, which is DEF-PANE-319's report.
+    probes.running = { ...READABLE, cwds: [OTHER_PROJECT] };
+
+    await manager.openSession(session(), undefined, CURRENT);
+
+    expect(launches).toHaveLength(1);
+    expect(launches[0].project_path).toBe(PROJECT);
+  });
+
+  it('reuses a terminal that changed directory inside the project', async () => {
+    manager = makeManager();
+    manager.setSessions([session()]);
+    terminals.push(terminal('running'));
+    probes.running = { ...READABLE, cwds: [PROJECT, `${PROJECT}/sub`] };
+
+    await manager.openSession(session(), undefined, CURRENT);
+
+    expect(launches).toHaveLength(0);
   });
 });

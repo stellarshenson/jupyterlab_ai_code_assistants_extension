@@ -10,20 +10,28 @@ import {
 test.use({ autoGoto: false, waitForApplication });
 
 /**
- * The click's own feedback (DEF-PANE-318).
+ * The click's own feedback (DEF-PANE-318, DEF-PANE-318-1).
  *
  * A Branch Session click and a row click used to show nothing for seconds: the
  * branch spinner was raised only after the branch route answered, and the open
  * spinner only after the server had been asked about every live terminal. Both
  * routes are held open here, so only a spinner raised ON the click can be seen
  * before the answer arrives.
+ *
+ * The spinner must sit in the MAIN WORKING AREA, on the lab shell, the way the
+ * launch spinner does - not inside the panel, where a hidden or scrolled panel
+ * keeps it out of sight. Every scenario therefore asserts the overlay is not a
+ * descendant of the panel, covers the viewport and takes no focus.
  */
 
 const PANEL = `#${panelId('claude')}`;
 const MENU = '.lm-Menu.jp-AiAssistantsContextMenu';
 const SESSIONS =
   '/jupyterlab-ai-code-assistants-extension/providers/claude/sessions';
-const BUSY = '.jp-AiAssistantsPanel-busyOverlay:not([hidden])';
+const BUSY = '.jp-AiAssistants-busyOverlay:not([hidden])';
+// Every panel builds its own overlay at startup and leaves it hidden, so the
+// spinner class alone matches one per provider. Scope it to the visible one.
+const SPINNER = `${BUSY} .jp-AiAssistants-busySpinner`;
 
 /** Longer than the assertion deadline, so a spinner raised only when the
  * delayed route answers cannot pass. */
@@ -84,7 +92,46 @@ async function branchRow(page: any, name: string): Promise<void> {
   await item.click();
 }
 
-test('a branch click shows the spinner before the branch route answers', async ({
+/** The overlay is on the shell, not inside the panel, and covers the window;
+ * its spinner is centred. Returns once all of that holds. */
+async function expectMainAreaOverlay(page: any): Promise<void> {
+  // The panel does not contain it: this is the placement defect itself.
+  await expect(page.locator(`${PANEL} ${BUSY}`)).toHaveCount(0);
+
+  const viewport = page.viewportSize()!;
+  const box = await page.locator(BUSY).boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeLessThanOrEqual(1);
+  expect(box!.y).toBeLessThanOrEqual(1);
+  expect(box!.width).toBeGreaterThanOrEqual(viewport.width - 2);
+  expect(box!.height).toBeGreaterThanOrEqual(viewport.height - 2);
+
+  const spinner = await page.locator(SPINNER).boundingBox();
+  expect(spinner).not.toBeNull();
+  expect(
+    Math.abs(spinner!.x + spinner!.width / 2 - viewport.width / 2)
+  ).toBeLessThan(8);
+  expect(
+    Math.abs(spinner!.y + spinner!.height / 2 - viewport.height / 2)
+  ).toBeLessThan(8);
+
+  // It never takes focus: the context menu that launched the action, and the
+  // element the user was working in, must keep it.
+  const focusedInside = await page.evaluate(
+    () =>
+      !!(
+        document.activeElement &&
+        (document.activeElement as HTMLElement).closest(
+          '.jp-AiAssistants-busyOverlay'
+        )
+      )
+  );
+  expect(focusedInside).toBe(false);
+  // And it is not a modal: no dialog is raised on the click.
+  await expect(page.locator('.jp-Dialog')).toHaveCount(0);
+}
+
+test('a branch click shows the main-area spinner before the branch route answers', async ({
   page
 }) => {
   await page.goto();
@@ -106,17 +153,12 @@ test('a branch click shows the spinner before the branch route answers', async (
   await branchRow(page, parent);
 
   // While the branch route is unanswered. The old code raised nothing here.
-  await expect(page.locator(PANEL).locator(BUSY)).toBeVisible({
-    timeout: SEEN_MS
-  });
+  await expect(page.locator(BUSY)).toBeVisible({ timeout: SEEN_MS });
+  await expectMainAreaOverlay(page);
   // The panel stays clickable while the action runs.
-  await expect(
-    page.locator(PANEL).locator('.jp-AiAssistantsPanel-busyOverlay')
-  ).toHaveCSS('pointer-events', 'none');
+  await expect(page.locator(BUSY)).toHaveCSS('pointer-events', 'none');
   // The overlay box alone would pass visibility with nothing painted inside.
-  const spinner = page
-    .locator(PANEL)
-    .locator('.jp-AiAssistantsPanel-busySpinner');
+  const spinner = page.locator(SPINNER);
   await expect(spinner).toBeVisible({ timeout: SEEN_MS });
   await expect(spinner).toHaveCSS('border-top-style', 'solid');
   await expect(spinner).toHaveCSS('border-top-width', '3px');
@@ -125,12 +167,10 @@ test('a branch click shows the spinner before the branch route answers', async (
   await expect
     .poll(() => currentName(page, 'spinner-fixture'), { timeout: 30000 })
     .not.toBe(parent);
-  await expect(page.locator(PANEL).locator(BUSY)).toHaveCount(0, {
-    timeout: 30000
-  });
+  await expect(page.locator(BUSY)).toHaveCount(0, { timeout: 30000 });
 });
 
-test('a row click shows the spinner before the terminal probe answers', async ({
+test('a row click shows the main-area spinner before the terminal probe answers', async ({
   page
 }) => {
   await page.goto();
@@ -153,14 +193,42 @@ test('a row click shows the spinner before the terminal probe answers', async ({
   await row(page, second).click();
 
   // While the probe of the live terminal is unanswered.
-  await expect(page.locator(PANEL).locator(BUSY)).toBeVisible({
-    timeout: SEEN_MS
-  });
+  await expect(page.locator(BUSY)).toBeVisible({ timeout: SEEN_MS });
+  await expectMainAreaOverlay(page);
 
   // The probe answers with the other project's conversation, so the launch
   // runs and its terminal appears; the spinner is gone with it.
   await expect
     .poll(() => terminalCount(page), { timeout: 30000 })
     .toBe(before + 2);
-  await expect(page.locator(PANEL).locator(BUSY)).toHaveCount(0);
+  await expect(page.locator(BUSY)).toHaveCount(0);
+});
+
+test('a refused branch clears the main-area spinner and says what happened', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  await page.route(BRANCH_ROUTE, async (route: any) => {
+    await new Promise(resolve => setTimeout(resolve, HOLD_MS));
+    // A failed request, not an invented answer: the branch route is never
+    // called, so nothing is minted and the panel reports the failure.
+    await route.abort();
+  });
+
+  const parent = await currentName(page, 'spinner-fixture');
+  const before = await terminalCount(page);
+  await branchRow(page, parent);
+
+  await expect(page.locator(BUSY)).toBeVisible({ timeout: SEEN_MS });
+  await expectMainAreaOverlay(page);
+
+  // The refusal clears the click's feedback, opens no terminal, and tells the
+  // user in the panel's own banner.
+  await expect(page.locator(BUSY)).toHaveCount(0, { timeout: 15000 });
+  await expect.poll(() => terminalCount(page), { timeout: 15000 }).toBe(before);
+  const banner = page.locator(PANEL).locator('.jp-AiAssistantsPanel-error');
+  await expect(banner).toBeVisible({ timeout: 15000 });
+  await expect(banner).toContainText('Could not branch this session');
 });

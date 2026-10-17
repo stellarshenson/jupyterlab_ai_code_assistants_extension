@@ -563,7 +563,7 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   /* The click-time busy spinner is the only thing on screen while a click is
      being handled, so it keeps full opacity: dimmed, its brand arc measures
      1.74:1 on the light panel, below the 3:1 minimum for a non-text cue. */
-  .jp-AiAssistantsPanel-busySpinner {
+  .jp-AiAssistants-busySpinner {
     opacity: 1;
   }
 }
@@ -589,11 +589,13 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
 }
 
 /* Click-time busy overlay (DEF-PANE-318): raised on the click, before the
-   terminal probe or the branch request. No pointer events and no focus - the
-   context menu that launched a branch stays open until its command runs, and
-   a focus change would close it. */
-.jp-AiAssistantsPanel-busyOverlay:not([hidden]) {
-  position: absolute;
+   terminal probe or the branch request. It lives on the lab shell so the
+   feedback appears in the main working area, not inside the panel
+   (DEF-PANE-318-1). No pointer events and no focus - the context menu that
+   launched a branch stays open until its command runs, and a focus change
+   would close it. */
+.jp-AiAssistants-busyOverlay:not([hidden]) {
+  position: fixed;
   inset: 0;
   z-index: 9;
   display: flex;
@@ -602,7 +604,7 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   pointer-events: none;
 }
 
-.jp-AiAssistantsPanel-busySpinner {
+.jp-AiAssistants-busySpinner {
   width: 24px;
   height: 24px;
   border-width: 3px;

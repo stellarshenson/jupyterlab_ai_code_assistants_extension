@@ -25,6 +25,7 @@ same value for a hand-launched server.
 """
 import json
 import os
+import shutil
 import stat
 import sqlite3
 import sys
@@ -170,7 +171,13 @@ _pdir.mkdir(parents=True, exist_ok=True)
 _now = time.time()
 for _i in range(3):
     _jsonl = _pdir / f"branch-{_i}.jsonl"
-    _records = [{"cwd": str(_project_cwd)}]
+    _records = [
+        {"cwd": str(_project_cwd)},
+        # A conversation holds a message. Without one the file is the
+        # metadata-only shape a fork or bridge session leaves behind, and the
+        # store neither lists it as a branch nor counts it (DEF-PANE-320).
+        {"type": "user", "message": {"role": "user", "content": "seed"}},
+    ]
     if _i == 2:
         # The newest conversation carries an assistant-chosen colour (`/color`),
         # so a test comparing a hand-set colour against "what the assistant
@@ -222,7 +229,16 @@ _wdir.mkdir(parents=True, exist_ok=True)
 # the chip lands on the row rather than only in the branch submenus.
 for _i, _wide_id in enumerate(("wide-0", _BG_SESSION_ID)):
     _jsonl = _wdir / f"{_wide_id}.jsonl"
-    _jsonl.write_text(json.dumps({"cwd": str(_wide_cwd)}) + "\n", encoding="utf-8")
+    _jsonl.write_text(
+        "".join(
+            json.dumps(record) + "\n"
+            for record in (
+                {"cwd": str(_wide_cwd)},
+                {"type": "user", "message": {"role": "user", "content": "seed"}},
+            )
+        ),
+        encoding="utf-8",
+    )
     os.utime(_jsonl, (_now - 600 + _i, _now - 600 + _i))
 
 # A third Claude project, owned by the rename spec alone. Renaming mutates the
@@ -237,7 +253,16 @@ _rename_cwd.mkdir(parents=True, exist_ok=True)
 _rdir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(str(_rename_cwd))
 _rdir.mkdir(parents=True, exist_ok=True)
 _jsonl = _rdir / "rename-0.jsonl"
-_jsonl.write_text(json.dumps({"cwd": str(_rename_cwd)}) + "\n", encoding="utf-8")
+_jsonl.write_text(
+    "".join(
+        json.dumps(record) + "\n"
+        for record in (
+            {"cwd": str(_rename_cwd)},
+            {"type": "user", "message": {"role": "user", "content": "seed"}},
+        )
+    ),
+    encoding="utf-8",
+)
 os.utime(_jsonl, (_now - 900, _now - 900))
 
 # Native branch tests own their projects and cannot rename another spec's row.
@@ -250,6 +275,7 @@ for _project, _title in (("native-branch", "Native branch"), ("manual-branch", "
         _file = _directory / f"{_project}-{_index}.jsonl"
         _file.write_text("".join(json.dumps(record) + "\n" for record in (
             {"cwd": str(_cwd)},
+            {"type": "user", "message": {"role": "user", "content": "seed"}},
             {"type": "custom-title", "customTitle": _title + _suffix},
             {"type": "agent-color", "agentColor": "blue"},
         )))
@@ -266,6 +292,7 @@ _spinner_dir.mkdir(parents=True)
 _spinner_file = _spinner_dir / "spinner-fixture.jsonl"
 _spinner_file.write_text("".join(json.dumps(record) + "\n" for record in (
     {"cwd": str(_spinner_cwd)},
+    {"type": "user", "message": {"role": "user", "content": "seed"}},
     {"type": "custom-title", "customTitle": "Spinner fixture"},
     {"type": "agent-color", "agentColor": "blue"},
 )))
@@ -284,9 +311,31 @@ _newest_dir.mkdir(parents=True)
 _jsonl = _newest_dir / "colour-newest-0.jsonl"
 _jsonl.write_text("".join(json.dumps(record) + "\n" for record in (
     {"cwd": str(_newest_cwd)},
+    {"type": "user", "message": {"role": "user", "content": "seed"}},
     {"type": "agent-color", "agentColor": "orange"},
 )), encoding="utf-8")
 os.utime(_jsonl, (_now - 1800, _now - 1800))
+
+# A project holding a COPY of `branchy`'s current conversation under the same
+# session id: the shape Claude leaves when a transcript is resumed from another
+# folder (docs in the my-claude skill, "Re-homed transcripts"). Owned by
+# `rehomed-session.spec.ts`, which proves that a click here opens a terminal in
+# THIS folder instead of focusing `branchy`'s running one (DEF-PANE-319).
+_rehomed_cwd = _root / "rehomed-fixture"
+_rehomed_cwd.mkdir()
+_rehomed_dir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(
+    str(_rehomed_cwd)
+)
+_rehomed_dir.mkdir(parents=True)
+_rehomed_file = _rehomed_dir / "branch-2.jsonl"
+shutil.copyfile(_pdir / "branch-2.jsonl", _rehomed_file)
+# The copy records the folder it moved to, which is what a re-homed transcript
+# does once the resumed conversation writes its next line. Without it the
+# resolver still reports `branchy`, and the listing drops this row as a
+# duplicate of that project.
+with _rehomed_file.open("a", encoding="utf-8") as _handle:
+    _handle.write(json.dumps({"cwd": str(_rehomed_cwd)}) + "\n")
+os.utime(_rehomed_file, (_now - 240, _now - 240))
 
 _codex_root = Path(os.environ["CODEX_HOME"])
 _codex_root.mkdir(parents=True)

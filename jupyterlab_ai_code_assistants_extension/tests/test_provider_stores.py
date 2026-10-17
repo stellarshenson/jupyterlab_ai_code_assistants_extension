@@ -230,6 +230,122 @@ def test_claude_branches_exclude_the_current_conversation(claude):
     assert set(store.project_session_ids(CLAUDE_ENCODED)) == {first, second}
 
 
+def test_claude_metadata_only_transcripts_are_not_branches(claude):
+    """A transcript with no message in it is not a conversation (DEF-PANE-320).
+
+    While a fork or bridge session is created, Claude writes a file holding
+    only metadata - ``last-prompt``, ``custom-title``, ``agent-name``,
+    ``mode``, ``bridge-session`` and ``cost-state`` records - until the first
+    message lands. Offering it as a branch, and counting it as an extra
+    session, shows an empty conversation the user can neither read nor resume.
+    """
+    store, root = claude
+    current, sibling = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [{"id": current, "cwd": PROJECT_PATH}, {"id": sibling, "cwd": PROJECT_PATH}],
+    )
+    touch(project_dir / f"{current}.jsonl", 0)
+    touch(project_dir / f"{sibling}.jsonl", -600)
+    pending = project_dir / f"{new_uuid()}.jsonl"
+    pending.write_text(
+        "\n".join(
+            json.dumps(record)
+            for record in (
+                {"type": "last-prompt", "lastPrompt": "hello"},
+                {"type": "custom-title", "customTitle": "Pending"},
+                {"type": "agent-name", "agentName": "claude"},
+                {"type": "mode", "mode": "normal"},
+                {"type": "bridge-session", "bridgeSessionId": "bridge"},
+                {"type": "cost-state", "totalCostUsd": 0},
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    # Written last, so its mtime would otherwise make it the current one.
+    touch(pending, -1200)
+
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == current
+    assert [b["session_id"] for b in listing["branches"]] == [sibling]
+    assert listing["total"] == 2
+    assert store.list_sessions()[0]["extra_sessions"] == 1
+
+
+def test_claude_a_large_metadata_prefix_is_still_a_conversation(claude):
+    """A real conversation can open past the first 256 KiB (DEF-PROV-322).
+
+    A bridge or resumed session writes file-history snapshots before its first
+    message: the live 225 MB transcript carries six of them, and its first user
+    record sits at byte 265,252. A fixed head budget reads the conversation as
+    metadata-only and hides it from the branch list and the extra count.
+    """
+    store, root = claude
+    current, sibling, late = new_uuid(), new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [{"id": current, "cwd": PROJECT_PATH}, {"id": sibling, "cwd": PROJECT_PATH}],
+    )
+    snapshot = json.dumps(
+        {"type": "file-history-snapshot", "data": "x" * (44 * 1024)}
+    )
+    prefix = "\n".join([snapshot] * 6) + "\n"
+    assert len(prefix) > 262_144, "the prefix must exceed the old head budget"
+    late_path = project_dir / f"{late}.jsonl"
+    late_path.write_text(
+        prefix + json.dumps({"type": "user", "cwd": PROJECT_PATH}) + "\n",
+        encoding="utf-8",
+    )
+    touch(project_dir / f"{current}.jsonl", 0)
+    touch(project_dir / f"{sibling}.jsonl", -600)
+    touch(late_path, -300)
+
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == current
+    assert late in [b["session_id"] for b in listing["branches"]]
+    assert store.list_sessions()[0]["extra_sessions"] == 2
+
+
+def test_claude_extra_sessions_excludes_the_current_stub(claude):
+    """A pinned metadata-only current must not cost a real sibling (DEF-PROV-323).
+
+    ``extra_sessions`` is the conversations beyond the current one. Counting
+    the files that pass the conversation filter and subtracting one silently
+    subtracts a real conversation whenever the pinned current is itself a stub.
+    """
+    store, root = claude
+    stub, first, second = new_uuid(), new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [{"id": first, "cwd": PROJECT_PATH}, {"id": second, "cwd": PROJECT_PATH}],
+    )
+    stub_path = project_dir / f"{stub}.jsonl"
+    stub_path.write_text(
+        "\n".join(
+            json.dumps(record)
+            for record in (
+                {"type": "last-prompt", "lastPrompt": "hello"},
+                {"type": "custom-title", "customTitle": "Stub"},
+                {"type": "mode", "mode": "normal"},
+                {"type": "cost-state", "totalCostUsd": 0},
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    # A switch made before the metadata filter could leave a stub pinned current.
+    state.write_pin("claude", CLAUDE_ENCODED, stub)
+    touch(project_dir / f"{first}.jsonl", 0)
+    touch(project_dir / f"{second}.jsonl", -60)
+    touch(stub_path, -120)
+
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == stub
+    assert {b["session_id"] for b in listing["branches"]} == {first, second}
+    assert store.list_sessions()[0]["extra_sessions"] == 2
+
+
 def test_claude_the_route_side_pin_outlives_recency(claude):
     store, root = claude
     first, second = new_uuid(), new_uuid()

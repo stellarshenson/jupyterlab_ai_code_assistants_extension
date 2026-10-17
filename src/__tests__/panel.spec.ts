@@ -119,14 +119,21 @@ function session(over: Partial<ISession> = {}): ISession {
 function makePanel(
   descriptor: IProviderDescriptor = DESCRIPTOR
 ): AssistantSessionsPanel {
+  const shellNode = document.createElement('div');
   return new AssistantSessionsPanel({
     app: {
       serviceManager: { serverSettings: {} },
-      commands: { execute: jest.fn() }
+      commands: { execute: jest.fn() },
+      shell: { node: shellNode, activateById: jest.fn() }
     } as any,
     descriptor,
     rootDir: '/home/user'
   });
+}
+
+/** The lab-shell node a panel mounts its click-time overlay on. */
+function shellNodeOf(panel: AssistantSessionsPanel): HTMLElement {
+  return (panel as any)._app.shell.node as HTMLElement;
 }
 
 function render(panel: AssistantSessionsPanel, rows: ISession[]): void {
@@ -466,7 +473,7 @@ describe('click-time busy state (DEF-PANE-318)', () => {
     (target as any)._terminals.openSession = jest.fn(() => pending);
     (target as any)._fetch = jest.fn().mockResolvedValue(undefined);
     const overlay = (): HTMLElement =>
-      target.node.querySelector('.jp-AiAssistantsPanel-busyOverlay')!;
+      shellNodeOf(target).querySelector('.jp-AiAssistants-busyOverlay')!;
     const body = (): HTMLElement =>
       target.node.querySelector('.jp-AiAssistantsPanel-body')!;
 
@@ -481,9 +488,11 @@ describe('click-time busy state (DEF-PANE-318)', () => {
     expect(live.getAttribute('aria-live')).toBe('polite');
 
     expect(overlay().hidden).toBe(true);
-    // Root placement is load-bearing: _render wipes the body on every fetch,
-    // including the 30 s poll, which would delete an overlay kept there.
-    expect(overlay().parentElement).toBe(target.node);
+    // Shell placement is load-bearing: the feedback belongs in the main
+    // working area, and a panel that is hidden or scrolled must not keep it
+    // out of sight (DEF-PANE-318-1).
+    expect(overlay().parentElement).toBe(shellNodeOf(target));
+    expect(target.node.contains(overlay())).toBe(false);
     // The overlay takes no focus, so the context menu that launched an action
     // cannot be closed by an element inside it taking the focus.
     expect(overlay().hasAttribute('tabindex')).toBe(false);
@@ -528,7 +537,7 @@ describe('click-time busy state (DEF-PANE-318)', () => {
     (target as any)._terminals.openSession = jest.fn(() => requests.shift());
     (target as any)._fetch = jest.fn().mockResolvedValue(undefined);
     const overlay = (): HTMLElement =>
-      target.node.querySelector('.jp-AiAssistantsPanel-busyOverlay')!;
+      shellNodeOf(target).querySelector('.jp-AiAssistants-busyOverlay')!;
     const body = (): HTMLElement =>
       target.node.querySelector('.jp-AiAssistantsPanel-body')!;
 
@@ -636,8 +645,8 @@ describe('a branch whose terminal launch was refused after the mint', () => {
       // The refused launch still clears the click-time busy state.
       expect(
         (
-          target.node.querySelector(
-            '.jp-AiAssistantsPanel-busyOverlay'
+          shellNodeOf(target).querySelector(
+            '.jp-AiAssistants-busyOverlay'
           ) as HTMLElement
         ).hidden
       ).toBe(true);
@@ -709,7 +718,8 @@ describe('DEF-132 - a panel docked before the first roster has no root', () => {
     return new AssistantSessionsPanel({
       app: {
         serviceManager: { serverSettings: {} },
-        commands: { execute: jest.fn() }
+        commands: { execute: jest.fn() },
+        shell: { node: document.createElement('div'), activateById: jest.fn() }
       } as any,
       descriptor: { ...DESCRIPTOR, iconName: 'testbed-rootless-panel-spec' },
       rootDir: '',
@@ -898,15 +908,12 @@ describe('DEF-PANE-183 - the status dot follows the name in the DOM', () => {
   });
 });
 
-describe('DEF-PANE-181 - a successful switch says so', () => {
-  it('announces the conversation the project now sits on', async () => {
+describe('DEF-PANE-321 - a successful switch stays quiet', () => {
+  it('issues the switch and raises no notification', async () => {
     const success = jest
       .spyOn(Notification, 'success')
       .mockReturnValue('' as any);
     const target = session({ name: 'proj' });
-    (panel as any)._lastBranches = [
-      { session_id: 'sid-other', file_mtime: 1, label: 'Second thoughts' }
-    ];
     request.mockImplementation((_id: string, route: string) =>
       Promise.resolve(
         route === 'switch'
@@ -915,8 +922,9 @@ describe('DEF-PANE-181 - a successful switch says so', () => {
       )
     );
     await (panel as any)._switchBranch(target, 'sid-other');
-    expect(success).toHaveBeenCalledTimes(1);
-    expect(success.mock.calls[0][0]).toBe('proj: switched to Second thoughts');
+    // The row's own re-render is the only signal a switch earns.
+    expect(request.mock.calls.map(call => call[1])).toContain('switch');
+    expect(success).not.toHaveBeenCalled();
   });
 
   it('stays quiet when the store could not make it current', async () => {
@@ -1852,7 +1860,10 @@ describe('ACC-SESS-190..192 - opening a session moves the file browser', () => {
     const p = new AssistantSessionsPanel({
       app: {
         serviceManager: { serverSettings: {} },
-        shell: { activateById: jest.fn() },
+        shell: {
+          node: document.createElement('div'),
+          activateById: jest.fn()
+        },
         commands: {
           execute: jest.fn(async (id: string) =>
             id === 'terminal:open'
@@ -1936,7 +1947,8 @@ describe('ACC-SESS-190..192 - opening a session moves the file browser', () => {
     const p = new AssistantSessionsPanel({
       app: {
         serviceManager: { serverSettings: {} },
-        commands: { execute: jest.fn() }
+        commands: { execute: jest.fn() },
+        shell: { node: document.createElement('div'), activateById: jest.fn() }
       } as any,
       descriptor: { ...DESCRIPTOR, iconName: 'testbed-rootless-sync-spec' },
       rootDir: ''
@@ -1972,8 +1984,8 @@ describe('ACC-SESS-190..192 - opening a session moves the file browser', () => {
     // The failed open clears the click-time busy state.
     expect(
       (
-        panel.node.querySelector(
-          '.jp-AiAssistantsPanel-busyOverlay'
+        shellNodeOf(panel).querySelector(
+          '.jp-AiAssistants-busyOverlay'
         ) as HTMLElement
       ).hidden
     ).toBe(true);
@@ -2069,7 +2081,11 @@ describe('ACC-PANE-193 - the panel header has a context menu of its own', () => 
       }
     });
     p = new AssistantSessionsPanel({
-      app: { serviceManager: { serverSettings: {} }, commands } as any,
+      app: {
+        serviceManager: { serverSettings: {} },
+        commands,
+        shell: { node: document.createElement('div'), activateById: jest.fn() }
+      } as any,
       descriptor: { ...DESCRIPTOR, iconName: 'testbed-header-menu-spec' },
       rootDir: '/home/user'
     });

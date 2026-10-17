@@ -10,6 +10,11 @@
   },
   "devDependencies": {
     "@jupyterlab/galata": "^5.0.5",
-    "@playwright/test": "^1.60.0"
+    "@playwright/test": "^1.64.1"
+  },
+  "resolutions": {
+    "@playwright/test": "^1.64.1",
+    "playwright": "^1.64.1",
+    "playwright-core": "^1.64.1"
   }
 }

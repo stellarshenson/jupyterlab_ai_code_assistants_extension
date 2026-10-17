@@ -192,7 +192,10 @@ function harness(
       }
     },
     commands,
-    shell: { activateById: (id: string) => activated.push(id) }
+    shell: {
+      node: document.createElement('div'),
+      activateById: (id: string) => activated.push(id)
+    }
   } as any;
   const panel = new AssistantSessionsPanel({
     app,
@@ -279,7 +282,8 @@ describe('the tile click path resumes a folder that has a conversation', () => {
       'terminal/term-1': {
         terminal_name: 'term-1',
         running: true,
-        session_id: 'sid-proj'
+        session_id: 'sid-proj',
+        cwds: ['/srv/lab/proj']
       }
     });
     const h = harness({ tracker: true });
@@ -289,6 +293,32 @@ describe('the tile click path resumes a folder that has a conversation', () => {
     expect(h.activated).toEqual(['terminal-open-1']);
     expect(h.launches).toEqual([]);
     expect(callsTo('launch-argv')).toHaveLength(0);
+  });
+
+  it('launches here when the terminal holds the conversation in another folder', async () => {
+    // DEF-PANE-319: a transcript re-homed into another project keeps its id,
+    // so the id alone cannot prove the terminal is this folder's.
+    routes({
+      sessions: { sessions: [session()] },
+      'terminal/term-1': {
+        terminal_name: 'term-1',
+        running: true,
+        session_id: 'sid-proj',
+        cwds: ['/srv/other']
+      },
+      'launch-argv': { argv: ['/bin/testbed', '--resume', 'sid-proj'] }
+    });
+    const h = harness({ tracker: true });
+    await flush();
+
+    expect(await h.panel.launchHere('proj')).toBe(LAUNCHED_WIDGET);
+    expect(h.activated).not.toContain('terminal-open-1');
+    expect(h.launches).toEqual([
+      {
+        argv: ['/bin/testbed', '--resume', 'sid-proj'],
+        cwd: '/srv/lab/proj'
+      }
+    ]);
   });
 
   it('asks for resume argv when no terminal holds it, and launches that', async () => {
@@ -489,7 +519,8 @@ describe('the tiles the plugin adds to the Launcher', () => {
     const app = {
       serviceManager: { serverSettings: {} },
       commands: new CommandRegistry(),
-      hasPlugin: () => false
+      hasPlugin: () => false,
+      shell: { node: document.createElement('div') }
     } as any;
     const labShell = {
       add: (widget: AssistantSessionsPanel) => docked.push(widget)

@@ -133,6 +133,7 @@ _COLOUR_COMMAND_TAG = "<command-name>/color</command-name>"
 _COLOUR_ACCEPTED_PREFIX = "<local-command-stdout>Session color "
 # Lines read from the FRONT of a transcript when its tail carries no cwd at all.
 _HEAD_SCAN_LIMIT = 50
+_READ_CHUNK_BYTES = 65536
 _DECODE_MAX_DEPTH = 20
 
 # Charset gate for a background-agent id as ``claude attach`` takes it (the
@@ -342,6 +343,45 @@ def _head_cwd(path: Path) -> str | None:
 def _jsonl_cwd(path: Path) -> str | None:
     """Best-effort cwd for a transcript: its most recent one, else its first."""
     return _tail_records(path).get("cwd") or _head_cwd(path)
+
+
+def _has_conversation(path: Path) -> bool:
+    """Whether a transcript holds at least one ``user`` or ``assistant`` record.
+
+    Claude writes the metadata-only shape - ``last-prompt``, ``custom-title``,
+    ``agent-name``, ``mode``, ``bridge-session`` and ``cost-state`` records and
+    no turn - while a fork or bridge session is being created, and a killed
+    resume flushes the same stub on exit. The file is not a conversation until
+    a message lands, so listing it as a branch or counting it as an extra
+    session offers an empty conversation the user cannot open (DEF-PANE-320).
+
+    Reads in chunks and stops at the first record that names a turn: an
+    ordinary transcript answers inside its first chunk, and the cost of a
+    metadata-only stub is bounded by its metadata prefix, read to EOF. A marker
+    can straddle a chunk boundary, so the last ``len(marker) - 1`` bytes are
+    carried into the next read. An unreadable file is no conversation. JSON
+    whitespace is not significant, so the compact form the CLI writes and the
+    spaced form a fixture writes are both recognised.
+    """
+    markers = (
+        b'"type":"user"',
+        b'"type": "user"',
+        b'"type":"assistant"',
+        b'"type": "assistant"',
+    )
+    carry = b""
+    try:
+        with path.open("rb") as fh:
+            while True:
+                chunk = fh.read(_READ_CHUNK_BYTES)
+                if not chunk:
+                    return False
+                data = carry + chunk
+                if any(marker in data for marker in markers):
+                    return True
+                carry = data[-(max(len(marker) for marker in markers) - 1) :]
+    except OSError:
+        return False
 
 
 # ------------------------------------------------------------ path encoding
@@ -1132,8 +1172,10 @@ class ClaudeStore(SessionStore):
                 "message_count": latest.get("messageCount") or 0,
                 "file_mtime": latest.get("fileMtime") or 0,
                 "git_branch": latest.get("gitBranch"),
-                "extra_sessions": max(
-                    len(list(project_dir.glob("*.jsonl"))) - 1, 0
+                "extra_sessions": sum(
+                    1
+                    for p in project_dir.glob("*.jsonl")
+                    if p.stem != session_id and _has_conversation(p)
                 ),
                 "remote_control": bool(session_state.get("remote_control")),
                 # The conversation's own ``/color``, already read from the tail
@@ -1201,7 +1243,15 @@ class ClaudeStore(SessionStore):
                     if isinstance(summary, str) and summary.strip():
                         summaries[entry["sessionId"]] = summary
 
-        jsonls = [p for p in project_dir.glob("*.jsonl") if p.stem != current]
+        # Metadata-only transcripts are the shape Claude writes while a fork
+        # or bridge session is being created, not conversations, so they are no
+        # branches. The current conversation is exempt whatever its shape: the
+        # row already names it, and this path must not second-guess that.
+        jsonls = [
+            p
+            for p in project_dir.glob("*.jsonl")
+            if p.stem != current and _has_conversation(p)
+        ]
         jsonls.sort(key=_activity_ms, reverse=True)
         bg_owned = bg_agents_cached() if include_extras else {}
         branches = [

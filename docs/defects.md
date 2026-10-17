@@ -373,6 +373,20 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - root-cause: 2026-10-15T21:50:38Z @kj launch_argv spawned `dsh tui` with no check that `$DSH_HOME/profiles/tui` is mounted; the dsh boot failure names the bundle only as the literal `<package>`
   - log: 2026-10-15T21:50:38Z @kj added
   - log: 2026-10-15T21:50:48Z @kj closed: fixed: `launch_argv` preflights `$DSH_HOME/profiles/tui` and refuses in named words before any terminal opens
+- [x] `DEF-PROV-322` **A real transcript whose first turn sits past 256 KiB is hidden as metadata-only** - MAJOR; _has_conversation reads at most 256 KiB for a user or assistant record. A real transcript whose first turn sits past that prefix - two live conversations, first turn at 265,252 and 619,816 bytes - is classified metadata-only and disappears from the branch list and the extra-session count.
+  - evidence: _has_conversation scans in 64 KiB chunks until the first user or assistant record or EOF; test_claude_a_large_metadata_prefix_is_still_a_conversation reddens on the old 256 KiB cap and passes; the two live transcripts (first turn at 265,252 and 619,816 bytes) classify as conversations; pytest 368
+  - repro: List branches for a project holding a conversation whose first user record follows more than 256 KiB of file-history-snapshot records: the conversation is absent and extra_sessions omits it
+  - test-tags: UNIT
+  - root-cause: 2026-10-17T20:02:08Z @kj the head scan stopped at a fixed 256 KiB byte budget; the metadata prefix of a real bridge or resumed session can exceed it
+  - log: 2026-10-17T20:02:08Z @kj added
+  - log: 2026-10-17T20:03:54Z @kj closed
+- [x] `DEF-PROV-323` **extra_sessions undercounts when the current conversation is metadata-only** - MINOR; extra_sessions counts conversation files and subtracts one for the current conversation. When the pinned current transcript is metadata-only, it is not in that count, so subtracting one removes a real sibling instead: a project with two other conversations reports one.
+  - evidence: extra_sessions excludes the current session id instead of subtracting one after the filter; test_claude_extra_sessions_excludes_the_current_stub reddens on the old formula (1 != 2) and passes; pytest 368
+  - repro: Pin a metadata-only transcript as a project's current conversation in a project with two real conversations: the row reports one extra session instead of two
+  - test-tags: UNIT
+  - root-cause: 2026-10-17T20:02:08Z @kj the count subtracts one unconditionally after the metadata-only filter, instead of excluding the current session id
+  - log: 2026-10-17T20:02:08Z @kj added
+  - log: 2026-10-17T20:03:54Z @kj closed
 
 ## Frontend / server contract `FRONT`
 
@@ -777,13 +791,14 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-09-06T18:06:57Z @kj logged, not fixed: found by the round-1 adversarial panel and triaged as immaterial or as new machinery a review loop should not introduce
   - log: 2026-09-06T19:31:22Z @kj closed: fixed: the index's fileMtime is discarded rather than taken as an upper bound - _resolve_latest reports _activity_ms alone
 - [x] `DEF-PANE-181` **A successful switch gives the row no positive feedback** - MEDIUM; The panel notifies only when a switch fails, so the sole success signal is the re-render. Now that the row reports the conversation's true last activity, switching to an old conversation makes the row dim under the stale treatment and fall out of Recent: the user clicks 'make this current' and the row gets quieter. Logged rather than fixed - both candidate remedies are new mechanisms, either a success notification or a suppression of the stale treatment on the pinned row, and a review loop is the wrong place to introduce either. A feature request with its own acceptance criterion is the right route.
-  - evidence: panel.ts _switchBranch raises Notification.success '<project>: switched to <branch label>' when the store made the request current, and stays quiet on the warning path; panel.spec.ts DEF-PANE-181 two cases; jest 205 green
+  - evidence: superseded by DEF-PANE-321: the success notification was removed at the user's request and _switchBranch now stays quiet on every path; panel.spec.ts keeps the warning case
   - repro: Switch a project to a conversation last used weeks ago and watch the row dim and move down the list
   - test-tags: MANUAL
   - root-cause: 2026-09-06T18:06:57Z @kj Switch feedback was carried incidentally by the old touch-to-now, which made the row read as freshly active
   - log: 2026-09-06T18:06:57Z @kj added
   - log: 2026-09-06T18:06:58Z @kj logged, not fixed: found by the round-1 adversarial panel and triaged as immaterial or as new machinery a review loop should not introduce
   - log: 2026-09-17T17:24:28Z @kj closed
+  - log: 2026-10-17T19:27:27Z @kj edited evidence "panel.ts _switchBranch raises Notification.success '<project>: switched to <branch label>' when the store made the request current, and stays quiet on the warning path; panel.spec.ts DEF-PANE-181 two cases; jest 205 green" -> "superseded by DEF-PANE-321: the success notification was removed at the user's request and _switchBranch now stays quiet on every path; panel.spec.ts keeps the warning case"
 - [x] `DEF-PANE-182` **An unexplained future mtime is assumed to be exactly the switch lead** - MINOR; When a transcript's mtime is in the future and its tail carries no parsable timestamp, _activity_ms subtracts a full SWITCH_MTIME_LEAD_S, which is only right if the switch put it there. A server clock behind the transcript writer would make a live conversation read a month old and take the stale treatment. Needs both conditions at once: one of 102 real transcripts on this workstation has no timestamp in its tail, none carry a future record timestamp, and the conjunction was not observed. Logged, not fixed - the alternative is a clamp that answers 'now' for a transcript whose age is unknown, which is the shape of the defect this correction exists to remove.
   - evidence: wontfix: the input (future mtime with no tail timestamp) was not observed in 102 transcripts and any guard is a guess at a threshold; the clamp alternative answers now for an unknown age, which is the defect this correction removes
   - repro: Set a transcript's mtime slightly ahead of the server clock with no timestamp record in its tail, and read the row's reported age
@@ -1328,6 +1343,36 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-10-17T15:04:39Z @kj added
   - log: 2026-10-17T16:00:58Z @kj closed
   - log: 2026-10-17T17:28:36Z @kj amended text "a Branch Session click and a row click show no busy state for several seconds while the extension resolves its next step, so the click reads as ignored; cause under investigation; fix: raise the spinner on the click, before any store or route work; `src/core/panel.ts`" -> "a Branch Session click and a row click show no busy state for several seconds while the extension resolves its next step, so the click reads as ignored; root cause recorded below; fix: raise the panel's busy overlay on the click, before any store or route work; `src/core/panel.ts`"
+  - log: 2026-10-17T19:04:39Z @kj regressed as DEF-PANE-318-1
+- [x] `DEF-PANE-318-1` **No spinner on branching or opening until the launch starts** - MEDIUM; the click-time spinner sits inside the assistant panel, not the main working area; a hidden or scrolled panel keeps it out of sight; fix: mount the overlay on the lab shell, centred over the working area, with no pointer events and no focus; `src/core/panel.ts`
+  - evidence: live lab 1600x1000: overlay [0,0,1600,1000], fixed, pointer-events none, z-index 9, spinner centred at (800,500), outside the panel; click-spinner.spec.ts asserts non-containment and viewport coverage on branch, row-click and refused paths; panel-root mutation reddens all three; Jest 343, pytest 366 at 1.2.102; Galata 76/76 at 1.2.104
+  - root-cause: 2026-10-17T19:11:20Z @kj the overlay was appended to the panel root when DEF-PANE-318 was fixed; the feedback belongs to the click rather than to the panel, and the launch spinner it mirrors is centred over the whole app
+  - test-tags: UNIT, E2E
+  - repro: click a row or Branch Session: the spinner sits inside the panel bounds, not centred over the working area; hide or scroll the panel and it is out of sight
+  - log: 2026-10-17T19:04:39Z @kj regression of DEF-PANE-318
+  - log: 2026-10-17T19:11:20Z @kj edited text "a Branch Session click and a row click show no busy state for several seconds while the extension resolves its next step, so the click reads as ignored; root cause recorded below; fix: raise the panel's busy overlay on the click, before any store or route work; `src/core/panel.ts`" -> "MEDIUM; the click-time spinner sits inside the assistant panel, not the main working area; a hidden or scrolled panel keeps it out of sight; fix: mount the overlay on the lab shell, centred over the working area, with no pointer events and no focus; `src/core/panel.ts`"; repro added "click a row or Branch Session: the spinner sits inside the panel bounds, not centred over the working area; hide or scroll the panel and it is out of sight"; test-tags added "UNIT, E2E"
+  - log: 2026-10-17T19:31:27Z @kj closed
+- [x] `DEF-PANE-319` **Row for a re-homed conversation opens another project's terminal** - MAJOR; A row whose conversation was re-homed into its project from another one opens nothing: the click focuses the other project's live terminal. The copier-embedded-project row shows session 01466dd0, already running from the device_bridge project, so no terminal opens in the copier folder.
+  - evidence: reuse requires the probe cwds to include the clicked folder; terminals.spec.ts and launcher.spec.ts cover same-folder reuse, cross-folder launch and an inside-folder cwd; Galata rehomed-session.spec.ts opens the second terminal in its own folder; mutation reddened the cross-project test; Jest 343, pytest 366, Galata 75/75 at 1.2.100
+  - repro: click the copier-embedded-project row in the Claude panel while a terminal runs session 01466dd0 from the device_bridge project
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-10-17T18:31:10Z @kj findForSession matches a live terminal by conversation id alone; a transcript re-homed into a second project resolves to the first project's terminal, and the click reuses it instead of launching in the requested folder
+  - log: 2026-10-17T18:31:10Z @kj added
+  - log: 2026-10-17T19:02:43Z @kj closed
+- [x] `DEF-PANE-320` **Empty transcripts are offered as switch targets** - MAJOR; Two metadata-only transcripts with no user or assistant record sit in the device_bridge project. The panel lists both as branches named like the current conversation, counts them in Conversations: 5, and switching to one changes nothing visible.
+  - evidence: list_branches and extra_sessions count only transcripts holding a user or assistant record; test_claude_metadata_only_transcripts_are_not_branches covers the metadata-only sibling; mutation made _has_conversation return True and the test failed; pytest 366 at 1.2.100; Galata 75/75
+  - repro: list branches for the device_bridge project: 4c8737dc and 5c5e9af9 are 1 KB files with no message record; switch to 5c5e9af9 and read the row
+  - test-tags: UNIT
+  - root-cause: 2026-10-17T18:31:14Z @kj list_branches lists every .jsonl in the project folder; a transcript holding only custom-title, agent-name, mode and cost-state records is not a conversation, but it becomes a switch entry carrying the parent's own name
+  - log: 2026-10-17T18:31:14Z @kj added
+  - log: 2026-10-17T19:02:43Z @kj closed
+- [x] `DEF-PANE-321` **A successful conversation switch raises an unnecessary toast** - MINOR; picking another conversation for a project raises a success notification naming the project and the target. The row's own re-render already shows the switch, so the toast is noise. Remove it and keep the warning raised when the store refuses the switch.
+  - evidence: panel.ts _switchBranch raises no success notification; panel.spec.ts DEF-PANE-321 asserts the switch request is issued and Notification.success is not called; restoring the success call reddens both switch tests; panel suite 91 passed
+  - repro: Pick another conversation for a project from the row menu: a success toast appears although nothing failed and no confirmation was requested
+  - test-tags: UNIT
+  - root-cause: 2026-10-17T19:17:36Z @kj DEF-PANE-181 added Notification.success to _switchBranch so that a successful switch would announce itself; the announcement duplicates the visible re-render and stays on screen as a toast
+  - log: 2026-10-17T19:17:36Z @kj added
+  - log: 2026-10-17T19:18:17Z @kj closed
 
 ## Colour store `COLO`
 

@@ -678,9 +678,10 @@ class ColoursHandler(_ProviderHandler):
             # failure - the 500 below means the state dir could not be written.
             self.bad_request("colour_invalid")
             return
-        # A fork inherits its tint server-side, in ``BranchHandler``, never
-        # through this route. ``hand_set`` false here is a test-seeding path
-        # for an inherited entry; the tab write-back is the user's own choice.
+        # A fork inherits its tint server-side, in ``BranchHandler``; the
+        # ``/clear`` path inherits through this route with ``hand_set`` false.
+        # The flag records an inherited entry rather than a hand-set override;
+        # the tab write-back is the user's own choice.
         hand_set = body.get("hand_set", True)
         if not isinstance(hand_set, bool):
             self.bad_request()

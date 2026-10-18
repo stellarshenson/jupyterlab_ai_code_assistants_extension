@@ -1,8 +1,9 @@
 // Terminal tab tint per conversation.
 //
 // Effective colour, highest wins:
-//   1. user-set     - the write-back store this module keeps, per provider.
-//                     Only entries the server still holds: it releases a pick
+//   1. stored       - the write-back store, hand-set or inherited, that this
+//                     module keeps per provider. Only entries the server still
+//                     holds: it releases a pick
 //                     that the assistant's own later colour command overtook,
 //                     because the newer of the two channels wins (DEF-COLO-306)
 //   2. native       - the conversation's own colour, when the assistant has one
@@ -101,7 +102,7 @@ export function sessionForCwds(
 }
 
 /**
- * Client for one provider's user-set colour store.
+ * Client for one provider's stored colour store, hand-set or inherited.
  *
  * The store is server-side and per provider (`providers/<id>/colours`), so
  * colours survive a reload and one assistant's colours can never be read or
@@ -128,7 +129,7 @@ export class ColourStore {
   }
 
   /** Whether this conversation's colour is the user's own choice rather than
-   * one it inherited at fork time. Only a hand-set colour is offered for
+   * one it inherited at fork or /clear. Only a hand-set colour is offered for
    * release: dropping an inherited one would un-inherit the branch. */
   isOverride(sessionId: string | null | undefined): boolean {
     return !!sessionId && this._overrides.has(sessionId);
@@ -206,8 +207,8 @@ export class ColourStore {
    * The ceiling is per request, so K ops queued behind a dead server wait K
    * times it, not it.
    *
-   * An op must never call `load`, `set` or `forget` - it would wait on a chain
-   * that is waiting on it. */
+   * An op must never call `load`, `set`, `forget` or `inherit` - it would wait
+   * on a chain that is waiting on it. */
   private _run<T>(op: () => Promise<T>): Promise<T> {
     const result = this._chain.then(op);
     const settled = () => undefined;
@@ -288,6 +289,61 @@ export class ColourStore {
         this._overrides.delete(sessionId);
         if (colour) {
           this._overrides.add(sessionId);
+        }
+        return true;
+      } catch (_err) {
+        return false;
+      } finally {
+        this._closeWrite(ids);
+      }
+    });
+  }
+
+  /** Record a colour inherited at `/clear`.
+   *
+   * The terminal process survives `/clear` and starts reporting a NEW
+   * conversation id, so the replacement has no colour of its own. It continues
+   * the conversation it replaced, not a new branch, and takes that
+   * conversation's effective colour over - whether the colour was picked on
+   * the tab or chosen by the assistant. `hand_set` false is what records the
+   * origin: an inherited entry, never a hand-set override, so `isOverride`
+   * leaves it out of the release affordance exactly as a fork's inherited tint
+   * is left out.
+   *
+   * The cache is reconciled from the answer the same way `set` reconciles this
+   * one id: the colour when the answer carries it, and the id in `_overrides`
+   * only when the answer names it there. Answers false when the answer does
+   * not carry the colour. */
+  async inherit(sessionId: string, colour: string): Promise<boolean> {
+    if (!sessionId) {
+      return false;
+    }
+    const ids = [sessionId];
+    // Marked before the op is queued, not inside it - see `isPending`.
+    this._openWrite(ids);
+    return this._run(async () => {
+      try {
+        const data = await requestProvider<IColourStoreResponse>(
+          this._providerId,
+          'colours',
+          this._serverSettings,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              session_id: sessionId,
+              colour,
+              hand_set: false
+            })
+          }
+        );
+        if ((data.colours ?? {})[sessionId] !== colour) {
+          return false;
+        }
+        this._colours.set(sessionId, colour);
+        if ((data.overrides ?? []).includes(sessionId)) {
+          this._overrides.add(sessionId);
+        } else {
+          this._overrides.delete(sessionId);
         }
         return true;
       } catch (_err) {

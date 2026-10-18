@@ -190,6 +190,32 @@ describe('ColourStore.set', () => {
   });
 });
 
+describe('ColourStore.inherit', () => {
+  // The `/clear` path: the replacement conversation takes the effective colour
+  // of the one it replaced, but as an INHERITED entry. Only a hand-set colour
+  // is offered for release, and releasing this one would strip the branch.
+  const store = () => new ColourStore('claude', {} as any);
+
+  beforeEach(() => request.mockReset());
+
+  it('records the colour as inherited, not as the user own choice', async () => {
+    request.mockResolvedValue({
+      colours: { [SESSION_B]: 'sky' },
+      overrides: []
+    } as any);
+    const colours = store();
+    expect(await colours.inherit(SESSION_B, 'sky')).toBe(true);
+
+    expect(JSON.parse((request.mock.calls[0][3] as any).body)).toEqual({
+      session_id: SESSION_B,
+      colour: 'sky',
+      hand_set: false
+    });
+    expect(colours.get(SESSION_B)).toEqual('sky');
+    expect(colours.isOverride(SESSION_B)).toBe(false);
+  });
+});
+
 describe('ColourStore origins', () => {
   // A stored colour is either the user's own choice or one a fork inherited.
   // Both beat the default; only the first is offered for release, or one click
@@ -525,7 +551,7 @@ describe('sessionForCwds', () => {
  * unrunnable invariant (see `core-neutrality.spec.ts`): by reading the source.
  */
 describe('ColourStore queue re-entrancy', () => {
-  const QUEUED = ['load', 'set', 'forget'];
+  const QUEUED = ['load', 'set', 'forget', 'inherit'];
 
   /** The body of one method, by brace matching from its declaration. */
   const bodyOf = (source: string, name: string): string => {

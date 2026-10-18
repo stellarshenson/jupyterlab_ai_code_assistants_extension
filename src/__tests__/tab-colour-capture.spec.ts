@@ -992,6 +992,102 @@ describe('the paint pass', () => {
   });
 });
 
+describe('a conversation replaced in place by /clear', () => {
+  /** The POSTs that record an inherited colour rather than a pick on a tab. */
+  const inheritPosts = (): Record<string, unknown>[] =>
+    request.mock.calls
+      .filter(
+        call =>
+          call[1] === 'colours' &&
+          (call[3] as RequestInit)?.method === 'POST' &&
+          JSON.parse(String((call[3] as RequestInit).body)).hand_set === false
+      )
+      .map(call => JSON.parse(String((call[3] as RequestInit).body)));
+
+  it('hands the replaced conversation effective colour to the new id', async () => {
+    // A pick on the tab of the conversation that `/clear` replaced. The probe
+    // follows the pidfile, so the next pass answers the same terminal with the
+    // new conversation id and the old colour must carry over.
+    server.colours[SESSION] = 'sky';
+    server.overrides = [SESSION];
+    await store.load();
+
+    await manager.reconcileColours();
+    expect(paints(terminals[0]).pop()).toEqual('sky');
+
+    server.probes['1'] = {
+      terminal_name: '1',
+      running: true,
+      session_id: OTHER_SESSION
+    };
+    await manager.reconcileColours();
+
+    expect(inheritPosts()).toEqual([
+      { session_id: OTHER_SESSION, colour: 'sky', hand_set: false }
+    ]);
+    expect(store.get(OTHER_SESSION)).toEqual('sky');
+    // Inherited, not hand-set: the release affordance must not offer it.
+    expect(store.isOverride(OTHER_SESSION)).toBe(false);
+    expect(paints(terminals[0]).pop()).toEqual('sky');
+  });
+
+  it('leaves a colour the new conversation already answers alone', async () => {
+    // The new conversation already has a stored colour of its own. It is not
+    // bare, so the replaced conversation's colour must not be written over it.
+    server.colours[SESSION] = 'sky';
+    server.overrides = [SESSION];
+    await store.load();
+    await manager.reconcileColours();
+
+    server.colours[OTHER_SESSION] = 'mint';
+    server.overrides = [SESSION, OTHER_SESSION];
+    await store.load();
+    server.probes['1'] = {
+      terminal_name: '1',
+      running: true,
+      session_id: OTHER_SESSION
+    };
+    await manager.reconcileColours();
+
+    expect(inheritPosts()).toEqual([]);
+    expect(paints(terminals[0]).pop()).toEqual('mint');
+  });
+
+  it('does not inherit over a colour the new conversation already answers with', async () => {
+    // The replacement answers the probe with an assistant-chosen colour. That
+    // is the new conversation's own answer even though the store holds nothing
+    // for it, so `native === null` is what keeps the replaced conversation's
+    // colour from overwriting it.
+    //
+    // The descriptor is switched to `native` so the probe's colour reaches the
+    // ladder: under the default `derived` source a native colour is only a
+    // guard input and would never be painted.
+    manager.dispose();
+    manager = makeManager({
+      descriptor: { ...DESCRIPTOR, colourSource: 'native' }
+    });
+
+    server.colours[SESSION] = 'sky';
+    server.overrides = [SESSION];
+    await store.load();
+    await manager.reconcileColours();
+    expect(paints(terminals[0]).pop()).toEqual('sky');
+
+    server.probes['1'] = {
+      terminal_name: '1',
+      running: true,
+      session_id: OTHER_SESSION,
+      colour: 'mint'
+    };
+    await manager.reconcileColours();
+
+    // Nothing was written for the replacement: its own colour outranks the
+    // cleared conversation's, and the tab paints that colour.
+    expect(inheritPosts()).toEqual([]);
+    expect(paints(terminals[0]).pop()).toEqual('mint');
+  });
+});
+
 /** Manager options against one companion, for the isolated-module case that
  * cannot use `makeManager`. */
 function optionsFor(colourfulTabs: unknown): TerminalManager.IOptions {

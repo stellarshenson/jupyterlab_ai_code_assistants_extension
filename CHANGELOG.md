@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.118] - 2026-10-18
+
+### Added
+
+- A Claude Code conversation cleared with `/clear` keeps its tab colour: the replacement conversation inherits the effective colour of the conversation it replaced, whether the colour was set by hand on the tab or chosen by the assistant, and the entry is recorded as inherited rather than as a hand-set override
+
 ## [1.2.115] - 2026-10-18
 
 ### Added

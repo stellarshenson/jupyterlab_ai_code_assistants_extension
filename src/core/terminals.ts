@@ -151,6 +151,9 @@ export class TerminalManager {
     // running. Kept past dispose it would be filed by nothing and would hold a
     // widget reference for the life of the page.
     this._pendingChoices.clear();
+    // Nothing is painted from here on, so the record would only hold widget
+    // ids for the life of the page.
+    this._lastPainted.clear();
   }
 
   /**
@@ -508,15 +511,44 @@ export class TerminalManager {
               ? (this._sessions.find(s => s.session_id === sessionId)?.colour ??
                 null)
               : null);
-          this._applyColour(
-            widget,
-            effectiveColour(
-              sessionId,
-              this._descriptor.colourSource,
-              this._colours.get(sessionId),
-              native
-            )
+
+          // The probe follows the pidfile, so an in-place `/clear` answers the
+          // SAME terminal with a NEW conversation id. The replacement continues
+          // the conversation it replaced and takes over the effective colour
+          // that one was wearing - a pick made on the tab or a colour the
+          // assistant chose. A stored colour or an assistant-chosen colour on
+          // the new conversation is its own answer, though: only a bare new id
+          // is filled in, so the old colour never overwrites it.
+          let colour = effectiveColour(
+            sessionId,
+            this._descriptor.colourSource,
+            this._colours.get(sessionId),
+            native
           );
+          if (sessionId) {
+            const last = this._lastPainted.get(widget.id);
+            if (
+              last &&
+              last.sessionId !== sessionId &&
+              last.colour !== null &&
+              this._colours.get(sessionId) === null &&
+              native === null
+            ) {
+              await this._colours.inherit(sessionId, last.colour);
+              if (
+                !this._colouredTabs ||
+                this._disposed ||
+                this._pass !== generation
+              ) {
+                // Colouring went off, the panel went away or a newer pass took
+                // over while the write was queued. That pass paints the tabs.
+                return;
+              }
+              colour = this._colours.get(sessionId) ?? last.colour;
+            }
+            this._lastPainted.set(widget.id, { sessionId, colour });
+          }
+          this._applyColour(widget, colour);
         },
         widget => disowned.add(widget.id)
       );
@@ -561,6 +593,10 @@ export class TerminalManager {
     // drawing, which is the same thing `_captureColour` refuses to do while
     // colouring is off.
     this._pendingChoices.clear();
+    // Every terminal this manager still sees is about to be painted null, so
+    // no recorded paint describes what is on screen any more - and a `/clear`
+    // that happened while colouring was off must not be inherited from.
+    this._lastPainted.clear();
     const generation = ++this._pass;
     try {
       await this._eachAssistantTerminal(async widget => {
@@ -884,6 +920,17 @@ export class TerminalManager {
   // pass can read the conversation and file it - and while an entry stands, its
   // terminal is not painted, because painting is what destroys the pick.
   private readonly _pendingChoices: Map<string, string | null> = new Map();
+  // The conversation each terminal was last PAINTED from, and the effective
+  // colour it was painted. The probe follows the pidfile, so `/clear` answers
+  // the same widget with a new conversation id; a difference against this
+  // record is what tells an in-place replacement from a terminal that simply
+  // started later, and is the colour the replacement inherits. Pruned by
+  // `clearColours` and `dispose` so a tab that is no longer drawn leaves no
+  // entry behind.
+  private readonly _lastPainted: Map<
+    string,
+    { sessionId: string; colour: string | null }
+  > = new Map();
   // Most recent terminal per project, tagged with the conversation it runs so
   // reuse can tell a project's branches apart.
   private readonly _byProject: Map<

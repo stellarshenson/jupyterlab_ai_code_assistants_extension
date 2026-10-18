@@ -208,10 +208,10 @@ test('Manage Sessions popup exposes a per-row Open button', async ({
 test('Manage Sessions Delete sits in the action row and follows the destructive style (DEF-PANE-307)', async ({
   page
 }) => {
-  // The server's move-to-trash preference, reported as off. A permanent
-  // delete arms on the first click and only the second one deletes, so this
-  // test reaches the armed state without ever removing a seeded conversation;
-  // a trashed delete would execute on the first click.
+  // The server's move-to-trash preference, reported as off, so the popup
+  // presents the permanent-delete wording. Every delete arms on the first
+  // click and only deletes on the second, so this test reaches the armed
+  // state without ever removing a seeded conversation.
   await page.route(`**${STATUS_URL}*`, async (route: any) => {
     const response = await route.fetch();
     const body = await response.json();

@@ -609,6 +609,36 @@ def test_claude_delete_never_touches_the_current_conversation(claude):
     assert store.delete_branches(CLAUDE_ENCODED, [drop]) == []
 
 
+def test_claude_delete_removes_when_the_trash_refuses(claude, monkeypatch):
+    """A filesystem with no usable trash must not turn a delete into a no-op.
+
+    send2trash refusing the move used to leave the id out of the answer, so the
+    panel reported zero removed and the conversation stayed. The delete now
+    falls back to a permanent removal, and the id is answered as removed.
+    """
+    import send2trash
+
+    store, root = claude
+    keep, drop = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": keep, "cwd": PROJECT_PATH}, {"id": drop, "cwd": PROJECT_PATH}]
+    )
+    touch(project_dir / f"{drop}.jsonl", -600)
+    store.switch(CLAUDE_ENCODED, keep)
+    side_dir = project_dir / drop
+    side_dir.mkdir()
+    (side_dir / "agent.jsonl").write_text("{}", encoding="utf-8")
+
+    def refuse(_path):
+        raise OSError("no trash on this filesystem")
+
+    monkeypatch.setattr(send2trash, "send2trash", refuse)
+
+    assert store.delete_branches(CLAUDE_ENCODED, [drop], to_trash=True) == [drop]
+    assert not (project_dir / f"{drop}.jsonl").exists()
+    assert not side_dir.exists()
+
+
 def test_claude_launch_argv(claude):
     store, _root = claude
     session_id = new_uuid()

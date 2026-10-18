@@ -30,6 +30,7 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - root-cause: 2026-10-16T07:52:59Z @kj `core/store.dispose_path` fell back to `shutil.rmtree`/`unlink` on ANY send2trash failure
   - log: 2026-08-07T00:00:00Z @kj reported: reported by the bug-hunter adversary (round 1, MINOR); runtime-verified - send2trash raises TrashPermissionError under /tmp in this environment while succeeding under $HOME
   - log: 2026-08-07T00:00:00Z @kj fixed: `dispose_path` raises when a requested trash move fails instead of falling through to rmtree/unlink, so the item counts as NOT disposed of - it stays out of removed_ids, keeps its colour, and the panel reports the shortfall. send2trash is now declared in pyproject [project] dependencies rather than ridden in transitively through jupyter_server
+  - log: 2026-10-17T23:03:47Z @kj reversed by user direction: a refused trash move now falls back to a permanent removal (ACC-SESS-211), so the delete proceeds where no trash is usable
 - [x] `DEF-SERV-18` **Store-computed colour discarded and recomputed by a per-row glob** - MAJOR; the claude store emitted `color` from the transcript tail it had already read, the sessions route popped it and recomputed the same value through `default_colour`, which globs `*/<sid>.jsonl` across the whole projects root - once per row, per poll - and the American spelling survived inside the store after DEF-3 fixed it on the wire; `jupyterlab_ai_code_assistants_extension/core/routes.py`
   - root-cause: 2026-10-16T07:53:04Z @kj the claude store emitted `color` from the transcript tail it had already read, the sessions route popped it and recomputed the same value through `default_colour`, which globs `*/<sid>.jsonl` across the whole projects root - once per row, per poll
   - log: 2026-08-07T00:00:00Z @kj reported: reported by the architect adversary (round 1, MAJOR)
@@ -1373,6 +1374,21 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-10-17T19:17:36Z @kj DEF-PANE-181 added Notification.success to _switchBranch so that a successful switch would announce itself; the announcement duplicates the visible re-render and stays on screen as a toast
   - log: 2026-10-17T19:17:36Z @kj added
   - log: 2026-10-17T19:18:17Z @kj closed
+- [x] `DEF-PANE-324` **Click-time busy spinner stands still under reduced motion** - MEDIUM; With prefers-reduced-motion: reduce the click-time busy overlay showed a ring that never turns, so a Branch Session or row click read as ignored. The reduced-motion block sets animation none on the spinner. Fix: hold the ring still at full opacity and name the action in a visible label beside it.
+  - evidence: click-spinner.spec.ts 'a reduced-motion click holds the ring still and names the action in sight' passes: spinner animation-name none, opacity 1, label reads 'Branching conversation'; renaming the label class reddens it; Jest 343, pytest 372, Galata 79/79 at 1.2.108
+  - repro: Turn the OS animation-effects setting off (Settings > Accessibility > Visual effects), click Branch Session; the ring shows and stands still
+  - test-tags: E2E
+  - root-cause: 2026-10-18T00:34:03Z @kj style/base.css reduced-motion block sets animation none and opacity 0.5 on .jp-aiAssistants-spinner; the busy ring kept full opacity but no motion, and a motionless ring carries no busy signal
+  - log: 2026-10-18T00:34:03Z @kj added
+  - log: 2026-10-18T00:41:54Z @kj closed
+  - log: 2026-10-18T01:07:00Z @kj edited text "With prefers-reduced-motion: reduce the click-time busy overlay shows a ring that never turns and never changes, so a Branch Session or row click reads as ignored. The reduced-motion block sets animation none on the spinner. Fix: pulse the busy ring in place under the preference - opacity changes, no rotation." -> "With prefers-reduced-motion: reduce the click-time busy overlay showed a ring that never turns, so a Branch Session or row click read as ignored. The reduced-motion block sets animation none on the spinner. Fix: hold the ring still at full opacity and name the action in a visible label beside it."; evidence "click-spinner.spec.ts 'a reduced-motion click pulses the main-area spinner instead of holding it still' passes: emulateMedia reduce, transform none, animation-name jp-ai-assistants-pulse, opacity changes over time; severing the animation reddens it at the animation-name assertion; Galata 79/79, Jest 343, pytest 372 at 1.2.106" -> "click-spinner.spec.ts 'a reduced-motion click holds the ring still and names the action in sight' passes: spinner animation-name none, opacity 1, label reads 'Branching conversation'; renaming the label class reddens it; Jest 343, pytest 372, Galata 79/79 at 1.2.108"
+- [x] `DEF-PANE-325` **Busy live region names a finished action when overlapping actions end** - MINOR; With two actions in flight, ending the later-started one left the screen-reader busy region naming the finished action until the other ended. The visible label was repainted and the live region was not. Fix: one repaint writes both. src/core/panel.ts
+  - evidence: panel.spec.ts 'names the action still running when an overlapping action ends first' asserts the sr-only region returns to 'Opening conversation'; severing the live repaint reddens it; Jest 345, pytest 378, Galata 79/79 at 1.2.113
+  - repro: Hold a row open and a Branch Session so the busy counter is 2; settle the branch first; the live region still says 'Branching conversation'
+  - test-tags: UNIT
+  - root-cause: 2026-10-18T02:16:43Z @kj _endBusy repainted only the visible label when actions remained; the live region kept the last message. _paintBusyMessage now writes both.
+  - log: 2026-10-18T02:16:43Z @kj added
+  - log: 2026-10-18T02:16:45Z @kj closed
 
 ## Colour store `COLO`
 

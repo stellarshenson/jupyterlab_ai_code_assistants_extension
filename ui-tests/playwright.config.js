@@ -102,6 +102,11 @@ module.exports = {
       // out of the search path entirely; set it there and it is already too
       // late. See the header.
       HOME: path.join(scratch, 'home'),
+      // send2trash resolves the trash from XDG_DATA_HOME at import time, before
+      // the test config file runs. Pinned to the scratch home, the deletion
+      // spec's blocked-trash path is the one send2trash actually uses, and no
+      // fixture can reach the developer's trash.
+      XDG_DATA_HOME: path.join(scratch, 'home', '.local', 'share'),
       JLAB_TEST_SCRATCH: scratch
     },
     // Never adopt a running lab. The suite drives terminals and session

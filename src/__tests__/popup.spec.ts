@@ -158,9 +158,22 @@ describe('Manage Sessions popup Delete button (DEF-PANE-307)', () => {
     expect(deleteButton().textContent).toBe('Delete (1)');
   });
 
-  it('deletes without closing the dialog', async () => {
+  it('names the trash outcome without promising recoverability', () => {
+    expect(deleteButton().title).toContain(
+      'a refused move may remove them permanently or leave them in place'
+    );
+  });
+
+  it('arms, then deletes without closing the dialog', async () => {
     checkbox(rows()[1]).click();
-    deleteButton().click();
+    const del = deleteButton();
+    // The trash setting does not promise the system will accept the move, so
+    // the first click arms rather than deletes.
+    del.click();
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(del.textContent).toBe('Confirm delete 1');
+
+    del.click();
     await Promise.resolve();
     expect(onDelete).toHaveBeenCalledWith([FIRST]);
     expect(document.querySelector('.jp-Dialog')).not.toBeNull();

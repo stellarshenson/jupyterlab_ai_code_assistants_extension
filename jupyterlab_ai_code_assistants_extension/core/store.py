@@ -20,6 +20,7 @@ Two conventions the whole contract rests on:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -30,6 +31,8 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
+
+_log = logging.getLogger(__name__)
 
 
 # JupyterLab writes user settings as JSON with comments - the raw editor seeds
@@ -310,18 +313,20 @@ def is_safe_segment(name: Any) -> bool:
 def dispose_path(target: Path, to_trash: bool = False) -> None:
     """Delete ``target`` (file or dir), via the desktop trash when asked.
 
-    Honours JupyterLab's ``ContentsManager.delete_to_trash``. A failed trash
-    move (no backend, unsupported filesystem, permissions) RAISES rather than
-    falling through to a permanent delete: the dialog promised the user a
-    recoverable outcome, and silently destroying the data instead is the one
-    answer that cannot be taken back. The caller counts the item as not
-    disposed of.
+    Honours JupyterLab's ``ContentsManager.delete_to_trash``. A trash move the
+    backend refuses (no trash on the filesystem, permissions, send2trash
+    missing) falls back to a permanent removal and logs the reason, so the
+    delete still happens where no trash is usable. ``to_trash=False`` removes
+    permanently without trying the trash.
     """
     if to_trash:
-        from send2trash import send2trash
+        try:
+            from send2trash import send2trash
 
-        send2trash(str(target))
-        return
+            send2trash(str(target))
+            return
+        except (OSError, ImportError) as err:
+            _log.warning("trash refused %s: %s; removing permanently", target, err)
     if target.is_dir():
         shutil.rmtree(target)
     else:

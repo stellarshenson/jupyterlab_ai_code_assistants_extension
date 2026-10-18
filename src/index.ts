@@ -250,9 +250,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
           descriptor: module.descriptor,
           hooks: module.hooks,
           rootDir: status?.root_dir ?? '',
-          // Unknown reads as "not trash": the popup then arms its Delete
-          // button before it executes, which is the only confirmation a
-          // permanent bulk delete has (DEF-135).
+          // Unknown reads as "not trash", so the dialogs and the popup
+          // present the permanent-delete wording rather than promising a
+          // recoverable move the server never confirmed (DEF-135).
           deleteToTrash: status ? status.delete_to_trash !== false : false,
           terminalTracker,
           fileBrowser,

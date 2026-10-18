@@ -77,6 +77,7 @@ exclude = [".github", "binder", ".claude", "logs", "docs/defects.md"]
 "jupyterlab_ai_code_assistants_extension/labextension" = "share/jupyter/labextensions/jupyterlab_ai_code_assistants_extension"
 "install.json" = "share/jupyter/labextensions/jupyterlab_ai_code_assistants_extension/install.json"
 "jupyter-config/server-config" = "etc/jupyter/jupyter_server_config.d"
+".agents/skills/jupyterlab-ai-code-assistants-extension" = "share/jupyter/agents/skills/jupyterlab-ai-code-assistants-extension"
 
 [tool.hatch.build.hooks.version]
 path = "jupyterlab_ai_code_assistants_extension/_version.py"

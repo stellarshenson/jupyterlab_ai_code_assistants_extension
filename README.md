@@ -76,6 +76,23 @@ pip install jupyterlab_ai_code_assistants_extension
 > [!WARNING]
 > `package.json` pins `webpack: 5.106.0` and `chalk: 4.1.2` in both `resolutions` and `overrides`. Do not remove these. webpack `>= 5.106.1` changed its module-federation share identifier format and crashes the unmaintained `license-webpack-plugin` (`split('=')[1].trim()`) that `@jupyterlab/builder` injects into every production build; the duplicate `chalk@2.4.2` pulled by `duplicate-package-checker-webpack-plugin` crashes on Node 24+ in the build-isolation install. Without the pins, `make publish` and CI fail on `python -m build`.
 
+## Agent skill
+
+The wheel ships a session-operations skill for coding agents at `share/jupyter/agents/skills/jupyterlab-ai-code-assistants-extension/SKILL.md`. It covers finding, moving, splitting, renaming and promoting sessions, copying a session into another project under a fresh id, the task-list environment variables, and running Claude Code against Kimi K3 or DeepSeek.
+
+After `pip install`, with the Python that runs the lab:
+
+```bash
+mkdir -p ~/.agents/skills
+ln -s "$(python -c 'import sys; print(sys.prefix)')/share/jupyter/agents/skills/jupyterlab-ai-code-assistants-extension" ~/.agents/skills/jupyterlab-ai-code-assistants-extension
+```
+
+From a clone:
+
+```bash
+ln -s "$PWD/.agents/skills/jupyterlab-ai-code-assistants-extension" ~/.claude/skills/jupyterlab-ai-code-assistants-extension
+```
+
 ## Migrating from the standalone extensions
 
 This package supersedes `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension`. On first run it carries their settings and favourites over automatically, and it never replaces a setting you have already saved in this extension; uninstall the standalones once you are ready:

@@ -10,7 +10,7 @@ import {
 test.use({ autoGoto: false, waitForApplication });
 
 /**
- * The click's own feedback (DEF-PANE-318, DEF-PANE-318-1).
+ * The click's own feedback (DEF-PANE-318, DEF-PANE-318-1, DEF-PANE-324).
  *
  * A Branch Session click and a row click used to show nothing for seconds: the
  * branch spinner was raised only after the branch route answered, and the open
@@ -22,6 +22,11 @@ test.use({ autoGoto: false, waitForApplication });
  * launch spinner does - not inside the panel, where a hidden or scrolled panel
  * keeps it out of sight. Every scenario therefore asserts the overlay is not a
  * descendant of the panel, covers the viewport and takes no focus.
+ *
+ * The ring must show activity under both motion preferences: it turns
+ * normally, and under prefers-reduced-motion it is held still at full opacity
+ * while the overlay names the action in visible text, so the click still reads
+ * as busy (DEF-PANE-324).
  */
 
 const PANEL = `#${panelId('claude')}`;
@@ -93,7 +98,8 @@ async function branchRow(page: any, name: string): Promise<void> {
 }
 
 /** The overlay is on the shell, not inside the panel, and covers the window;
- * its spinner is centred. Returns once all of that holds. */
+ * its ring and action label are centred as one group. Returns once all of
+ * that holds. */
 async function expectMainAreaOverlay(page: any): Promise<void> {
   // The panel does not contain it: this is the placement defect itself.
   await expect(page.locator(`${PANEL} ${BUSY}`)).toHaveCount(0);
@@ -106,14 +112,23 @@ async function expectMainAreaOverlay(page: any): Promise<void> {
   expect(box!.width).toBeGreaterThanOrEqual(viewport.width - 2);
   expect(box!.height).toBeGreaterThanOrEqual(viewport.height - 2);
 
+  // The ring and its visible action label are one centred group; the ring
+  // alone sits left of centre by half the label's width.
   const spinner = await page.locator(SPINNER).boundingBox();
+  const label = await page
+    .locator(`${BUSY} .jp-AiAssistants-busyLabel`)
+    .boundingBox();
   expect(spinner).not.toBeNull();
-  expect(
-    Math.abs(spinner!.x + spinner!.width / 2 - viewport.width / 2)
-  ).toBeLessThan(8);
-  expect(
-    Math.abs(spinner!.y + spinner!.height / 2 - viewport.height / 2)
-  ).toBeLessThan(8);
+  expect(label).not.toBeNull();
+  const left = Math.min(spinner!.x, label!.x);
+  const top = Math.min(spinner!.y, label!.y);
+  const right = Math.max(spinner!.x + spinner!.width, label!.x + label!.width);
+  const bottom = Math.max(
+    spinner!.y + spinner!.height,
+    label!.y + label!.height
+  );
+  expect(Math.abs((left + right) / 2 - viewport.width / 2)).toBeLessThan(8);
+  expect(Math.abs((top + bottom) / 2 - viewport.height / 2)).toBeLessThan(8);
 
   // It never takes focus: the context menu that launched the action, and the
   // element the user was working in, must keep it.
@@ -162,6 +177,11 @@ test('a branch click shows the main-area spinner before the branch route answers
   await expect(spinner).toBeVisible({ timeout: SEEN_MS });
   await expect(spinner).toHaveCSS('border-top-style', 'solid');
   await expect(spinner).toHaveCSS('border-top-width', '3px');
+  await expect(spinner).toHaveCSS('animation-name', 'jp-ai-assistants-spin');
+  // The action is named in sight, so the ring is never the only cue.
+  await expect(page.locator(`${BUSY} .jp-AiAssistants-busyLabel`)).toHaveText(
+    'Branching conversation'
+  );
 
   // And the branch still lands once the route answers, with the overlay gone.
   await expect
@@ -231,4 +251,49 @@ test('a refused branch clears the main-area spinner and says what happened', asy
   const banner = page.locator(PANEL).locator('.jp-AiAssistantsPanel-error');
   await expect(banner).toBeVisible({ timeout: 15000 });
   await expect(banner).toContainText('Could not branch this session');
+});
+
+test('a reduced-motion click holds the ring still and names the action in sight', async ({
+  page
+}) => {
+  // What the browser reports for an OS with animation effects off, where the
+  // reduced-motion prefix turns the spin off.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  await page.route(BRANCH_ROUTE, async (route: any) => {
+    await new Promise(resolve => setTimeout(resolve, HOLD_MS));
+    await route.abort();
+  });
+
+  const parent = await currentName(page, 'spinner-fixture');
+  await branchRow(page, parent);
+
+  await expect(page.locator(BUSY)).toBeVisible({ timeout: SEEN_MS });
+  await expectMainAreaOverlay(page);
+  const spinner = page.locator(SPINNER);
+  await expect(spinner).toBeVisible({ timeout: SEEN_MS });
+
+  // No animation and no rotation: the arc stays where it is, at full opacity
+  // above the 3:1 non-text minimum. This is the preference being honoured,
+  // not the defect.
+  await expect(spinner).toHaveCSS('transform', 'none');
+  await expect(spinner).toHaveCSS('animation-name', 'none');
+  await expect(spinner).toHaveCSS('opacity', '1');
+  // The visible label carries the busy state instead of motion.
+  const label = page.locator(`${BUSY} .jp-AiAssistants-busyLabel`);
+  await expect(label).toBeVisible({ timeout: SEEN_MS });
+  await expect(label).toHaveText('Branching conversation');
+  // Its own surface, so the theme's text colour stays readable over whatever
+  // the main area shows - a dark terminal included.
+  const background = await label.evaluate(
+    (element: Element) => getComputedStyle(element).backgroundColor
+  );
+  expect(background).not.toBe('rgba(0, 0, 0, 0)');
+
+  // And the overlay still clears when the request is refused.
+  await expect(page.locator(BUSY)).toHaveCount(0, { timeout: 15000 });
+  const banner = page.locator(PANEL).locator('.jp-AiAssistantsPanel-error');
+  await expect(banner).toBeVisible({ timeout: 15000 });
 });

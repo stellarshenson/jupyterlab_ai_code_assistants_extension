@@ -106,9 +106,9 @@ export function showManageSessionsPopup(
   let items = [...options.branches];
   const selected = new Set<string>();
   let deleting = false; // guards the async delete against double invocation
-  // Permanent deletion arms first and executes on the second click; a trashed
-  // deletion is recoverable and goes straight through.
-  const armsFirst = !options.deleteToTrash;
+  // Every deletion arms first and executes on the second click: the trash
+  // setting does not promise the system will accept the move, and a fallback
+  // removal is permanent.
   let armed = false;
   let armTimer = 0;
 
@@ -154,7 +154,7 @@ export function showManageSessionsPopup(
   deleteBtn.type = 'button';
   deleteBtn.className = 'jp-AiAssistantsPanel-branchDelete';
   deleteBtn.title = options.deleteToTrash
-    ? 'Deleted conversations move to the trash (recoverable)'
+    ? 'Deleted conversations move to the trash when the system accepts them; a refused move may remove them permanently or leave them in place'
     : 'Deleted conversations are removed permanently';
   footer.appendChild(deleteBtn);
   // Plain visual counter (selection, or the last action), beside the button
@@ -421,12 +421,12 @@ export function showManageSessionsPopup(
       return;
     }
     // No confirmation DIALOG here: a second Lumino dialog stacked on this popup
-    // renders detached. A permanent deletion still confirms, in the footer
-    // itself - the first click arms the button, the second executes, and any
-    // selection change or four seconds of hesitation disarms it. A trashed
-    // deletion is recoverable, so it keeps going through on one click, with
-    // the live "N deleted" status and a toast from the caller on failure.
-    if (armsFirst && !armed) {
+    // renders detached. The deletion confirms in the footer itself - the first
+    // click arms the button, the second executes, and any selection change or
+    // four seconds of hesitation disarms it. Every deletion arms, because the
+    // trash setting does not promise the system will accept the move, and a
+    // refused move may remove the conversation permanently or leave it.
+    if (!armed) {
       armed = true;
       window.clearTimeout(armTimer);
       armTimer = window.setTimeout(() => {
@@ -467,9 +467,9 @@ export function showManageSessionsPopup(
         options.onSync?.(items);
         render();
         updateControls();
-        const moved = options.deleteToTrash
-          ? `${deleted} moved to trash`
-          : `${deleted} deleted`;
+        // One wording for both outcomes: the client cannot know whether the
+        // trash accepted the move, so it does not claim it did.
+        const moved = `${deleted} deleted`;
         selCount.textContent = moved;
         selCount.classList.add('jp-mod-deleted');
         // Clear then re-set on the next tick so an identical count (two single

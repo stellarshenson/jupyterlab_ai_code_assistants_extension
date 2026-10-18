@@ -488,6 +488,14 @@ export class AssistantSessionsPanel extends Widget {
       'jp-aiAssistants-spinner jp-AiAssistants-busySpinner';
     busySpinner.setAttribute('aria-hidden', 'true');
     busy.appendChild(busySpinner);
+    // The action, named in sight: under a reduced-motion preference the ring
+    // is held still, so the label carries the busy state with no animation.
+    // Hidden from assistive technology because the live region below
+    // announces the same words once.
+    const busyLabel = document.createElement('div');
+    busyLabel.className = 'jp-AiAssistants-busyLabel';
+    busyLabel.setAttribute('aria-hidden', 'true');
+    busy.appendChild(busyLabel);
     // The spinner is decoration; a screen-reader user hears the action
     // instead. The region sits on the root, always rendered and outside the
     // overlay and the aria-busy body: a live region created inside a
@@ -521,37 +529,63 @@ export class AssistantSessionsPanel extends Widget {
     this._bodyEl = body;
     this._loadingEl = loading;
     this._busyEl = busy;
+    this._busyLabelEl = busyLabel;
     this._busyTextEl = busyText;
     this._errorEl = error;
   }
 
-  /** Raise the click-time busy overlay. Counted, because an open and a branch
-   * can overlap; the overlay clears when the last one ends. */
-  private _beginBusy(message: string): void {
-    this._busyCount += 1;
+  /** Raise the click-time busy overlay. Each action gets a token, because an
+   * open and a branch can overlap; the overlay clears when the last one ends,
+   * and the label names the newest action still running. */
+  private _beginBusy(message: string): number {
+    const token = ++this._busySeq;
+    this._busyMessages.set(token, message);
     if (this._busyEl) {
       this._busyEl.hidden = false;
-      if (this._busyTextEl) {
-        this._busyTextEl.textContent = message;
-      }
+      this._paintBusyMessage();
       // The body is what the action changes; the root stays outside the
       // busy subtree so the live region above is not withheld.
       if (this._bodyEl) {
         this._bodyEl.setAttribute('aria-busy', 'true');
       }
     }
+    return token;
   }
 
-  private _endBusy(): void {
-    this._busyCount = Math.max(0, this._busyCount - 1);
-    if (this._busyCount === 0 && this._busyEl) {
+  private _endBusy(token: number): void {
+    this._busyMessages.delete(token);
+    if (this._busyMessages.size > 0) {
+      // Another action is still running; neither the visible label nor the
+      // live region may keep naming the one that just ended.
+      this._paintBusyMessage();
+      return;
+    }
+    if (this._busyEl) {
       this._busyEl.hidden = true;
+      if (this._busyLabelEl) {
+        this._busyLabelEl.textContent = '';
+      }
       if (this._busyTextEl) {
         this._busyTextEl.textContent = '';
       }
       if (this._bodyEl) {
         this._bodyEl.removeAttribute('aria-busy');
       }
+    }
+  }
+
+  /** Name the newest still-running action in the visible label and the live
+   * region, so neither keeps naming an action that ended. */
+  private _paintBusyMessage(): void {
+    let message = '';
+    for (const active of this._busyMessages.values()) {
+      message = active;
+    }
+    if (this._busyLabelEl) {
+      this._busyLabelEl.textContent = message;
+    }
+    if (this._busyTextEl) {
+      this._busyTextEl.textContent = message;
     }
   }
 
@@ -781,15 +815,19 @@ export class AssistantSessionsPanel extends Widget {
     }
   }
 
-  /** The warning a permanent deletion earns and a trashed one does not - a
-   * trashed conversation is recoverable, and the popup one click away says
-   * so; the same sentence on both would be false half the time. */
+  /** The warning a deletion earns: with the trash setting on, a refused move
+   * may remove the conversations permanently or leave them in place, so
+   * neither the verb nor the note may promise one outcome. */
   private get _irreversibleNote(): string {
-    return this._deleteToTrash ? '' : ' This cannot be undone.';
+    return this._deleteToTrash
+      ? ' A permanent removal cannot be undone.'
+      : ' This cannot be undone.';
   }
 
   private get _disposalVerb(): string {
-    return this._deleteToTrash ? 'moved to trash' : 'deleted permanently';
+    return this._deleteToTrash
+      ? 'moved to the trash when the system accepts them; a refused move may remove them permanently or leave them in place'
+      : 'deleted permanently';
   }
 
   private async _removeProject(session: ISession): Promise<void> {
@@ -954,7 +992,7 @@ export class AssistantSessionsPanel extends Widget {
   ): Promise<void> {
     // The click's own feedback, raised before the terminal walk and the
     // launch - both can take seconds (DEF-PANE-318).
-    this._beginBusy(this._trans.__('Opening conversation'));
+    const busy = this._beginBusy(this._trans.__('Opening conversation'));
     try {
       await this._terminals.openSession(
         session,
@@ -975,7 +1013,7 @@ export class AssistantSessionsPanel extends Widget {
         this._notifyLaunchError('Could not open that conversation', err);
       }
     } finally {
-      this._endBusy();
+      this._endBusy(busy);
       // Reuse or fresh launch, either way the picture changed. Pull fresh
       // state; a poll tick retries if this one fails.
       void this._fetch().catch(() => undefined);
@@ -1239,11 +1277,11 @@ export class AssistantSessionsPanel extends Widget {
     // Raised on the click: the branch POST mints the fork server-side (for
     // Claude and Codex by running their own CLI) and can take seconds
     // (DEF-PANE-318).
-    this._beginBusy(this._trans.__('Branching conversation'));
+    const busy = this._beginBusy(this._trans.__('Branching conversation'));
     try {
       await this._branchByServerCopy(session, undefined, force);
     } finally {
-      this._endBusy();
+      this._endBusy(busy);
     }
   }
 
@@ -2858,8 +2896,10 @@ export class AssistantSessionsPanel extends Widget {
   private _bodyEl!: HTMLDivElement;
   private _loadingEl: HTMLElement | null = null;
   private _busyEl: HTMLElement | null = null;
+  private _busyLabelEl: HTMLElement | null = null;
   private _busyTextEl: HTMLElement | null = null;
-  private _busyCount = 0;
+  private _busySeq = 0;
+  private _busyMessages = new Map<number, string>();
   private _errorEl: HTMLElement | null = null;
   private _refreshBtn: HTMLButtonElement | null = null;
   private _filterBtn: HTMLButtonElement | null = null;

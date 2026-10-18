@@ -337,6 +337,35 @@ with _rehomed_file.open("a", encoding="utf-8") as _handle:
     _handle.write(json.dumps({"cwd": str(_rehomed_cwd)}) + "\n")
 os.utime(_rehomed_file, (_now - 240, _now - 240))
 
+# Two Claude projects owned by `session-delete.spec.ts` alone. Each holds two
+# conversations, so the manage-sessions popup has one deletable branch beside
+# the protected current conversation. They are the oldest fixtures: the spec
+# finds its rows by name, and no other spec's "first listed" row may move onto
+# them. One exercises the desktop trash; the other runs with the trash blocked
+# to exercise the permanent fallback.
+for _project in ("trash-fixture", "fallback-fixture"):
+    _cwd = _root / _project
+    _cwd.mkdir()
+    _directory = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(
+        str(_cwd)
+    )
+    _directory.mkdir()
+    for _index in range(2):
+        _file = _directory / f"{_project}-{_index}.jsonl"
+        _file.write_text(
+            "".join(
+                json.dumps(record) + "\n"
+                for record in (
+                    {"cwd": str(_cwd)},
+                    {"type": "user", "message": {"role": "user", "content": "seed"}},
+                )
+            ),
+            encoding="utf-8",
+        )
+        # Ascending mtimes: index 1 is the current conversation, index 0 the
+        # deletable branch.
+        os.utime(_file, (_now - 2400 + _index, _now - 2400 + _index))
+
 _codex_root = Path(os.environ["CODEX_HOME"])
 _codex_root.mkdir(parents=True)
 _codex_cwd = _root / "codex-branch"

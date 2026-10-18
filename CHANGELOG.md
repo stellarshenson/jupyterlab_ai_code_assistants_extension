@@ -2,6 +2,29 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.115] - 2026-10-18
+
+### Added
+
+- The wheel ships the session-operations agent skill at `share/jupyter/agents/skills/jupyterlab-ai-code-assistants-extension`: finding, moving, splitting, renaming, copying and promoting Claude Code sessions, the task-list environment variables, and Kimi K3 and DeepSeek launchers; the README shows the wheel and clone installs
+
+### Changed
+
+- A row click and a Branch Session click raise the busy overlay on the lab shell over the main working area; the visible label and the screen-reader live region name the action still running, and both follow overlapping actions
+- Under `prefers-reduced-motion: reduce` the busy ring holds still at full opacity and the visible label names the action
+- Every Manage Sessions delete arms first, including the trash path, and completion reads "N deleted"
+- Session deletion moves conversations to the trash when JupyterLab's setting is on and the system accepts the move; a refused move may remove them permanently or leave them in place, and the server log carries a warning
+- A re-homed conversation reuses a terminal only when that terminal's working directory sits inside the clicked project
+
+### Fixed
+
+- The click-time busy state covers the main area instead of sitting inside the assistant panel
+- A successful conversation switch no longer raises a toast
+- Conversations whose first turn follows a large metadata prefix are no longer hidden as metadata-only transcripts
+- The extra-conversation count no longer undercounts when the pinned current conversation is metadata-only
+- The fresh-id copy tool rewrites `sessionId` and `session_id` at any depth in the transcript and side files, and a failed copy leaves no partial output
+- The runbook states that `.pinned-session` is read by `claude-here` only, that the panel keeps its own pin, and that a copy resumes with `claude --resume <new-id>` or `claude-here`
+
 ## [1.2.105] - 2026-10-17
 
 ### Changed

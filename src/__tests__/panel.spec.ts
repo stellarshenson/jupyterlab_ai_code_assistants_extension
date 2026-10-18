@@ -213,13 +213,16 @@ describe('DEF-51 - the destructive dialogs open with Cancel under the keyboard',
     expect(request).not.toHaveBeenCalled();
   });
 
-  it('says a deletion cannot be undone only when it is permanent', async () => {
-    // Default: trash is on, and a trashed conversation is recoverable.
+  it('says a deletion may be permanent when the trash might refuse', async () => {
+    // Default: trash is on, but the server falls back to a permanent removal
+    // when no trash accepts the move.
     let done = (panel as any)._removeProject(session()) as Promise<void>;
     await openButtons();
     let body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
-    expect(body).toContain('moved to trash');
-    expect(body).not.toContain('cannot be undone');
+    expect(body).toContain(
+      'moved to the trash when the system accepts them; a refused move may remove them permanently or leave them in place'
+    );
+    expect(body).toContain('A permanent removal cannot be undone');
     pressEnter();
     await done;
 
@@ -559,6 +562,31 @@ describe('click-time busy state (DEF-PANE-318)', () => {
     expect(overlay().hidden).toBe(true);
     expect(body().getAttribute('aria-busy')).toBeNull();
 
+    target.dispose();
+  });
+
+  it('names the action still running when an overlapping action ends first', () => {
+    const target = makePanel(DESCRIPTOR);
+    const label = (): HTMLElement =>
+      shellNodeOf(target).querySelector('.jp-AiAssistants-busyLabel')!;
+    const live = (): HTMLElement =>
+      target.node.querySelector('.jp-AiAssistantsPanel-srOnly')!;
+
+    const opening = (target as any)._beginBusy('Opening conversation');
+    const branching = (target as any)._beginBusy('Branching conversation');
+    expect(label().textContent).toBe('Branching conversation');
+    expect(live().textContent).toBe('Branching conversation');
+
+    // The later-started action ends first: the label and the live region must
+    // return to the one that is still running, not keep naming the finished
+    // action.
+    (target as any)._endBusy(branching);
+    expect(label().textContent).toBe('Opening conversation');
+    expect(live().textContent).toBe('Opening conversation');
+
+    (target as any)._endBusy(opening);
+    expect(label().textContent).toBe('');
+    expect(live().textContent).toBe('');
     target.dispose();
   });
 

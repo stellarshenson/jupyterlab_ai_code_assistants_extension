@@ -550,26 +550,6 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   order: -1;
 }
 
-/* The spin carries "busy", not information, so under a reduced-motion
-   preference it degrades to the same ring held still and dimmed. */
-@media (prefers-reduced-motion: reduce) {
-  .jp-AiAssistantsPanel-iconButton.jp-mod-spinning svg,
-  .jp-aiAssistants-spinner,
-  .jp-AiAssistantsPanel-spinner {
-    animation: none;
-    opacity: 0.5;
-  }
-
-  /* The click-time busy spinner is the only thing on screen while a click is
-     being handled, so it keeps full opacity: dimmed, its brand arc measures
-     1.74:1 on the light panel, below the 3:1 minimum for a non-text cue. Held
-     still it would read as idle, so the overlay names the action in a visible
-     label beside it; the label, not an animation, carries the busy state. */
-  .jp-AiAssistants-busySpinner {
-    opacity: 1;
-  }
-}
-
 /* Full-panel veil shown only during an explicit refresh (refresh button or
    panel show) - the background poll never raises it. The rule is gated on
    :not([hidden]) because this author `display` would otherwise beat the UA

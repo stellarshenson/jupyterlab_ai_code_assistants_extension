@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.120] - 2026-10-19
+
+### Changed
+
+- The spinners always animate, regardless of the operating system's reduced-motion setting; the click-time busy overlay still names the action in a visible label
+
 ## [1.2.118] - 2026-10-18
 
 ### Added

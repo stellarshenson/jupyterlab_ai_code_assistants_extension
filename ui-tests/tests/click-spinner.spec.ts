@@ -24,9 +24,9 @@ test.use({ autoGoto: false, waitForApplication });
  * descendant of the panel, covers the viewport and takes no focus.
  *
  * The ring must show activity under both motion preferences: it turns
- * normally, and under prefers-reduced-motion it is held still at full opacity
- * while the overlay names the action in visible text, so the click still reads
- * as busy (DEF-PANE-324).
+ * normally, and under prefers-reduced-motion it still turns, while the overlay
+ * names the action in visible text, so the click still reads as busy
+ * (DEF-PANE-324).
  */
 
 const PANEL = `#${panelId('claude')}`;
@@ -253,11 +253,11 @@ test('a refused branch clears the main-area spinner and says what happened', asy
   await expect(banner).toContainText('Could not branch this session');
 });
 
-test('a reduced-motion click holds the ring still and names the action in sight', async ({
+test('a reduced-motion click still turns the ring and names the action in sight', async ({
   page
 }) => {
-  // What the browser reports for an OS with animation effects off, where the
-  // reduced-motion prefix turns the spin off.
+  // What the browser reports for an OS with animation effects off. The
+  // extension does not honour the preference: the ring turns regardless.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto();
   await openPanelTab(page, 'claude');
@@ -275,13 +275,16 @@ test('a reduced-motion click holds the ring still and names the action in sight'
   const spinner = page.locator(SPINNER);
   await expect(spinner).toBeVisible({ timeout: SEEN_MS });
 
-  // No animation and no rotation: the arc stays where it is, at full opacity
-  // above the 3:1 non-text minimum. This is the preference being honoured,
-  // not the defect.
-  await expect(spinner).toHaveCSS('transform', 'none');
-  await expect(spinner).toHaveCSS('animation-name', 'none');
+  // The ring turns under the emulated preference: no reduced-motion rule
+  // stops the spin, and the arc keeps full opacity above the 3:1 non-text
+  // minimum while it turns.
+  await expect(spinner).toHaveCSS('animation-name', 'jp-ai-assistants-spin');
+  const transform = await spinner.evaluate(
+    (element: Element) => getComputedStyle(element).transform
+  );
+  expect(transform).not.toBe('none');
   await expect(spinner).toHaveCSS('opacity', '1');
-  // The visible label carries the busy state instead of motion.
+  // The visible label carries the busy state alongside the motion.
   const label = page.locator(`${BUSY} .jp-AiAssistants-busyLabel`);
   await expect(label).toBeVisible({ timeout: SEEN_MS });
   await expect(label).toHaveText('Branching conversation');

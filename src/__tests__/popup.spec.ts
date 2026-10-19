@@ -26,13 +26,15 @@ function branch(sessionId: string, label: string): IBranch {
 }
 
 let onSwitch: jest.Mock;
+let onOpen: jest.Mock;
 let onDelete: jest.Mock;
 // Each test opens a fresh popup in beforeEach; a describe that needs the
 // permanent mode flips this in its beforeAll, which runs ahead of it.
 let deleteToTrash = true;
 
-function open(): void {
+function open(mode: 'switch' | 'open' = 'switch'): void {
   showManageSessionsPopup({
+    mode,
     branches: [branch(FIRST, 'first'), branch(SECOND, 'second')],
     current: 'session-00000000-0000-4000-8000-000000000000',
     currentName: 'proj (00000000)',
@@ -41,10 +43,18 @@ function open(): void {
     formatTime: () => 'now',
     openTitle: () => 'Open',
     onSwitch,
-    onOpen: jest.fn(),
+    onOpen,
     onDelete,
     onRefetch: jest.fn(async () => [])
   });
+}
+
+/** Replace the default switch-mode popup with one opened in `mode`, and let
+ * the launch queue attach it before the test queries rows. */
+async function reopen(mode: 'switch' | 'open'): Promise<void> {
+  Dialog.flush();
+  open(mode);
+  await new Promise(resolve => setTimeout(resolve, 0));
 }
 
 function rows(): HTMLElement[] {
@@ -63,8 +73,16 @@ function deleteButton(): HTMLButtonElement {
   )!;
 }
 
+/** The per-row action button - Switch or Open, by popup mode. */
+function actionButtons(row: HTMLElement): HTMLButtonElement[] {
+  return Array.from(
+    row.querySelectorAll<HTMLButtonElement>('.jp-AiAssistantsPanel-branchOpen')
+  );
+}
+
 beforeEach(() => {
   onSwitch = jest.fn();
+  onOpen = jest.fn();
   onDelete = jest.fn(async () => 0);
   open();
 });
@@ -97,6 +115,61 @@ describe('Manage Sessions popup click zones', () => {
     expect(onSwitch).not.toHaveBeenCalled();
     expect(checkbox(first).checked).toBe(false);
     expect(document.querySelector('.jp-Dialog')).not.toBeNull();
+  });
+});
+
+describe('Manage Sessions popup action mode (DEF-PANE-326)', () => {
+  it('switch mode labels non-current rows Switch and calls onSwitch', () => {
+    const [, first, second] = rows();
+    const buttons = [...actionButtons(first), ...actionButtons(second)];
+    expect(buttons.map(b => b.textContent)).toEqual(['Switch', 'Switch']);
+    expect(buttons[0].title).toBe(
+      "Make this the project's current conversation"
+    );
+
+    actionButtons(second)[0].click();
+
+    expect(onSwitch).toHaveBeenCalledWith(SECOND);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('open mode labels non-current rows Open and calls onOpen', async () => {
+    await reopen('open');
+    const [, first, second] = rows();
+    const buttons = [...actionButtons(first), ...actionButtons(second)];
+    expect(buttons.map(b => b.textContent)).toEqual(['Open', 'Open']);
+    expect(buttons[0].title).toBe('Open');
+
+    actionButtons(second)[0].click();
+
+    expect(onOpen).toHaveBeenCalledWith(SECOND);
+    expect(onSwitch).not.toHaveBeenCalled();
+  });
+
+  it('a row click switches in switch mode and opens in open mode', async () => {
+    const [, first] = rows();
+    first.click();
+
+    expect(onSwitch).toHaveBeenCalledWith(FIRST);
+    expect(onOpen).not.toHaveBeenCalled();
+
+    await reopen('open');
+    const [, openFirst] = rows();
+    openFirst.click();
+
+    expect(onOpen).toHaveBeenCalledWith(FIRST);
+    expect(onSwitch).toHaveBeenCalledTimes(1);
+  });
+
+  it('the current row has no action in switch mode and Open in open mode', async () => {
+    const [current] = rows();
+    expect(actionButtons(current)).toHaveLength(0);
+
+    await reopen('open');
+    const [openCurrent] = rows();
+    expect(actionButtons(openCurrent).map(b => b.textContent)).toEqual([
+      'Open'
+    ]);
   });
 });
 

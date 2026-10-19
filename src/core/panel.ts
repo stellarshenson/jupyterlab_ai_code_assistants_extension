@@ -2424,7 +2424,14 @@ export class AssistantSessionsPanel extends Widget {
 
     this._commands.addCommand(this._cmd('manage-sessions'), {
       label: () => `Manage Sessions... (${this._lastBranches.length})`,
-      execute: () => this._openManagePopup()
+      execute: () => this._openManagePopup('switch')
+    });
+
+    // The open submenu's copy of the item: same popup, but a row action
+    // launches the conversation rather than making it current.
+    this._commands.addCommand(this._cmd('manage-sessions-open'), {
+      label: () => `Manage Sessions... (${this._lastBranches.length})`,
+      execute: () => this._openManagePopup('open')
     });
 
     this._commands.addCommand(this._cmd('open-branch'), {
@@ -2791,11 +2798,11 @@ export class AssistantSessionsPanel extends Widget {
     }
     this._openBranchSubmenu.addItem({ type: 'separator' });
     this._openBranchSubmenu.addItem({
-      command: this._cmd('manage-sessions')
+      command: this._cmd('manage-sessions-open')
     });
   }
 
-  private _openManagePopup(): void {
+  private _openManagePopup(mode: 'switch' | 'open'): void {
     const session = this._activeSession;
     if (!session) {
       return;
@@ -2803,6 +2810,7 @@ export class AssistantSessionsPanel extends Widget {
     const current = this._lastBranchesCurrent || session.session_id;
     showManageSessionsPopup({
       trans: this._trans,
+      mode,
       branches: this._lastBranches,
       current,
       currentName: `${this._lookupName(session)} (${shortSessionId(

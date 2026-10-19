@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.123] - 2026-10-19
+
+### Fixed
+
+- The Manage Sessions popup now follows the submenu that opened it: Switch and Manage Sessions offers Switch per row and makes that conversation current, Open Branched Conversation offers Open and launches it, and the current row no longer shows a Switch button
+
 ## [1.2.120] - 2026-10-19
 
 ### Changed

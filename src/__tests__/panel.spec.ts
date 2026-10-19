@@ -986,14 +986,40 @@ describe('the Manage Sessions popup is handed the current row name', () => {
         name: 'proj',
         session_id: 'session_9f8e7d6c-1111-2222-3333-444455556666'
       });
-      (p as any)._openManagePopup();
+      (p as any)._openManagePopup('switch');
       const calls = (showManageSessionsPopup as jest.Mock).mock.calls;
       const [options] = calls[calls.length - 1];
       // A front-slice would read `proj (session_)` on every conversation.
       expect(options.currentName).toEqual('proj (9f8e7d6c)');
+      expect(options.mode).toEqual('switch');
     } finally {
       p.dispose();
     }
+  });
+});
+
+describe('Manage Sessions popup mode follows the invoking submenu (DEF-PANE-326)', () => {
+  const lastOptions = (): any => {
+    const calls = (showManageSessionsPopup as jest.Mock).mock.calls;
+    return calls[calls.length - 1][0];
+  };
+
+  it('the switch submenu opens the popup in switch mode', () => {
+    (panel as any)._activeSession = session({ name: 'proj' });
+    (panel as any)._fillBranchSubmenus([]);
+    const item = (panel as any)._switchSubmenu.items.at(-1);
+    (panel as any)._commands.execute(item.command, item.args);
+
+    expect(lastOptions().mode).toBe('switch');
+  });
+
+  it('the open submenu opens the popup in open mode', () => {
+    (panel as any)._activeSession = session({ name: 'proj' });
+    (panel as any)._fillBranchSubmenus([]);
+    const item = (panel as any)._openBranchSubmenu.items.at(-1);
+    (panel as any)._commands.execute(item.command, item.args);
+
+    expect(lastOptions().mode).toBe('open');
   });
 });
 
@@ -1827,7 +1853,7 @@ describe('ACC-SESS-190..192 - opening a session moves the file browser', () => {
       'the Manage Sessions Open button',
       (p, row) => {
         (p as any)._activeSession = row;
-        (p as any)._openManagePopup();
+        (p as any)._openManagePopup('open');
         const calls = (showManageSessionsPopup as jest.Mock).mock.calls;
         calls[calls.length - 1][0].onOpen('sid-branch');
       }

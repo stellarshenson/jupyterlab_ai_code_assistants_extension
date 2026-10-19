@@ -35,6 +35,10 @@ export namespace ManageSessionsPopup {
     formatTime: (epochMs: number) => string;
     /** Provider chip for a branch row, or null. */
     branchBadge?: (branch: IBranch) => HTMLElement | null;
+    /** What a row's action does, inherited from the submenu that opened the
+     * popup: `switch` makes the conversation current, `open` launches it in
+     * its own terminal. */
+    mode: 'switch' | 'open';
     /** Tooltip for one row's Open button. The panel owns it because the launch
      * mode in force is panel state, and every other surface that opens a
      * conversation names it. */
@@ -185,19 +189,32 @@ export function showManageSessionsPopup(
   // Scopes the action-row layout in base.css to this one dialog.
   dialog.addClass('jp-AiAssistantsPanel-branchDialog');
 
-  // Per-row "Open" launches that conversation in its own terminal and closes
-  // the popup. stopPropagation keeps the click from toggling selection or
-  // switching the row.
-  const openButton = (sessionId: string): HTMLButtonElement => {
+  // The row action follows the mode the invoking submenu passed: switch makes
+  // the conversation current, open launches it in its own terminal. Both close
+  // the popup first - the action is complete once it runs.
+  const runAction = (sessionId: string): void => {
+    dialog.dispose();
+    if (options.mode === 'switch') {
+      options.onSwitch(sessionId);
+    } else {
+      options.onOpen(sessionId);
+    }
+  };
+
+  // Per-row action button. stopPropagation keeps the click from toggling
+  // selection or repeating the action through the row's own click handler.
+  const actionButton = (sessionId: string): HTMLButtonElement => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'jp-AiAssistantsPanel-branchOpen';
-    btn.textContent = 'Open';
-    btn.title = options.openTitle();
+    btn.textContent = options.mode === 'switch' ? 'Switch' : 'Open';
+    btn.title =
+      options.mode === 'switch'
+        ? "Make this the project's current conversation"
+        : options.openTitle();
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      dialog.dispose();
-      options.onOpen(sessionId);
+      runAction(sessionId);
     });
     return btn;
   };
@@ -271,7 +288,11 @@ export function showManageSessionsPopup(
     badge.className = 'jp-AiAssistantsPanel-branchCurrentBadge';
     badge.textContent = 'current';
     currentRow.appendChild(badge);
-    currentRow.appendChild(openButton(options.current));
+    // Switch mode has nothing to switch to on the row that is already current;
+    // open mode can still launch it in a terminal.
+    if (options.mode === 'open') {
+      currentRow.appendChild(actionButton(options.current));
+    }
     currentRow.appendChild(copyButton(options.current, trans));
     list.appendChild(currentRow);
 
@@ -353,21 +374,20 @@ export function showManageSessionsPopup(
       time.textContent = options.formatTime(b.file_mtime);
       row.appendChild(time);
 
-      row.appendChild(openButton(b.session_id));
+      row.appendChild(actionButton(b.session_id));
       row.appendChild(copyButton(b.session_id, trans));
 
-      // A row click always switches, whatever is selected: the checkbox cell
-      // is the one select target, so a click has one meaning (DEF-PANE-209).
-      const activate = (): void => {
-        dialog.dispose();
-        options.onSwitch(b.session_id);
-      };
+      // A row click follows the popup's mode, whatever is selected: the
+      // checkbox cell is the one select target, so a click has one meaning
+      // (DEF-PANE-209).
+      const activate = (): void => runAction(b.session_id);
       row.addEventListener('click', activate);
-      // Switch has no button of its own, so it needs a role and a key route or
-      // it is reachable by mouse only. The affordance sits on the label span,
-      // not the row: the row also hosts a checkbox and the Open/Copy buttons,
-      // and a role="button" wrapping them both swallows their own Enter/Space
-      // and makes them presentational children (ARIA nested-interactive).
+      // The row action also has a button; the label keeps a role and key route
+      // so the row itself stays keyboard-reachable. The affordance sits on the
+      // label span, not the row: the row also hosts a checkbox and the
+      // action/Copy buttons, and a role="button" wrapping them both swallows
+      // their own Enter/Space and makes them presentational children (ARIA
+      // nested-interactive).
       label.setAttribute('role', 'button');
       label.tabIndex = 0;
       label.addEventListener('keydown', e => {

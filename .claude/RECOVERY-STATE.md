@@ -43,3 +43,42 @@ The brace below is closed. Same session returned; no job had died. CI on `5bc8bb
 3. Re-check the two corrected sentences with the ux and architect lenses (their agents never ran in the stopped workflow).
 4. Run the full Galata suite locally (script in 2 above) if CI is not reachable.
 5. Goal state at brace: clauses 1-7 of the project goal were met except clause 6's confirming-round accounting - ux and bug-hunter had confirmed, the architect's re-check and the ledger closure were the two open items. The goal hook is suspended by this brace and is reinstated on resume.
+
+## BRACE 2026-10-20 16:09
+
+### Horizon
+
+- `brace-horizon` printed `CLEAR`: no usage window near its ceiling. The user gave no reason, so the board assumes **SERVER RESTART** (the worst case): every session-bound process is gone, and only what is on disk counts
+
+### Stopped workflow
+
+1. run `wf_a349b780-f06` (task `wf4rnr2tj`), stopped with TaskStop
+   - script: `tmp/workflows/user-rulings/script.js` (gitignored under `tmp/`, kept on the workspace disk); it nests `tmp/workflows/review-busy-dialog/script.js`
+   - args: none
+   - transcript dir: `~/.claude/projects/-home-lab-workspace-private-jupyterlab-jupyterlab-ai-code-assistants-extension/82b6185d-3753-4627-9870-6ba388d6235e/subagents/workflows/wf_a349b780-f06`
+   - phase reached: Implement - agent `implement-1` had started; it changed no file and wrote no checkpoint. Nothing to salvage from `journal.jsonl`
+   - resume: same session `Workflow({scriptPath: 'tmp/workflows/user-rulings/script.js', resumeFromRunId: 'wf_a349b780-f06'})`; after a restart, relaunch with `scriptPath` alone - every stage returns its checkpoint when it holds
+   - input it reads: `tmp/workflows/review-project/review-state-final.json` (the SHIP state of the project-wide review, round 2)
+
+### Tree difference from the stop
+
+- None: `git status --porcelain` was empty before and after the stop
+
+### State
+
+- HEAD `b719002` on `main`, pushed; working tree clean; installed build 1.2.172
+- npm and PyPI carry 1.2.163; 1.2.171 and 1.2.172 are not published
+- Trackers: 0 open of 215 criteria; 0 open of 329 closed and 11 rejected defects; `pm-tools check docs/` exit 0
+- Gates at 1.2.172: Jest 378/378, pytest 387, Galata 84/84, lint clean
+- Project-wide adversarial review of HEAD `3563288` (architect, bug-hunter, ux-designer): SHIP in round 2; its three MAJOR fixes are commit `b719002` (journal entry 140)
+- Running jobs: none. Detached compute: none. Paused processes: none
+
+### Pending work, in order
+
+1. **FIRST ACTION** - relaunch the stopped workflow (command above). It applies the user's three rulings of 2026-10-20:
+   - R1: in Manage Sessions, the second click of a double-click is ignored only within 600 ms of arming Delete
+   - R2: a terminal that opens after the user pressed Hide does not take the keyboard
+   - R3: dialog buttons show a focus outline for keyboard focus only (`:focus-visible`)
+   - It then runs the confirming round of the project-wide review and writes the conclusions into `~/.claude/skills/jupyterlab-extension/design-language.md` and `design-system/extension-design-system.dc.html`, as the user asked ("update design system in /jupyterlab-extension with those conclusions")
+2. After it returns SHIP: ask the user for commit approval for the project changes; the design-system edits in `~/.claude` stay uncommitted unless the user asks
+3. Active goal (suspended by this brace, reinstated on resume): all functionality per acceptance criteria, criteria updated via pm-tools, unit and Galata tests green, no open defects with root causes recorded, architecture sound, project survived the adversarial review with architect, bug-hunter and ux-designer, last round SHIP. The rulings work must end in a SHIP round for the goal to hold

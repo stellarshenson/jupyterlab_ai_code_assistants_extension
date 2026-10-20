@@ -1,4 +1,4 @@
-import { LabIcon } from '@jupyterlab/ui-components';
+import { classes, LabIcon } from '@jupyterlab/ui-components';
 import * as React from 'react';
 
 // Shared panel chrome icons. Provider icons are NOT here - each provider
@@ -175,7 +175,11 @@ export function providerIcon(name: string, svgstr: string): LabIcon {
  * preset, and each tile under `launcherCard`. This view of `tile` renders the
  * extension's joint icon under the section preset and `tile` everywhere else,
  * so the header carries no vendor's mark while every tile keeps its own
- * (ACC-LNCH-163).
+ * (ACC-LNCH-163). Under `launcherCard` it also adds the class
+ * `jp-AiAssistantsLauncher-tileGlyph`, which `style/base.css` scales to 75%,
+ * so the tile glyph is drawn smaller than JupyterLab's own tile glyphs while
+ * the sidebar tab, panel header and menus keep the standard size
+ * (ACC-LNCH-215).
  *
  * Built the way `LabIcon.bindprops` builds its views - a prototype child of
  * the tile with its own `react` - so `LabIcon.resolve` still recognises it.
@@ -188,7 +192,16 @@ export function launcherTileIcon(tile: LabIcon): LabIcon {
         props.stylesheet === 'launcherSection'
           ? assistantsIcon.react
           : tile.react,
-        { ...props, ref }
+        {
+          ...props,
+          ...(props.stylesheet === 'launcherCard' && {
+            className: classes(
+              props.className,
+              'jp-AiAssistantsLauncher-tileGlyph'
+            )
+          }),
+          ref
+        }
       )
   );
   // `react` is readonly on the type; the view shadows the tile's own.

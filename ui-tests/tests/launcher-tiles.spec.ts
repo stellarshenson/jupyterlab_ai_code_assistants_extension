@@ -7,6 +7,7 @@ import {
   ABSENT,
   AVAILABLE,
   fetchStatus,
+  panelId,
   setProviderEnabled,
   terminalCount,
   waitForApplication
@@ -206,11 +207,15 @@ test('ACC-LNCH-163 - the section header carries the joint icon, not a tile icon'
   await page.screenshot({ path: shotPath('launcher-section-joint-icon') });
 });
 
-/** Largest allowed difference between an assistant glyph and the Terminal
- * card's glyph: 1px of the 52px box every card draws its icon in. */
+/** Largest allowed difference between an assistant glyph and its target
+ * size, between two assistant glyphs, and between a glyph's centre and its
+ * icon box's centre: 1px of the 52px box every card draws its icon in. */
 const GLYPH_TOLERANCE_PX = 1;
 
-test('DEF-PANE-332 - every assistant glyph renders at the size of the Terminal card glyph', async ({
+/** An assistant tile glyph's size as a share of the Terminal card glyph. */
+const TILE_GLYPH_SHARE = 0.75;
+
+test('DEF-PANE-332 and ACC-LNCH-215 - every assistant glyph renders at 75% of the Terminal card glyph in the Launcher tiles only', async ({
   page
 }) => {
   await page.goto();
@@ -218,8 +223,10 @@ test('DEF-PANE-332 - every assistant glyph renders at the size of the Terminal c
   await resetToLauncher(page);
 
   // An assistant with no binary in the harness has no tile. Its glyph is
-  // drawn into a copy of a live card by JupyterLab's own LabIcon under the
-  // same `launcherCard` preset, from the provider source the build bundles.
+  // drawn by JupyterLab's own LabIcon under the same `launcherCard` preset,
+  // from the provider source the build bundles, in place of the svg of a copy
+  // of a live card - so it sits in the icon box the extension built for that
+  // live tile, with that box's classes.
   const absent = ABSENT.map(id => ({
     label: status.providers.find(p => p.id === id)!.label,
     svgstr: /`(<svg[\s\S]*?<\/svg>)`/.exec(
@@ -230,9 +237,11 @@ test('DEF-PANE-332 - every assistant glyph renders at the size of the Terminal c
     )![1]
   }));
 
-  // The larger side of the box around each card's drawn paths, in px, by
-  // card label.
-  const sizes: Record<string, number> = await page.evaluate(
+  // Each glyph is the box around an icon's drawn paths: its larger side, in
+  // px, and how far its centre sits from the centre of the icon box. Cards
+  // by label, sidebar tabs by panel id.
+  type Glyph = { size: number; dx: number; dy: number };
+  const { cards, tabs } = await page.evaluate(
     ({ cards, absent }) => {
       const app = (window as any).jupyterapp;
       // LabIcon is not on window; a tile's command icon is one.
@@ -243,41 +252,85 @@ test('DEF-PANE-332 - every assistant glyph renders at the size of the Terminal c
       for (const { label, svgstr } of absent) {
         const copy = live.cloneNode(true) as HTMLElement;
         copy.querySelector('.jp-LauncherCard-label p')!.textContent = label;
-        copy.querySelector('.jp-LauncherCard-icon')!.replaceChildren(
-          new LabIcon({ name: `galata:${label}`, svgstr }).element({
-            stylesheet: 'launcherCard'
-          })
-        );
+        copy
+          .querySelector('.jp-LauncherCard-icon svg')!
+          .replaceWith(
+            new LabIcon({ name: `galata:${label}`, svgstr })
+              .element({ stylesheet: 'launcherCard' })
+              .querySelector('svg')!
+          );
         live.parentElement!.appendChild(copy);
       }
-      const result: Record<string, number> = {};
-      const all = document.querySelectorAll(
-        `${cards}, .jp-LauncherCard[data-category="Other"]`
-      );
-      for (const card of Array.from(all)) {
-        const rects = Array.from(
-          card.querySelectorAll('.jp-LauncherCard-icon svg path')
-        ).map(p => p.getBoundingClientRect());
-        const width =
-          Math.max(...rects.map(r => r.right)) -
-          Math.min(...rects.map(r => r.left));
-        const height =
-          Math.max(...rects.map(r => r.bottom)) -
-          Math.min(...rects.map(r => r.top));
+      const glyph = (box: Element): Glyph => {
+        const rects = Array.from(box.querySelectorAll('svg path')).map(p =>
+          p.getBoundingClientRect()
+        );
+        const left = Math.min(...rects.map(r => r.left));
+        const right = Math.max(...rects.map(r => r.right));
+        const top = Math.min(...rects.map(r => r.top));
+        const bottom = Math.max(...rects.map(r => r.bottom));
+        const outer = box.getBoundingClientRect();
+        return {
+          size: Math.max(right - left, bottom - top),
+          dx: (left + right - outer.left - outer.right) / 2,
+          dy: (top + bottom - outer.top - outer.bottom) / 2
+        };
+      };
+      const cardGlyphs: Record<string, Glyph> = {};
+      for (const card of Array.from(
+        document.querySelectorAll(
+          `${cards}, .jp-LauncherCard[data-category="Other"]`
+        )
+      )) {
         const label = card.querySelector('.jp-LauncherCard-label p')!;
-        result[label.textContent!] = Math.max(width, height);
+        cardGlyphs[label.textContent!] = glyph(
+          card.querySelector('.jp-LauncherCard-icon')!
+        );
       }
-      return result;
+      const tabGlyphs: Record<string, Glyph> = {};
+      for (const tab of Array.from(
+        document.querySelectorAll('.jp-SideBar .lm-TabBar-tab')
+      )) {
+        const icon = tab.querySelector('.lm-TabBar-tabIcon');
+        if (icon?.querySelector('svg path')) {
+          tabGlyphs[(tab as HTMLElement).dataset.id!] = glyph(icon);
+        }
+      }
+      return { cards: cardGlyphs, tabs: tabGlyphs };
     },
     { cards: CARDS, absent }
   );
 
-  const reference = sizes['Terminal'];
+  const reference = cards['Terminal'].size;
   expect(reference).toBeGreaterThan(0);
+  const target = reference * TILE_GLYPH_SHARE;
   for (const { label } of status.providers) {
+    const { size, dx, dy } = cards[label];
     expect(
-      Math.abs(sizes[label] - reference),
-      `${label}: ${sizes[label]}px, Terminal: ${reference}px`
+      Math.abs(size - target),
+      `${label}: ${size}px, 75% of Terminal ${reference}px: ${target}px`
+    ).toBeLessThanOrEqual(GLYPH_TOLERANCE_PX);
+    expect(
+      Math.max(Math.abs(dx), Math.abs(dy)),
+      `${label}: centre off the icon box centre by ${dx}px, ${dy}px`
+    ).toBeLessThanOrEqual(GLYPH_TOLERANCE_PX);
+  }
+  const assistantSizes = status.providers.map(p => cards[p.label].size);
+  expect(
+    Math.max(...assistantSizes) - Math.min(...assistantSizes),
+    `assistant glyphs: ${assistantSizes.join(', ')}px`
+  ).toBeLessThanOrEqual(GLYPH_TOLERANCE_PX);
+
+  // Only the tiles shrink. A sidebar tab draws the provider icon itself, and
+  // at the size of the File Browser tab's folder glyph, whose art also fills
+  // 20/24 of its box.
+  const folder = tabs['filebrowser'].size;
+  expect(folder).toBeGreaterThan(0);
+  for (const id of AVAILABLE) {
+    const size = tabs[panelId(id)]?.size ?? 0;
+    expect(
+      Math.abs(size - folder),
+      `${id} tab: ${size}px, File Browser tab: ${folder}px`
     ).toBeLessThanOrEqual(GLYPH_TOLERANCE_PX);
   }
 

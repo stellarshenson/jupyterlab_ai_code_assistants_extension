@@ -1707,6 +1707,15 @@ Launcher tiles that open an assistant in the file browser's current folder
   - log: 2026-08-27T22:06:26Z @kj glyph changed on the user's word from the electronic brain to a filled robot head (Material style, evenodd cut-outs); the launcherTileIcon mechanism is unchanged
   - log: 2026-08-27T22:09:30Z @kj re-verified in v1.1.12 with the robot head: launcher-section-joint-icon.png shows it in the header after Other, Galata 41/41, Jest 159/159
   - log: 2026-09-17T17:26:05Z @kj edited importance
+- [x] `ACC-LNCH-215-TILE-GLYPH` **Smaller assistant glyphs in the tiles** - LOW; in the Launcher AI Assistants tiles each of the five assistant glyphs renders at 75% of the Terminal tile glyph, within 1px, the five equal within 1px and centred in the tile icon area; only the tiles change - section header icon, sidebar tabs, panel header, menus keep their size
+  - evidence: ui-tests/tests/launcher-tiles.spec.ts glyph-size test (line 218) green, Galata 84/84 at v1.2.171; glyphs 32.499-32.502px against Terminal 43.333px, sidebar tabs 16.666-16.668px against File Browser 16.667px
+  - related: DEF-PANE-332-ICON-SIZE - the earlier rule, every assistant glyph at the Terminal glyph size, which this narrows for the Launcher tiles
+  - test: open the Launcher, compare each tile's drawn glyph box with the Terminal tile's: 0.75 within 1px, five within 1px, centre within 1px of the icon area centre; sidebar tab glyphs within 1px of the File Browser tab glyph
+  - test-tags: E2E
+  - mechanism: 2026-10-20T11:54:39Z @kj launcherTileIcon adds the class jp-AiAssistantsLauncher-tileGlyph under the launcherCard preset only; style/base.css scales that svg to 0.75 about its centre
+  - log: 2026-10-20T11:54:39Z @kj added
+  - log: 2026-10-20T12:19:22Z @kj closed: verified in v1.2.171
+  - log: 2026-10-20T12:19:38Z @kj edited evidence "ui-tests/tests/launcher-tiles.spec.ts 'DEF-PANE-332 and ACC-LNCH-215 - every assistant glyph renders at 75% of the Terminal card glyph in the Launcher tiles only' green, Galata 84/84 at v1.2.171; glyphs 32.499-32.502px against Terminal 43.333px, sidebar tabs 16.666-16.668px against File Browser 16.667px" -> "ui-tests/tests/launcher-tiles.spec.ts glyph-size test (line 218) green, Galata 84/84 at v1.2.171; glyphs 32.499-32.502px against Terminal 43.333px, sidebar tabs 16.666-16.668px against File Browser 16.667px"
 
 ## DeepSeek Provider `DEEP`
 

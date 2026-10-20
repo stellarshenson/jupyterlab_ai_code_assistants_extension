@@ -1126,3 +1126,10 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
 .jp-AiAssistantsCallback-status[data-level='error'] {
   color: var(--jp-error-color1);
 }
+
+/* Launcher tile glyph at 75% of JupyterLab's own tile glyph (ACC-LNCH-215).
+   A transform, so the 52px icon box and the card layout stay as they are and
+   the svg shrinks about its own centre. */
+.jp-LauncherCard-icon .jp-AiAssistantsLauncher-tileGlyph > svg {
+  transform: scale(0.75);
+}

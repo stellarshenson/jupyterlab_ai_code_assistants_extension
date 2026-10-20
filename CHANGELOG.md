@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [Unreleased]
+
+### Changed
+
+- The assistant icons in the Launcher's AI Assistants tiles are drawn at three quarters of the size of JupyterLab's own tile icons, centred in the tile; the section header icon, the sidebar tabs, the panel header and the menus keep their size
+
 ## [1.2.163] - 2026-10-20
 
 ### Added

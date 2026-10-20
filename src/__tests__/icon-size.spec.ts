@@ -3,8 +3,10 @@
  * icons (DEF-PANE-332).
  *
  * The Launcher card, the sidebar tab and the menus draw every icon in one box
- * size, so how big a glyph looks there is fixed by the SVG alone: the share of
- * the viewBox its drawn paths cover. The reference is measured from
+ * size, so how big a glyph looks there is fixed by the SVG: the share of the
+ * viewBox its drawn paths cover. In the Launcher card the assistant svg is then
+ * scaled to 0.75 (ACC-LNCH-215, style/base.css), so the tile glyph is three
+ * quarters of that share. The reference is measured from
  * JupyterLab's terminal icon, the Terminal card of the same Launcher, rather
  * than written down, and each provider glyph is measured the same way.
  */

@@ -30,8 +30,10 @@ import { PROVIDERS } from '../providers';
 
 type Preset = 'launcherSection' | 'launcherCard';
 
-function markup(icon: LabIcon, stylesheet: Preset): string {
-  return renderToStaticMarkup(React.createElement(icon.react, { stylesheet }));
+function markup(icon: LabIcon, stylesheet: Preset, className?: string): string {
+  return renderToStaticMarkup(
+    React.createElement(icon.react, { stylesheet, className })
+  );
 }
 
 const tiles = PROVIDERS.map(module => [
@@ -55,7 +57,11 @@ describe('ACC-LNCH-163 - the section header draws the joint icon', () => {
 
   it.each(tiles)('%s: its own glyph on the tile', (_id, tile) => {
     const view = launcherTileIcon(tile);
-    expect(markup(view, 'launcherCard')).toBe(markup(tile, 'launcherCard'));
+    // The tile's glyph carries the class style/base.css scales to 75%
+    // (ACC-LNCH-215).
+    expect(markup(view, 'launcherCard')).toBe(
+      markup(tile, 'launcherCard', 'jp-AiAssistantsLauncher-tileGlyph')
+    );
     expect(markup(view, 'launcherCard')).not.toBe(
       markup(assistantsIcon, 'launcherCard')
     );

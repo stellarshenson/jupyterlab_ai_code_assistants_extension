@@ -51,6 +51,7 @@ The existing `POST providers/<id>/launch` spawns the terminal itself and is unto
 - **Version floor** - `categoryRank` exists from JupyterLab 4.6.0; `@jupyterlab/launcher` pinned `^4.6.0`, runtime here is 4.6.3
 - **Tile order** - `rank` = provider index in `src/providers/index.ts`, matching the sidebar
 - **Section icon** - the Launcher has no section icon of its own; it draws the header with the FIRST item's command icon under the `launcherSection` stylesheet preset and each tile under `launcherCard`. Every tile command carries `launcherTileIcon(providerIcon(...))` from `src/core/icons.ts`: a view of the provider icon (a prototype child, as `LabIcon.bindprops` builds) whose `react` renders the extension's joint icon `assistantsIcon` under the section preset and the provider's own glyph otherwise, so the header shows the vendor-neutral robot head while each tile keeps its mark (`ACC-LNCH-163`). No phantom item, no DOM patching; if the Launcher stopped passing the preset, the header would fall back to the first tile's icon
+- **Tile glyph size** - under `launcherCard` the same view adds the class `jp-AiAssistantsLauncher-tileGlyph`; `style/base.css` scales that svg to 0.75 about its centre, so each assistant glyph is drawn at 75% of the Terminal tile glyph while the 52px icon box stays as it is. The sidebar tabs, panel header and menus draw `providerIcon` itself and keep the standard size (`ACC-LNCH-215`)
 
 ## Dependencies
 

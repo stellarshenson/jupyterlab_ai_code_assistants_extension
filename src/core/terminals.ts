@@ -7,6 +7,7 @@ import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
 import { Widget } from '@lumino/widgets';
 
 import { ColourStore, effectiveColour, sessionForCwds } from './colour';
+import { DialogRenderer } from './dialogs';
 import { LOG_PREFIX } from './registry';
 import { requestProvider } from './request';
 import {
@@ -71,13 +72,39 @@ function warnLegacyCompanion(): void {
   Notification.warning(message, { autoClose: false });
 }
 
-/** Show a modal spinner while a terminal is being launched. The caller
- * dismisses it with `.dispose()` when the launch settles.
+/** The spinner dialog's header: the title as plain text this module can
+ * retitle in place. JupyterLab's own header renders the title through React,
+ * which owns that text and writes it back on its first render. */
+class SpinnerRenderer extends DialogRenderer {
+  createHeader(title: Dialog.Header): Widget {
+    const header = new Widget();
+    header.addClass('jp-Dialog-header');
+    header.node.textContent = String(title);
+    // A retitle lands while Hide already has the focus, so the dialog's name
+    // is not read again; the header says it instead.
+    header.node.setAttribute('aria-live', 'polite');
+    return header;
+  }
+}
+
+const spinnerRenderer = new SpinnerRenderer();
+
+/** Name the action on the spinner dialog: the header the user reads, and the
+ * accessible name read out when Hide takes the focus. */
+function titleSpinner(dialog: Dialog<unknown>, title: string): void {
+  const header = dialog.node.querySelector('.jp-Dialog-header');
+  if (header) {
+    header.textContent = title;
+  }
+  dialog.node.setAttribute('aria-label', title);
+}
+
+/** Show a modal spinner while an action runs.
  *
  * Hide does not abort the request - it only takes the app-wide scrim away, so
- * a stalled launch cannot leave the user staring at a modal with no exit. If
- * the launch later succeeds the terminal simply appears. */
-export function showLaunchSpinner(
+ * a stalled action cannot leave the user staring at a modal with no exit. If
+ * the action later succeeds the terminal simply appears. */
+function showLaunchSpinner(
   title: string,
   trans: TranslationBundle
 ): Dialog<unknown> {
@@ -96,13 +123,58 @@ export function showLaunchSpinner(
     // the request is already on the wire and the terminal will still open and
     // take focus. A button named Cancel that does not cancel is worse than no
     // button.
-    buttons: [Dialog.okButton({ label: trans.__('Hide') })]
+    buttons: [Dialog.okButton({ label: trans.__('Hide') })],
+    renderer: spinnerRenderer
   });
+  // Scopes the compact layout in base.css to this one dialog.
+  dialog.addClass('jp-AiAssistantsPanel-spinnerDialog');
+  titleSpinner(dialog, title);
   // `launch()` returns a promise nobody awaits - disposing an open Lumino
   // dialog rejects it with `undefined`, so swallow that here and keep a benign
   // teardown from surfacing as an unhandled rejection.
   dialog.launch().catch(() => undefined);
   return dialog;
+}
+
+/** The one spinner dialog, shared by every panel's clicks and launches, and
+ * the title of each action it stands for, keyed by the token `beginSpinner`
+ * returned. One dialog, retitled, never a second: JupyterLab queues a dialog
+ * behind the one on screen, so a second spinner would show only once the first
+ * had closed, or never. */
+let spinnerDialog: Dialog<unknown> | null = null;
+let spinnerSeq = 0;
+const spinnerTitles = new Map<number, string>();
+
+/** Show the spinner dialog for one action, or retitle the one already up so it
+ * names the newest action. Pass the token to `endSpinner` when the action
+ * settles. Hide disposes the dialog for the actions then running: they stay
+ * hidden and keep no dialog up, and the next action raises a fresh one. The
+ * launch inside a click passes the click's token to `launch()`, so a hidden
+ * click's launch raises nothing. */
+export function beginSpinner(title: string, trans: TranslationBundle): number {
+  const token = ++spinnerSeq;
+  if (!spinnerDialog || spinnerDialog.isDisposed) {
+    spinnerTitles.clear();
+    spinnerDialog = showLaunchSpinner(title, trans);
+  } else {
+    titleSpinner(spinnerDialog, title);
+  }
+  spinnerTitles.set(token, title);
+  return token;
+}
+
+/** End one action. The dialog then names the newest action still running, or
+ * closes with the last one. */
+export function endSpinner(token: number): void {
+  spinnerTitles.delete(token);
+  if (spinnerTitles.size > 0) {
+    if (spinnerDialog && !spinnerDialog.isDisposed) {
+      titleSpinner(spinnerDialog, [...spinnerTitles.values()].pop()!);
+    }
+    return;
+  }
+  spinnerDialog?.dispose();
+  spinnerDialog = null;
 }
 
 /**
@@ -174,7 +246,8 @@ export class TerminalManager {
   async openSession(
     session: ISession,
     mode: string | undefined,
-    sessionId?: string
+    sessionId?: string,
+    spinner?: number
   ): Promise<void> {
     const wanted = sessionId ?? session.session_id;
     const key = this._key(session.project_path, wanted);
@@ -182,9 +255,11 @@ export class TerminalManager {
     if (inFlight) {
       return inFlight;
     }
-    const promise = this._doOpenSession(session, mode, wanted).finally(() => {
-      this._pending.delete(key);
-    });
+    const promise = this._doOpenSession(session, mode, wanted, spinner).finally(
+      () => {
+        this._pending.delete(key);
+      }
+    );
     this._pending.set(key, promise);
     return promise;
   }
@@ -192,7 +267,8 @@ export class TerminalManager {
   private async _doOpenSession(
     session: ISession,
     mode: string | undefined,
-    wanted: string
+    wanted: string,
+    spinner: number | undefined
   ): Promise<void> {
     // 1. Microcache - the most recent terminal of this project, reused only
     // when it carries the wanted conversation.
@@ -227,7 +303,8 @@ export class TerminalManager {
         session_id: wanted,
         mode
       },
-      wanted
+      wanted,
+      spinner
     );
   }
 
@@ -235,12 +312,24 @@ export class TerminalManager {
    * Launch a terminal for one request and focus it. The returned widget is
    * tagged with `tagSessionId` in the microcache, so a later click on the row
    * that conversation now belongs to reuses this very terminal.
+   *
+   * `spinner` is the token of the click this launch belongs to. The launch
+   * joins that click's spinner instead of beginning its own, so the user sees
+   * one dialog from the click to the terminal, and a click the user hid stays
+   * hidden.
    */
-  async launch(request: ILaunchRequest, tagSessionId?: string): Promise<any> {
-    const spinner = showLaunchSpinner(
-      `Opening ${this._descriptor.label}`,
-      this._trans
-    );
+  async launch(
+    request: ILaunchRequest,
+    tagSessionId?: string,
+    spinner?: number
+  ): Promise<any> {
+    const own =
+      spinner === undefined
+        ? beginSpinner(
+            this._trans.__('Opening %1', this._descriptor.label),
+            this._trans
+          )
+        : undefined;
     try {
       const launched = await requestProvider<ILaunchResponse>(
         this._descriptor.id,
@@ -261,7 +350,9 @@ export class TerminalManager {
       }
       return widget ?? null;
     } finally {
-      spinner.dispose();
+      if (own !== undefined) {
+        endSpinner(own);
+      }
     }
   }
 
@@ -271,9 +362,20 @@ export class TerminalManager {
    * xterm inside does not reliably take DOM focus when the click came from the
    * sidebar, so the focus call is deferred to the next frame - by then the
    * widget is attached and visible.
+   *
+   * The activation waits for the spinner dialog to close. While the dialog is
+   * up it pulls any focus outside it back to Hide, and on closing it returns
+   * the focus to the element that had it before - so a terminal activated
+   * under it ends up without the keyboard. Closing emits `disposed` before
+   * that return, and the activation the tab then receives is processed after
+   * it, so the terminal is the last to take the focus.
    */
   focus(widget: any): void {
     if (!widget || widget.isDisposed) {
+      return;
+    }
+    if (spinnerDialog && !spinnerDialog.isDisposed) {
+      spinnerDialog.disposed.connect(() => this.focus(widget));
       return;
     }
     this._app.shell.activateById(widget.id);

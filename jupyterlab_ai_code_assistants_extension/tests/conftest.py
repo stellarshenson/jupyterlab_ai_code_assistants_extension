@@ -213,21 +213,29 @@ def write_gemini_tree(root: Path, short_id: str, chats: list[dict]) -> Path:
     for entry in chats:
         meta = {
             "sessionId": entry["id"],
+            "projectHash": "0" * 64,
             "startTime": "2026-08-01T10:00:00.000Z",
             "lastUpdated": "2026-08-01T11:00:00.000Z",
             "summary": entry.get("summary"),
         }
         if entry.get("kind"):
             meta["kind"] = entry["kind"]
-        # Compact, exactly as the CLI's own ``JSON.stringify`` writes it - the
-        # store recognises message records by substring, so the separators are
-        # part of the fixture's fidelity.
+        # Compact, exactly as the CLI's own ``JSON.stringify`` writes it, with
+        # ``id`` the first key of every message record - the store recognises
+        # message records by substring and reads the id off the line's head, so
+        # both are part of the fixture's fidelity.
         lines = [json.dumps(meta, separators=(",", ":"))]
-        for i in range(entry.get("messages", 0)):
+        for i in range(entry.get("messages", 2)):
             role = "user" if i % 2 == 0 else "gemini"
             lines.append(
                 json.dumps(
-                    {"type": role, "content": f"turn {i}"}, separators=(",", ":")
+                    {
+                        "id": new_uuid(),
+                        "timestamp": "2026-08-01T10:00:00.000Z",
+                        "type": role,
+                        "content": f"turn {i}",
+                    },
+                    separators=(",", ":"),
                 )
             )
         name = f"session-2026-08-01T10-00-{entry['id'][:8]}.jsonl"

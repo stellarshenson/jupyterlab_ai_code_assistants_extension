@@ -12,8 +12,9 @@
 import { IProviderDescriptor, IProviderHooks, ISession } from '../core/types';
 
 // Claude's own mark, drawn as a single path group so the theme's `jp-icon3`
-// fill drives it in both light and dark.
-const claudeSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+// fill drives it in both light and dark. The viewBox insets the mark to the
+// JupyterLab icon proportion (see `providerIcon`).
+const claudeSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-0.433 -0.4 16.8 16.8" width="16" height="16">
   <g class="jp-icon3" fill="#616161">
     <path d="m14.375 6.48.49.28v.209l-.14.489-5.937 1.397-.558-1.387zm0 0"/>
     <path d="m12.155 2.373.683.143.182.224.173.535-.072.342-3.983 5.447L7.81 7.737l3.673-4.82z"/>

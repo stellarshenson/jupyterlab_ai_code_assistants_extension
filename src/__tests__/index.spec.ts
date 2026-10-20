@@ -110,8 +110,7 @@ describe('DEF-GUARD-139 - reconcile hands a late roster to a docked panel', () =
     const app = {
       serviceManager: { serverSettings: {} },
       commands: new CommandRegistry(),
-      hasPlugin: () => false,
-      shell: { node: document.createElement('div') }
+      hasPlugin: () => false
     } as any;
     const settings = {
       raw: '{}',
@@ -214,8 +213,7 @@ describe('ACC-LNCH-143..146 - the Launcher tile has the panel lifecycle', () => 
     const app = {
       serviceManager: { serverSettings: {} },
       commands: new CommandRegistry(),
-      hasPlugin: () => false,
-      shell: { node: document.createElement('div') }
+      hasPlugin: () => false
     } as any;
     const labShell = {
       add: (widget: AssistantSessionsPanel) => docked.push(widget)
@@ -290,8 +288,7 @@ describe('ACC-LNCH-143..146 - the Launcher tile has the panel lifecycle', () => 
       {
         serviceManager: { serverSettings: {} },
         commands: new CommandRegistry(),
-        hasPlugin: () => false,
-        shell: { node: document.createElement('div') }
+        hasPlugin: () => false
       } as any,
       { add: (widget: AssistantSessionsPanel) => docked.push(widget) } as any,
       null,
@@ -419,8 +416,7 @@ describe('ACC-PROV - the activation contract', () => {
     const app = {
       serviceManager: { serverSettings },
       commands: new CommandRegistry(),
-      hasPlugin: () => false,
-      shell: { node: document.createElement('div') }
+      hasPlugin: () => false
     } as any;
 
     const composite = options.composite;
@@ -882,8 +878,6 @@ describe('ACC-SETT - settings drive the panels', () => {
     const shellMoves: [string, string][] = [];
     const sequence: string[] = [];
     const labShell = {
-      // The panel mounts its click-time overlay on the shell node.
-      node: document.createElement('div'),
       // As the real sidebar does: a widget is hidden when it is added, and a
       // placement the user made with JupyterLab's own command overrides the
       // area the caller asks for.
@@ -940,8 +934,7 @@ describe('ACC-SETT - settings drive the panels', () => {
     const app = {
       serviceManager: { serverSettings },
       commands,
-      hasPlugin: () => false,
-      shell: { node: document.createElement('div') }
+      hasPlugin: () => false
     } as any;
 
     const changed = new Signal<unknown, void>({});
@@ -1765,8 +1758,7 @@ describe('ACC-RETI-82..84 - a retired standalone extension still installed', () 
     const app = {
       serviceManager: { serverSettings },
       commands: new CommandRegistry(),
-      hasPlugin: (id: string) => installed.includes(id),
-      shell: { node: document.createElement('div') }
+      hasPlugin: (id: string) => installed.includes(id)
     } as any;
     await (plugin.activate as any)(
       app,

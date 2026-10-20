@@ -149,7 +149,15 @@ export const statusDotIcon = new LabIcon({
 // rather than construct a second one on every toggle.
 const _providerIcons = new Map<string, LabIcon>();
 
-/** Build (or reuse) the LabIcon for a provider's own glyph. */
+/**
+ * Build (or reuse) the LabIcon for a provider's own glyph.
+ *
+ * Every provider SVG carries a square viewBox centred on its art, with the
+ * art's larger side at 20/24 of the box - the inset of JupyterLab's own icons
+ * (the terminal icon draws 2..22 in a 24 box). The Launcher card, the sidebar
+ * tab and the menus each draw every icon in one box size, so the same inset
+ * gives every assistant the same visual size there (DEF-PANE-332).
+ */
 export function providerIcon(name: string, svgstr: string): LabIcon {
   let icon = _providerIcons.get(name);
   if (!icon) {

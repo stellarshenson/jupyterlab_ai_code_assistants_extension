@@ -1,8 +1,10 @@
+import * as fs from 'fs';
 import * as path from 'path';
 
 import { expect, test } from '@jupyterlab/galata';
 
 import {
+  ABSENT,
   AVAILABLE,
   fetchStatus,
   setProviderEnabled,
@@ -202,6 +204,87 @@ test('ACC-LNCH-163 - the section header carries the joint icon, not a tile icon'
 
   await section.scrollIntoViewIfNeeded();
   await page.screenshot({ path: shotPath('launcher-section-joint-icon') });
+});
+
+/** Largest allowed difference between an assistant glyph and the Terminal
+ * card's glyph: 1px of the 52px box every card draws its icon in. */
+const GLYPH_TOLERANCE_PX = 1;
+
+test('DEF-PANE-332 - every assistant glyph renders at the size of the Terminal card glyph', async ({
+  page
+}) => {
+  await page.goto();
+  const status = await fetchStatus(page);
+  await resetToLauncher(page);
+
+  // An assistant with no binary in the harness has no tile. Its glyph is
+  // drawn into a copy of a live card by JupyterLab's own LabIcon under the
+  // same `launcherCard` preset, from the provider source the build bundles.
+  const absent = ABSENT.map(id => ({
+    label: status.providers.find(p => p.id === id)!.label,
+    svgstr: /`(<svg[\s\S]*?<\/svg>)`/.exec(
+      fs.readFileSync(
+        path.join(__dirname, '..', '..', 'src', 'providers', `${id}.ts`),
+        'utf8'
+      )
+    )![1]
+  }));
+
+  // The larger side of the box around each card's drawn paths, in px, by
+  // card label.
+  const sizes: Record<string, number> = await page.evaluate(
+    ({ cards, absent }) => {
+      const app = (window as any).jupyterapp;
+      // LabIcon is not on window; a tile's command icon is one.
+      const LabIcon = app.commands.icon(
+        'ai-code-assistants:claude:launch-here'
+      ).constructor;
+      const live = document.querySelector(cards)!;
+      for (const { label, svgstr } of absent) {
+        const copy = live.cloneNode(true) as HTMLElement;
+        copy.querySelector('.jp-LauncherCard-label p')!.textContent = label;
+        copy.querySelector('.jp-LauncherCard-icon')!.replaceChildren(
+          new LabIcon({ name: `galata:${label}`, svgstr }).element({
+            stylesheet: 'launcherCard'
+          })
+        );
+        live.parentElement!.appendChild(copy);
+      }
+      const result: Record<string, number> = {};
+      const all = document.querySelectorAll(
+        `${cards}, .jp-LauncherCard[data-category="Other"]`
+      );
+      for (const card of Array.from(all)) {
+        const rects = Array.from(
+          card.querySelectorAll('.jp-LauncherCard-icon svg path')
+        ).map(p => p.getBoundingClientRect());
+        const width =
+          Math.max(...rects.map(r => r.right)) -
+          Math.min(...rects.map(r => r.left));
+        const height =
+          Math.max(...rects.map(r => r.bottom)) -
+          Math.min(...rects.map(r => r.top));
+        const label = card.querySelector('.jp-LauncherCard-label p')!;
+        result[label.textContent!] = Math.max(width, height);
+      }
+      return result;
+    },
+    { cards: CARDS, absent }
+  );
+
+  const reference = sizes['Terminal'];
+  expect(reference).toBeGreaterThan(0);
+  for (const { label } of status.providers) {
+    expect(
+      Math.abs(sizes[label] - reference),
+      `${label}: ${sizes[label]}px, Terminal: ${reference}px`
+    ).toBeLessThanOrEqual(GLYPH_TOLERANCE_PX);
+  }
+
+  await page
+    .locator(SECTION_TITLE, { hasText: CATEGORY })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({ path: shotPath('launcher-glyph-sizes') });
 });
 
 test('ACC-LNCH-145 - a settings toggle adds and removes a tile with no reload', async ({

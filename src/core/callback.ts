@@ -3,6 +3,7 @@ import { Dialog, ICommandPalette, Notification } from '@jupyterlab/apputils';
 import { TranslationBundle } from '@jupyterlab/translation';
 import { Widget } from '@lumino/widgets';
 
+import { dialogRenderer } from './dialogs';
 import { requestAPI } from './request';
 
 /** The command that delivers a pasted login callback link. */
@@ -113,7 +114,8 @@ class CallbackDialog extends Dialog<void> {
         Dialog.okButton({ label: _trans.__('OK') })
       ],
       defaultButton: 1,
-      focusNodeSelector: 'input'
+      focusNodeSelector: 'input',
+      renderer: dialogRenderer
     });
   }
 

@@ -107,5 +107,5 @@ async def test_a_resumable_conversation_still_launches(jp_fetch, launcher, tmp_p
     )
     assert json.loads(response.body)["terminal_name"] == "term-1"
     argv = manager.created[0]["shell_command"]
-    assert "--session-file" in argv
+    assert argv[-2:] == ["--resume", session]
     assert manager.created[0]["cwd"] == str(tmp_path)

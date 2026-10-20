@@ -2,7 +2,7 @@
 
 New provider: there is no standalone extension to port from, so the store below
 is written against the CLI's own on-disk format, verified in the installed
-bundle of ``@google/gemini-cli`` 0.54.4.
+bundle of ``@google/gemini-cli`` 0.64.0.
 
 The store reads ``~/.gemini``: ``projects.json`` is Gemini's own registry
 mapping a project root to a short id (a slug matching ``[a-z0-9-]+``), and that
@@ -24,14 +24,17 @@ Four consequences shape everything below:
 * Gemini has no colour command and records no colour, so a tint only ever comes
   from the extension's own colour store
 
-Resuming is ``--session-file <chat file>``, and the choice is load-bearing.
-``--resume`` is the CLI's only other way back into a conversation and it cannot
-address one by id: its argument is ``latest`` or a POSITION in a list re-sorted
-by start time, so it names a different conversation the moment another one
-lands, and a row clicked in the panel would open whatever had drifted into that
-slot. The chat file is the one handle that stays bound to a conversation for its
-whole life, so the store maps a session id onto its file and hands the CLI the
-path (acc-crit "Gemini / Resume", docs/defects.md DEF-8).
+Resuming is ``--resume <session id>``, and the choice is load-bearing. The
+CLI's help names only ``latest`` and a listing index for that flag, but its
+lookup (``SessionSelector.findSession``) matches a full session id before it
+reads the argument as an index, so the id names exactly one conversation, and
+the CLI appends the new turns to that conversation's own file under the same
+id. The lookup covers the chats of the project the terminal's working directory
+belongs to, which is why the launch route starts the terminal in the row's
+project. ``--session-file`` is no resume: it imports the chat as a NEW
+conversation, a copy named ``session-<epoch ms>-<first 8 of a new id>.jsonl``,
+so the clicked conversation never receives another turn (acc-crit "Gemini /
+Resume", docs/defects.md DEF-PROV-330-RESUME-COPY).
 
 Favourites and the current-conversation pin live in the extension's own state
 directory (``core.state``), never in ``~/.gemini`` - the assistant's own files
@@ -96,6 +99,16 @@ SESSION_ID_RE = re.compile(r"[0-9a-fA-F-]{36}")
 # parsed: a transcript runs to megabytes and the count is display only.
 _MESSAGE_MARKERS = ('"type":"user"', '"type":"gemini"')
 _USER_MARKER = '"type":"user"'
+# A message record's own id. The CLI writes ``id`` as the first key of every
+# message record, so the id is read without parsing the line; a line written
+# any other way is parsed instead.
+_RECORD_ID_RE = re.compile(r'\{"id":"([^"\\]*)"')
+# The CLI opens every conversation with a user record carrying this block - the
+# date, the platform, the directory tree - which is context, not a prompt.
+SESSION_CONTEXT_TAG = "<session_context>"
+# User text the CLI does not count as a prompt (``isIgnoredUserContent`` in
+# gemini-cli 0.64.0): a command, a help request, or a context block.
+_IGNORED_PREFIXES = ("/", "?", SESSION_CONTEXT_TAG, "<hook_context>")
 # Markers of a metadata record - the head of the file, and the ``$set`` updates
 # that follow it. Tested before the message markers, because a ``$set`` may
 # re-send the whole message list on one line.
@@ -153,9 +166,14 @@ def _content_text(content: Any) -> str:
 
 
 def _preview(text: str) -> str | None:
-    """One-line, length-bounded preview of a first prompt."""
+    """One-line, length-bounded preview of a first prompt.
+
+    None for an empty text and for text the CLI ignores - a command, a help
+    request, the ``<session_context>`` block - so the first prompt is the
+    first record the user typed that ``--resume`` would resume.
+    """
     collapsed = " ".join(text.split())
-    if not collapsed:
+    if not collapsed or collapsed.startswith(_IGNORED_PREFIXES):
         return None
     return collapsed[:FIRST_PROMPT_CHARS]
 
@@ -245,6 +263,10 @@ def _parse_chat(raw: bytes) -> dict | None:
             if first_prompt is None and message.get("type") == "user":
                 first_prompt = _preview(_content_text(message.get("content")))
     else:
+        # Messages are counted by id, not by line: a record under an id already
+        # seen replaces the earlier one, and the CLI writes a gemini message
+        # that calls tools twice, the second time with its tool calls.
+        message_ids: set[str] = set()
         for line in text.split("\n"):
             line = line.strip()
             if not line:
@@ -255,14 +277,21 @@ def _parse_chat(raw: bytes) -> dict | None:
             if not any(marker in line for marker in _META_MARKERS) and any(
                 marker in line for marker in _MESSAGE_MARKERS
             ):
-                count += 1
-                if first_prompt is None and _USER_MARKER in line:
+                match = _RECORD_ID_RE.match(line)
+                wants_prompt = first_prompt is None and _USER_MARKER in line
+                record = None
+                if match is None or wants_prompt:
                     try:
                         record = json.loads(line)
                     except ValueError:
-                        continue
-                    if isinstance(record, dict):
-                        first_prompt = _preview(_content_text(record.get("content")))
+                        pass
+                if not isinstance(record, dict):
+                    record = {}
+                record_id = match.group(1) if match else record.get("id")
+                if isinstance(record_id, str):
+                    message_ids.add(record_id)
+                if wants_prompt:
+                    first_prompt = _preview(_content_text(record.get("content")))
                 continue
             try:
                 record = json.loads(line)
@@ -279,12 +308,14 @@ def _parse_chat(raw: bytes) -> dict | None:
             # replaces what came before it rather than adding to it.
             messages = payload.get("messages")
             if isinstance(messages, list):
-                count = sum(
-                    1
+                message_ids = {
+                    message["id"]
                     for message in messages
                     if isinstance(message, dict)
                     and message.get("type") in ("user", "gemini")
-                )
+                    and isinstance(message.get("id"), str)
+                }
+        count = len(message_ids)
 
     session_id = meta.get("sessionId")
     if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
@@ -316,11 +347,11 @@ def parse_resume_id(cmdline: bytes) -> str | None:
     """The conversation id a NUL-separated gemini cmdline carries as a FLAG.
 
     ``--session-id`` names a brand-new conversation under an id we minted, and
-    ``--resume <uuid>`` is read for a terminal a user launched by hand that way.
-    ``--resume latest`` and ``--resume <index>`` read back as None - neither
-    names a conversation, so such a terminal is never claimed for one it may not
-    be running. The resume this extension itself spawns carries a FILE rather
-    than an id; :meth:`GeminiStore.parse_session_id` resolves that one.
+    ``--resume <uuid>`` is the resume this extension spawns. ``--resume
+    latest`` and ``--resume <index>`` read back as None - neither names a
+    conversation, so such a terminal is never claimed for one it may not be
+    running. So does ``--session-file``: that process runs an imported copy
+    under an id the CLI minted, which no argument carries.
     Pure (bytes in, no pid) so the grammar is testable without a live process.
     """
     args = cmdline_args(cmdline)
@@ -329,11 +360,6 @@ def parse_resume_id(cmdline: bytes) -> str | None:
         if value and SESSION_ID_RE.fullmatch(value):
             return value
     return None
-
-
-def parse_session_file(cmdline: bytes) -> str | None:
-    """The chat file path a NUL-separated gemini cmdline was resumed from."""
-    return flag_value(cmdline_args(cmdline), "--session-file")
 
 
 def _restamp(text: str, stamp: Callable[[dict], bool]) -> str | None:
@@ -536,8 +562,9 @@ class GeminiStore(SessionStore):
     def chat_file(self, session_id: str) -> Path | None:
         """The chat file of one conversation, searched across every project.
 
-        ``launch_argv`` is handed ids, not the project that owns them, and the
-        resume flag takes a path - so the mapping is resolved here. The scan is
+        ``launch_argv`` is handed ids, not the project that owns them, and
+        refuses a launch whose chat file is gone - so the mapping is resolved
+        here. The scan is
         bounded by the registry and every file it reads is served from the mtime
         cache, so a launch pays a stat per conversation and nothing more.
         """
@@ -758,7 +785,10 @@ class GeminiStore(SessionStore):
         could never track - so the extension forks on its behalf: the file is
         re-written beside the original under a new uuid, with the CLI's own
         filename shape so the CLI lists it as an ordinary conversation, and
-        ``--resume <new id>`` opens it.
+        ``--resume <new id>`` resumes the copy in place, the same argv as any
+        row. The copy keeps the source's ``projectHash`` and messages, which
+        that lookup needs: it skips a chat without ``projectHash`` or without
+        one message worth resuming.
 
         The copy is written whole and only then does the id become live, and a
         failed write is rolled back: a half-copied transcript would list as a
@@ -871,12 +901,13 @@ class GeminiStore(SessionStore):
         mode: str | None = None,
         project_path: str | None = None,
     ) -> list[str]:
-        """``gemini --session-file <chat>`` to resume, ``--session-id`` to start.
+        """``gemini --resume <id>`` to resume, ``--session-id`` to start.
 
-        The conversation is named by its FILE, never by ``--resume``: that flag
-        takes ``latest`` or a listing index, a position in a list re-sorted by
-        start time, so it is stale the moment another conversation lands and
-        would open a different conversation than the row that was clicked.
+        The conversation is named by its full id, which the CLI matches before
+        it reads the argument as a listing index, and the CLI goes on writing
+        that conversation's own file. Never ``--session-file``: it imports the
+        chat as a new conversation under an id the CLI mints, so the clicked
+        conversation would stop receiving turns.
 
         A session id whose file cannot be found REFUSES the launch. Dropping
         the flag instead leaves a bare ``gemini``, which starts a brand-new
@@ -893,10 +924,9 @@ class GeminiStore(SessionStore):
         """
         argv = [cli_path]
         if session_id:
-            chat = self.chat_file(session_id)
-            if chat is None:
+            if self.chat_file(session_id) is None:
                 raise SessionNotFound(session_id)
-            argv += ["--session-file", str(chat)]
+            argv += ["--resume", session_id]
         elif new_session_id and SESSION_ID_RE.fullmatch(new_session_id):
             argv += ["--session-id", new_session_id]
         if mode == YOLO_MODE:
@@ -931,38 +961,16 @@ class GeminiStore(SessionStore):
             for arg in cmdline_args(cmdline)
         )
 
-    def _confined_chat_file(self, path: str) -> Path | None:
-        """A ``--session-file`` path read off ``/proc``, if it is one of ours.
-
-        The path is whatever a process advertises, so it is confined under this
-        store's ``tmp/`` root before anything reads and JSON-parses it - the
-        same gate every other path join in this module runs.
-        """
-        try:
-            base = (self.root / TMP_DIRNAME).resolve()
-            chat = Path(path).resolve()
-            chat.relative_to(base)
-        except (OSError, ValueError):
-            return None
-        return chat
-
     def parse_session_id(self, cmdline: bytes) -> str | None:
         """The conversation a running gemini is on, from its argv.
 
-        Gemini writes no per-pid file, so argv is the only handle. A resume this
-        extension spawned carries ``--session-file <path>``, so the id is read
-        back out of that file - the filename holds only the first eight
-        characters of the id and the reuse ladder matches on the whole one. The
-        flag-carried forms (``--session-id``, a hand-typed ``--resume <uuid>``)
-        are read directly; anything else reads back as None rather than being
-        claimed for a conversation it may not be running.
+        Gemini writes no per-pid file, so argv is the only handle, and both
+        forms this extension spawns carry the full id: ``--session-id`` for a
+        new conversation, ``--resume <uuid>`` for a resume. Anything else -
+        ``--session-file`` included, whose copy runs under an id the CLI
+        minted - reads back as None rather than being claimed for a
+        conversation it is not running.
         """
-        path = parse_session_file(cmdline)
-        if path:
-            chat = self._confined_chat_file(path)
-            meta = read_chat_meta(chat) if chat is not None else None
-            if meta:
-                return meta["session_id"]
         return parse_resume_id(cmdline)
 
 

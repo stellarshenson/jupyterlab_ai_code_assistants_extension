@@ -192,10 +192,7 @@ function harness(
       }
     },
     commands,
-    shell: {
-      node: document.createElement('div'),
-      activateById: (id: string) => activated.push(id)
-    }
+    shell: { activateById: (id: string) => activated.push(id) }
   } as any;
   const panel = new AssistantSessionsPanel({
     app,
@@ -519,8 +516,7 @@ describe('the tiles the plugin adds to the Launcher', () => {
     const app = {
       serviceManager: { serverSettings: {} },
       commands: new CommandRegistry(),
-      hasPlugin: () => false,
-      shell: { node: document.createElement('div') }
+      hasPlugin: () => false
     } as any;
     const labShell = {
       add: (widget: AssistantSessionsPanel) => docked.push(widget)

@@ -78,7 +78,7 @@ pip install jupyterlab_ai_code_assistants_extension
 
 ## Agent skill
 
-The wheel ships a session-operations skill for coding agents at `share/jupyter/agents/skills/jupyterlab-ai-code-assistants-extension/SKILL.md`. It covers finding, moving, splitting, renaming and promoting sessions, copying a session into another project under a fresh id, the task-list environment variables, and running Claude Code against Kimi K3 or DeepSeek.
+The wheel ships a session-operations skill for coding agents at `share/jupyter/agents/skills/jupyterlab-ai-code-assistants-extension/SKILL.md`. It covers finding, moving, splitting, renaming and promoting sessions, copying a session into another project under a fresh id, the task-list environment variables, and running Claude Code against Kimi K3 or DeepSeek, with two references for the rest - `claude-operations.md` for how `claude -c` and `--resume` choose a session and how to repair, promote and pin one, and `cross-assistant-sessions.md` for reading, inventorying, taking over and resuming sessions of Claude Code, Codex, Kimi, Gemini and DeepSeek.
 
 After `pip install`, with the Python that runs the lab:
 

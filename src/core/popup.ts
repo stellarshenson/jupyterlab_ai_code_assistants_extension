@@ -3,6 +3,7 @@ import { TranslationBundle, nullTranslator } from '@jupyterlab/translation';
 import { copyIcon } from '@jupyterlab/ui-components';
 import { Widget } from '@lumino/widgets';
 
+import { DialogRenderer } from './dialogs';
 import { branchIcon } from './icons';
 import { IBranch } from './types';
 
@@ -76,14 +77,14 @@ function copyButton(
   return btn;
 }
 
-/** The default dialog renderer with one extra node leading the footer.
+/** The extension's dialog renderer with one extra node leading the footer.
  * JupyterLab builds the footer in the Dialog constructor through
  * `renderer.createFooter`, and `IOptions.renderer` is the public hook for
  * changing it; its only built-in extra, `checkbox`, renders a checkbox, not a
  * button. Leading the footer puts the node before Close in tab order, so the
  * keyboard reaches the list, then Delete, then Close - and the Dialog's own Tab
  * wrap, keyed on its last button, still wraps from Close. */
-class FooterRenderer extends Dialog.Renderer {
+class FooterRenderer extends DialogRenderer {
   constructor(private readonly _lead: HTMLElement) {
     super();
   }

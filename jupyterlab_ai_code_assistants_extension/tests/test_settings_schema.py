@@ -14,6 +14,7 @@ from, and a provider added to one runtime only fails here as well as there.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,8 @@ from jupyterlab_ai_code_assistants_extension.core import registry
 
 
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schema" / "plugin.json"
+INDEX_TS = Path(__file__).resolve().parents[2] / "src" / "index.ts"
+PLUGIN_ID = "jupyterlab_ai_code_assistants_extension:plugin"
 
 #: Keys that apply to every panel from one value, rather than per provider.
 SHARED_KEYS = {
@@ -140,3 +143,66 @@ def test_the_enable_key_the_schema_declares_is_the_one_the_server_gates_on(prope
 
     for provider_id in registry.providers():
         assert routes.enabled_setting_key(provider_id) in properties
+
+
+def test_def_pane_331_the_settings_form_draws_no_add_item_control(schema):
+    """DEF-PANE-331 - JupyterLab's settings form ends an object with an Add item
+    control whenever its ``additionalProperties`` is truthy (rjsf
+    ``canExpand``), and a key added there is saved and never read."""
+    assert not schema.get("additionalProperties")
+
+
+def test_def_pane_331_a_saved_key_the_schema_does_not_declare_keeps_the_declared_values(
+    schema, tmp_path
+):
+    """ACC-PROV-14 - a key the schema no longer declares is inert.
+
+    JupyterLab's server validates the saved file against the schema on every
+    read and answers ``{}`` for a file that fails, so a schema closed with
+    ``"additionalProperties": false`` puts every saved value back to its
+    default. The stale keys are the ones real saved files hold: Gemini's
+    retired ``approvalMode``, the ``newKey`` the Add item control writes, and a
+    provider no longer registered.
+    """
+    from jupyterlab_server.settings_utils import get_settings
+
+    package, _, plugin = PLUGIN_ID.partition(":")
+    (tmp_path / "schemas" / package).mkdir(parents=True)
+    (tmp_path / "schemas" / package / f"{plugin}.json").write_text(
+        json.dumps(schema), encoding="utf-8"
+    )
+    declared = {"presentationMode": "path", "providers.claude.enabled": False}
+    stale = {
+        "providers.gemini.approvalMode": "default",
+        "newKey": "New Value",
+        "providers.nimbus.enabled": True,
+    }
+    (tmp_path / "user" / package).mkdir(parents=True)
+    (tmp_path / "user" / package / f"{plugin}.jupyterlab-settings").write_text(
+        json.dumps({**declared, **stale}), encoding="utf-8"
+    )
+
+    result, warnings = get_settings(
+        str(tmp_path / "app"),
+        str(tmp_path / "schemas"),
+        str(tmp_path / "user"),
+        PLUGIN_ID,
+        overrides={},
+        labextensions_path=[],
+    )
+
+    assert [w for w in warnings if w] == []
+    assert result["settings"] == {**declared, **stale}
+
+
+def test_def_pane_331_every_key_the_frontend_reads_by_name_is_declared(properties):
+    """A key the frontend reads but the schema does not declare has no control
+    in the settings form, so the user can never set it. The per-provider keys
+    are built from the registry and held by the tests above; this covers the
+    keys ``src/index.ts`` names."""
+    if not INDEX_TS.is_file():
+        pytest.skip(f"{INDEX_TS} not present (sdist test run)")
+    source = INDEX_TS.read_text(encoding="utf-8")
+    read = set(re.findall(r"(?:setting<\w+>|saveSetting)\(\s*'([^']+)'", source))
+    assert read, "no settings key found in src/index.ts - check the pattern"
+    assert read - set(properties) == set()

@@ -3,19 +3,18 @@
 
 The copy is independent. Every ``sessionId`` and ``session_id`` in the main transcript and in the
 copied side directory (subagent transcripts, ``custom-title.json``, workflows,
-tool results) is rewritten to the new id, and the id is pinned for ``claude-here``.
+tool results) is rewritten to the new id, and the id is written to ``.pinned-session``.
 
-Pass the encoded project directory under ``~/.claude/projects``. Claude Code
-replaces every character outside ``A-Za-z0-9`` with ``-`` and truncates names
-longer than 200 characters with a hash suffix; prefer the target transcript's
-own ``cwd`` field or an existing directory over re-deriving the name.
+Pass the encoded project directory under ``~/.claude/projects``. The dash
+encoding is lossy; find the directory by its transcripts' ``cwd`` field or take
+an existing directory rather than re-deriving the name.
 
 ``claude -c`` does not read ``.pinned-session``. Resume the copy with
-``claude-here`` or ``claude --resume <new-id>``.
+``claude --resume <new-id>``.
 
 Examples:
-  copy-session.py ~/.claude/projects/-home-lab-a/<id>.jsonl \\
-      ~/.claude/projects/-home-lab-b
+  copy-session.py ~/.claude/projects/-home-user-a/<id>.jsonl \\
+      ~/.claude/projects/-home-user-b
   copy-session.py <src.jsonl> <target-dir> --with-side-files
 """
 from __future__ import annotations

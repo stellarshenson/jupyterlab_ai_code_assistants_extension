@@ -14,9 +14,12 @@ jest.mock('@jupyter/web-components', () => ({
 
 jest.mock('../core/request', () => ({ requestProvider: jest.fn() }));
 
+import { Dialog } from '@jupyterlab/apputils';
+import { nullTranslator } from '@jupyterlab/translation';
+
 import { ColourStore } from '../core/colour';
 import { requestProvider } from '../core/request';
-import { TerminalManager } from '../core/terminals';
+import { TerminalManager, beginSpinner, endSpinner } from '../core/terminals';
 import {
   IProviderDescriptor,
   ISession,
@@ -201,5 +204,173 @@ describe('terminal reuse', () => {
     await manager.openSession(session(), undefined, CURRENT);
 
     expect(launches).toHaveLength(0);
+  });
+});
+
+describe('one spinner dialog (DEF-PANE-327-BUSY-MODAL-1)', () => {
+  const trans = nullTranslator.load('jupyterlab_ai_code_assistants_extension');
+  /** `Dialog.launch` attaches behind a launch-queue promise. */
+  const flush = (): Promise<void> =>
+    new Promise(resolve => setTimeout(resolve, 0));
+  const spinners = (): HTMLElement[] =>
+    Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '.jp-Dialog.jp-AiAssistantsPanel-spinnerDialog'
+      )
+    );
+  const title = (): string =>
+    spinners()[0]?.querySelector('.jp-Dialog-header')?.textContent ?? '';
+  // Every dialog constructed and launched, including one queued behind the
+  // dialog on screen, which the document does not show yet.
+  let launched: jest.SpyInstance;
+
+  beforeEach(() => {
+    launched = jest.spyOn(Dialog.prototype, 'launch');
+  });
+
+  afterEach(() => {
+    launched.mockRestore();
+  });
+
+  it('drives one dialog from overlapping actions and closes it with the last', async () => {
+    const opening = beginSpinner('Opening Testbed', trans);
+    const branching = beginSpinner('Branching Testbed session', trans);
+    try {
+      await flush();
+      expect(launched).toHaveBeenCalledTimes(1);
+      expect(spinners()).toHaveLength(1);
+
+      endSpinner(branching);
+      await flush();
+      expect(spinners()).toHaveLength(1);
+
+      endSpinner(opening);
+      await flush();
+      expect(spinners()).toHaveLength(0);
+    } finally {
+      endSpinner(branching);
+      endSpinner(opening);
+    }
+  });
+
+  it('names the newest action still running', async () => {
+    const opening = beginSpinner('Opening Testbed', trans);
+    let branching: number | undefined;
+    try {
+      await flush();
+      expect(title()).toBe('Opening Testbed');
+
+      branching = beginSpinner('Branching Testbed session', trans);
+      expect(title()).toBe('Branching Testbed session');
+      expect(spinners()[0].getAttribute('aria-label')).toBe(
+        'Branching Testbed session'
+      );
+
+      // The later action ends first: the dialog returns to the one still
+      // running rather than keep naming the one that ended.
+      endSpinner(branching);
+      expect(title()).toBe('Opening Testbed');
+      expect(spinners()[0].getAttribute('aria-label')).toBe('Opening Testbed');
+    } finally {
+      if (branching !== undefined) {
+        endSpinner(branching);
+      }
+      endSpinner(opening);
+    }
+  });
+
+  it('lets a launch join the click-time dialog instead of raising a second', async () => {
+    manager = makeManager();
+    const click = beginSpinner('Branching Testbed session', trans);
+    try {
+      await manager.launch(
+        { project_path: PROJECT, session_id: CURRENT },
+        CURRENT
+      );
+      expect(launches).toHaveLength(1);
+      expect(launched).toHaveBeenCalledTimes(1);
+      await flush();
+      // The click's action has not ended, so its dialog stays up.
+      expect(spinners()).toHaveLength(1);
+    } finally {
+      endSpinner(click);
+    }
+    await flush();
+    expect(spinners()).toHaveLength(0);
+  });
+
+  it('raises the launch dialog for a launch with no click-time dialog up', async () => {
+    manager = makeManager();
+    const answer = request.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    request.mockImplementation(((...args: Parameters<typeof answer>) =>
+      args[1] === 'launch'
+        ? held.then(() => answer(...args))
+        : answer(...args)) as any);
+    const call = manager.launch(
+      { project_path: PROJECT, session_id: CURRENT },
+      CURRENT
+    );
+    try {
+      await flush();
+      expect(spinners()).toHaveLength(1);
+      expect(title()).toBe('Opening Testbed');
+    } finally {
+      release();
+      await call;
+    }
+    await flush();
+    expect(spinners()).toHaveLength(0);
+  });
+
+  it('raises a fresh dialog for an action begun after Hide and keeps the hidden launch hidden', async () => {
+    manager = makeManager();
+    const answer = request.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    request.mockImplementation(((...args: Parameters<typeof answer>) =>
+      args[1] === 'launch'
+        ? held.then(() => answer(...args))
+        : answer(...args)) as any);
+    const hidden = beginSpinner('Opening Testbed', trans);
+    let branching: number | undefined;
+    let call: Promise<any> | undefined;
+    try {
+      await flush();
+      spinners()[0]
+        .querySelector<HTMLElement>('.jp-Dialog-footer .jp-Dialog-button')!
+        .click();
+      expect(spinners()).toHaveLength(0);
+
+      // A click while the hidden action still runs shows its own dialog, and
+      // closes it when it ends.
+      branching = beginSpinner('Branching Testbed session', trans);
+      await flush();
+      expect(spinners()).toHaveLength(1);
+      expect(title()).toBe('Branching Testbed session');
+      endSpinner(branching);
+      await flush();
+      expect(spinners()).toHaveLength(0);
+
+      // The hidden action's own launch joins its token and raises nothing.
+      call = manager.openSession(session(), undefined, CURRENT, hidden);
+      await flush();
+      expect(request.mock.calls.some(([, path]) => path === 'launch')).toBe(
+        true
+      );
+      expect(spinners()).toHaveLength(0);
+    } finally {
+      release();
+      await call;
+      if (branching !== undefined) {
+        endSpinner(branching);
+      }
+      endSpinner(hidden);
+    }
   });
 });

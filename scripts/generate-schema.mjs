@@ -125,11 +125,14 @@ const schema = {
   'jupyter.lab.setting-icon':
     'jupyterlab_ai_code_assistants_extension:assistants',
   'jupyter.lab.setting-icon-label': 'AI Code Assistants',
-  properties: { ...SHARED },
-  // Open, deliberately: a provider removed from the barrel leaves its saved
-  // key behind in the user's settings, and that leftover must be inert rather
-  // than a validation failure.
-  additionalProperties: true
+  // No `additionalProperties`, deliberately. A provider removed from the
+  // barrel leaves its saved key behind in the user's settings, and that
+  // leftover must be inert (ACC-PROV-14): JupyterLab's server answers `{}` for
+  // a saved file the schema rejects, so `false` would put every saved value
+  // back to its default. Left out, the keyword admits the key; `true` admits
+  // it too but makes the settings form draw an Add item control
+  // (DEF-PANE-331).
+  properties: { ...SHARED }
 };
 
 for (const module of PROVIDERS) {

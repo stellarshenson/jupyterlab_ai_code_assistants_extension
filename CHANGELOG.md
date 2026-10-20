@@ -2,6 +2,25 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.163] - 2026-10-20
+
+### Added
+
+- The shipped agent skill carries two new references: `claude-operations.md` (how `claude -c` and `--resume` choose a session, the causes of "No conversation found to continue", repairing a compacted conversation, promoting a background job, re-homed transcripts, pins and transcript clean-up) and `cross-assistant-sessions.md` (the stores, transcript formats and resume commands of Claude Code, Codex, Kimi, Gemini and DeepSeek, an inventory of a project's sessions across all five, newest first, and a takeover procedure); it no longer points at skills outside the wheel for Claude Code mechanics and takeover
+
+### Changed
+
+- A row click and a Branch Session click raise the launch spinner dialog instead of a busy card of their own; the launch that follows keeps the same dialog, so one spinner stays on screen from the click to the terminal, names the newest action still running, and closes before the terminal takes the keyboard
+- The spinner dialog names the assistant session - "Branching Claude Code session", "Opening Claude Code" - and is compact: a semi-bold title one step above the base UI size, a 240px minimum width, a 24px ring and a 28px Hide button; it never shows a scrollbar beside the turning ring; a screen reader hears the title when Hide takes the focus
+- No button in the extension's dialogs shows a focus rim; the primary action is marked by its fill, and the secondary buttons - Cancel, and Close in the Open Callback popup - have a border instead of a grey fill
+
+### Fixed
+
+- The five assistant icons (Claude Code, Codex, DeepSeek, Gemini, Kimi) now render at the size of JupyterLab's own icons in the Launcher, the sidebar tabs and the menus; the Gemini, DeepSeek and Kimi icons no longer fill their Launcher cards
+- The AI Code Assistants settings form no longer ends with an Add item control; a key it saved stays in the settings file and changes nothing
+- Clicking a Gemini conversation resumes it in place with `gemini --resume <id>`, so its new turns land in its own chat file; on gemini-cli 0.64.0 the old `--session-file` launch started a copy under a new id each time. A Gemini row's message count no longer counts a tool turn twice, and an unnamed conversation is labelled by the first prompt the user typed instead of the CLI's `<session_context>` block
+- The shipped agent skill now states that `claude -c` falls back past a transcript it refuses, such as a compacted root, where it said `-c` had no fallback; its DeepSeek steps save the `claude-deepseek` wrapper on `PATH` instead of naming a launcher path that a plain install does not have
+
 ## [1.2.123] - 2026-10-19
 
 ### Fixed

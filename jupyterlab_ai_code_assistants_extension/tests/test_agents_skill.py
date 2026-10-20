@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,8 @@ FILES = (
     "SKILL.md",
     "references/session-operations.md",
     "references/provider-launchers.md",
+    "references/claude-operations.md",
+    "references/cross-assistant-sessions.md",
     "scripts/copy-session.py",
 )
 FIXED_ID = "11111111-1111-4111-8111-111111111111"
@@ -40,6 +43,16 @@ def test_the_skill_exists_with_its_frontmatter():
     assert body.strip()
     assert (SKILL_DIR / "references" / "session-operations.md").is_file()
     assert (SKILL_DIR / "references" / "provider-launchers.md").is_file()
+    assert (SKILL_DIR / "references" / "claude-operations.md").is_file()
+    assert (SKILL_DIR / "references" / "cross-assistant-sessions.md").is_file()
+
+
+def test_every_reference_named_in_the_skill_exists():
+    text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    named = set(re.findall(r"references/[A-Za-z0-9._-]+\.md", text))
+    assert named
+    for relative in sorted(named):
+        assert (SKILL_DIR / relative).is_file(), relative
 
 
 def test_the_installed_skill_matches_the_repository_copy():

@@ -31,7 +31,7 @@ exec claude "$@"
 
 ## DeepSeek
 
-- Provisioned launcher: `/opt/galaxalab/packages/bin/claude-deepseek`; run `claude-deepseek`
+- Save the wrapper below on `PATH` and run `claude-deepseek`
 - Token variable: `DEEPSEEK_AUTH_TOKEN`
 - Endpoint: `https://api.deepseek.com/anthropic`
 
@@ -52,5 +52,5 @@ export CLAUDE_CODE_AUTO_COMPACT_WINDOW='786432'
 exec claude "$@"
 ```
 
-- No `ANTHROPIC_DEFAULT_FABLE_MODEL` and no `ENABLE_TOOL_SEARCH` in the provisioned launcher
+- No `ANTHROPIC_DEFAULT_FABLE_MODEL` and no `ENABLE_TOOL_SEARCH` in this wrapper
 - `deepseek-flash[1m]` for main, Opus and Sonnet; `deepseek-flash` for Haiku and subagents

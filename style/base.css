@@ -570,52 +570,93 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   border-width: 3px;
 }
 
-/* Click-time busy overlay (DEF-PANE-318): raised on the click, before the
-   terminal probe or the branch request. It lives on the lab shell so the
-   feedback appears in the main working area, not inside the panel
-   (DEF-PANE-318-1). No pointer events and no focus - the context menu that
-   launched a branch stays open until its command runs, and a focus change
-   would close it. */
-.jp-AiAssistants-busyOverlay:not([hidden]) {
-  position: fixed;
-  inset: 0;
-  z-index: 9;
+/* The spinner dialog (src/core/terminals.ts): one JupyterLab Dialog, raised
+   on the click that starts a branch or an open, and by a launch, and retitled
+   while actions overlap. Compact, about halfway between JupyterLab's default
+   dialog and the smallest card: a semi-bold title one step above the base
+   UI size (JupyterLab's default is two), a 240px minimum width, a 28px button
+   and no resize grip. Scoped to this one dialog, so JupyterLab's other
+   dialogs keep their sizes. */
+.jp-AiAssistantsPanel-spinnerDialog .jp-Dialog-content {
+  min-width: 240px;
+  min-height: 0;
+  padding: 16px 20px 8px;
+  resize: none;
+}
+
+.jp-AiAssistantsPanel-spinnerDialog .jp-Dialog-header {
+  padding-bottom: 8px;
+  font-size: var(--jp-ui-font-size2);
+  font-weight: 600;
+}
+
+.jp-AiAssistantsPanel-spinnerDialog .jp-Dialog-footer {
+  padding: 8px 12px;
+}
+
+.jp-AiAssistantsPanel-spinnerDialog .jp-Dialog-button {
+  height: 28px;
+  line-height: 28px;
+}
+
+/* The body is JupyterLab's .jp-Dialog-body, which scrolls (overflow: auto),
+   and a turning ring's box grows to its diagonal: the 30px ring box turns
+   through 42.4px. The 8px padding keeps that inside the 46px body, so no
+   scrollbar shows beside the ring (DEF-PANE-329-SPINNER-SIZE). */
+.jp-AiAssistantsPanel-launchOverlay {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  pointer-events: none;
+  padding: 8px 0;
 }
 
-.jp-AiAssistants-busySpinner {
+.jp-AiAssistantsPanel-launchSpinner {
   width: 24px;
   height: 24px;
   border-width: 3px;
 }
 
-.jp-AiAssistants-busyLabel {
-  color: var(--jp-ui-font-color1);
-  background: var(--jp-layout-color1);
+/* No focus rim on any button of this extension's dialogs: the primary action
+   is marked by its fill (jp-mod-accept). JupyterLab draws the rim from
+   `button.jp-Dialog-button.jp-mod-styled.jp-mod-accept:focus` and its warn and
+   reject siblings in apputils' dialog.css - on :focus, not :focus-visible -
+   and a Dialog focuses its default button when it attaches, so the rim showed
+   on a dialog opened with the mouse too. Scoped through the footer mark of
+   the extension's dialog renderer (src/core/dialogs.ts); the second selector
+   outranks those four-class rules. */
+.jp-Dialog:has(.jp-AiAssistantsPanel-dialogFooter) button:focus,
+.jp-Dialog:has(.jp-AiAssistantsPanel-dialogFooter)
+  button.jp-Dialog-button.jp-mod-styled:focus {
+  outline: none;
+}
+
+/* The fill alone marks the primary: the reject buttons (jp-mod-reject) -
+   Cancel, and Close in the Open Callback popup -, which
+   @jupyterlab/application's buttons.css fills grey, are secondary surface
+   buttons in this extension's dialogs - a --jp-border-color2 border, a 6%
+   body-text tint over layout-color1 and the body text colour. The dialog
+   prefix outranks those reject rules, :hover and :active included; the line
+   height keeps the label centred inside the 1px border of the 32px
+   border-box button. */
+.jp-Dialog:has(.jp-AiAssistantsPanel-dialogFooter)
+  button.jp-Dialog-button.jp-mod-reject {
   border: 1px solid var(--jp-border-color2);
-  border-radius: 4px;
-  padding: 4px 10px;
-  font-size: var(--jp-ui-font-size1);
+  background: color-mix(
+    in srgb,
+    var(--jp-ui-font-color0) 6%,
+    var(--jp-layout-color1)
+  );
+  color: var(--jp-ui-font-color0);
+  line-height: 30px;
 }
 
-.jp-AiAssistantsPanel-launchOverlay {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 12px 8px;
-  min-width: 240px;
-}
-
-.jp-AiAssistantsPanel-launchSpinner {
-  width: 28px;
-  height: 28px;
-  border-width: 3px;
+.jp-Dialog:has(.jp-AiAssistantsPanel-dialogFooter)
+  button.jp-Dialog-button.jp-mod-reject:hover {
+  background: color-mix(
+    in srgb,
+    var(--jp-ui-font-color0) 11%,
+    var(--jp-layout-color1)
+  );
 }
 
 .jp-AiAssistantsPanel-cleanupBody {
@@ -991,11 +1032,6 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   font-size: var(--jp-ui-font-size1);
   white-space: nowrap;
   cursor: pointer;
-}
-
-.jp-AiAssistantsPanel-branchDelete:focus-visible {
-  outline: 1px solid var(--jp-brand-color1);
-  outline-offset: 1px;
 }
 
 /* Faded by opacity, as the lab's own disabled buttons are. */

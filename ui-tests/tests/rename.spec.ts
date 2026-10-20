@@ -18,6 +18,10 @@ import { openPanelTab, panelId, waitForApplication } from './shared';
  * store every later spec reads. The new name CONTAINS the old one so this
  * file's own locators keep matching after it, which is what makes a Playwright
  * retry find the row it already renamed.
+ *
+ * The rename dialog also stands for every dialog of this extension in one
+ * look check (DEF-PANE-328-FOCUS-RIM): the fill alone marks the primary, so
+ * Cancel is a secondary surface button, not JupyterLab's grey-filled reject.
  */
 test.use({ autoGoto: false, waitForApplication });
 
@@ -52,6 +56,61 @@ test('ACC-SESS-174 - the item is really on the menu, with a glyph', async ({
   await expect(glyph).toHaveCount(1);
   expect((await glyph.boundingBox())!.width).toBeGreaterThan(0);
   await page.keyboard.press('Escape');
+});
+
+/** A colour as the browser paints it, read off a probe element, so it compares
+ * equal to another element's computed colour. */
+async function painted(page: any, value: string): Promise<string> {
+  return page.evaluate((colour: string) => {
+    const probe = document.createElement('div');
+    probe.style.backgroundColor = colour;
+    document.body.appendChild(probe);
+    const result = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return result;
+  }, value);
+}
+
+test('DEF-PANE-328-FOCUS-RIM - the fill alone marks the primary', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  const menu = await openRowMenu(page, 'claude', 'branchy');
+  await menu.locator('.lm-Menu-item', { hasText: ITEM }).first().click();
+  const dialog = page.locator('.jp-Dialog');
+  await expect(dialog).toBeVisible();
+  // Off every button, so no hover colour is read.
+  await page.mouse.move(0, 0);
+
+  // Ok is the one filled button, in the brand colour of this light theme.
+  await expect(dialog.locator('.jp-Dialog-button.jp-mod-accept')).toHaveCSS(
+    'background-color',
+    await painted(page, 'var(--jp-brand-color1)')
+  );
+  // Cancel is the family's secondary surface button - not JupyterLab's
+  // grey-filled reject with white text.
+  const cancel = dialog.locator('.jp-Dialog-button.jp-mod-reject');
+  await expect(cancel).toHaveCSS(
+    'background-color',
+    await painted(
+      page,
+      'color-mix(in srgb, var(--jp-ui-font-color0) 6%, var(--jp-layout-color1))'
+    )
+  );
+  await expect(cancel).toHaveCSS('border-top-width', '1px');
+  await expect(cancel).toHaveCSS(
+    'border-top-color',
+    await painted(page, 'var(--jp-border-color2)')
+  );
+  await expect(cancel).toHaveCSS(
+    'color',
+    await painted(page, 'var(--jp-ui-font-color0)')
+  );
+
+  await cancel.click();
+  await expect(dialog).toHaveCount(0);
 });
 
 test('ACC-SESS-173 - a rename reaches the store and comes back on the row', async ({

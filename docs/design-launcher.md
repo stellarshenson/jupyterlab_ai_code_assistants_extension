@@ -41,7 +41,7 @@ The existing `POST providers/<id>/launch` spawns the terminal itself and is unto
 - `POST providers/<id>/launch-argv` body `{project_path, encoded_path?, session_id?, new_session_id?, mode?}` → `{argv: [...]}`; the tile sends `project_path`, `encoded_path`, `session_id`, `new_session_id` and `mode`
 - Same validation as `LaunchHandler`: directory exists, `new_session_id` exclusive with `session_id`, `mode` declared on the descriptor → 400 `mode_unsupported`
 - Same side effect: the pin bookkeeping - `state.clear_pin` on a launch that opens no existing conversation - is one shared method on `_LaunchBase`, so neither route can drift from the other. A tile launch never clears a pin: a tile resumes with a session id, or starts new in a project that has no row and therefore no `encoded_path` to key a pin on
-- Same provider hook: `store.launch_argv(cli_path, ...)`, so per-provider verbs (`claude --resume`, `codex resume`, `gemini --session-file`, `kimi -S`) need no change
+- Same provider hook: `store.launch_argv(cli_path, ...)`, so per-provider verbs (`claude --resume`, `codex resume`, `gemini --resume`, `kimi -S`) need no change
 - 503 `cli_not_found` when `shutil.which(cli_binary)` is empty; the tile shows one Notification naming the binary
 
 ## Section placement and order

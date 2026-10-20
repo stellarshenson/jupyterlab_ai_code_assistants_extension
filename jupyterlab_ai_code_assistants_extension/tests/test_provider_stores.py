@@ -1369,13 +1369,173 @@ def test_gemini_fork_declines_a_record_that_cannot_be_encoded(gemini):
     assert sorted(p.name for p in chats.iterdir()) == before
 
 
-def test_gemini_launch_argv_resumes_by_chat_file_never_by_resume(gemini):
-    """Resume names the conversation's FILE, never ``--resume``.
+def _gemini_064_chat(chats_dir, session, *, prompt="list the files", summary=None):
+    """A chat file in the shape gemini-cli 0.64.0 writes, with made-up text.
 
-    ``--resume`` takes ``latest`` or a listing index - a position in a list
-    re-sorted by start time - so it cannot address a conversation by id and a
-    clicked row would open whatever had drifted into that slot
-    (docs/defects.md DEF-8, acc-crit "Gemini / Resume").
+    The header, then the CLI's ``<session_context>`` user record, then one
+    prompt whose answer calls a tool: the calling gemini message is written
+    twice under one id, the second time with ``toolCalls`` - six message
+    lines, five messages.
+    """
+    stamp = "2026-10-19T17:58:13.367Z"
+    tokens = {
+        "input": 10, "output": 2, "cached": 0, "thoughts": 3, "tool": 0, "total": 15
+    }
+    response = {"id": "glob__call_1", "name": "glob", "response": {"output": "a.txt"}}
+    call = {
+        "id": "glob__call_1",
+        "name": "glob",
+        "args": {"pattern": "*"},
+        "status": "success",
+        "timestamp": stamp,
+        "result": [{"functionResponse": response}],
+        "resultDisplay": "Found 1 matching file",
+        "description": "*",
+        "displayName": "FindFiles",
+        "renderOutputAsMarkdown": True,
+    }
+
+    def message(kind, content, **extra):
+        return {
+            "id": extra.pop("id", None) or new_uuid(),
+            "timestamp": stamp,
+            "type": kind,
+            "content": content,
+            **extra,
+        }
+
+    def answer(content, **extra):
+        return message(
+            "gemini", content, tokens=tokens, model="gemini-3.8-flash", **extra
+        )
+
+    updated = {"$set": {"lastUpdated": stamp}}
+    context = "<session_context>\nThis is the Gemini CLI.\n</session_context>"
+    records = [
+        {
+            "sessionId": session,
+            "projectHash": "ab" * 32,
+            "startTime": stamp,
+            "lastUpdated": stamp,
+            "kind": "main",
+        },
+        message("user", [{"text": context}], id="c0ffee" * 5 + "00"),
+        updated,
+    ]
+    if prompt is not None:
+        thought = {"subject": "Listing", "description": "Find files.", "timestamp": stamp}
+        calling = answer("", thoughts=[thought])
+        records += [
+            message("user", [{"text": prompt}]),
+            updated,
+            calling,
+            updated,
+            {**calling, "toolCalls": [call]},
+            message("user", [{"functionResponse": response}]),
+            updated,
+            answer("One file: a.txt", thoughts=[]),
+            updated,
+        ]
+    if summary is not None:
+        records.append({"$set": {"summary": summary, "memoryScratchpad": {}}})
+    path = chats_dir / f"session-2026-10-19T17-58-{session[:8]}.jsonl"
+    path.write_text(
+        "".join(json.dumps(r, separators=(",", ":")) + "\n" for r in records),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_gemini_counts_a_same_id_rewrite_once(gemini):
+    """A record under an id already seen replaces the earlier one.
+
+    The CLI writes a gemini message that calls tools twice under one id, so a
+    count by line reads every tool turn as two messages - 17 for the CLI's 13
+    on a real four-tool chat (DEF-PROV-330-RESUME-COPY).
+    """
+    store, root = gemini
+    session = new_uuid()
+    chats = write_gemini_tree(root, GEMINI_SHORT_ID, [])
+    path = _gemini_064_chat(chats, session)
+    assert store.list_sessions()[0]["message_count"] == 5
+
+    # A ``$set`` re-sending the message list replaces everything before it,
+    # and a later rewrite of an id in that list still adds nothing.
+    kept = {"id": new_uuid(), "timestamp": "t", "type": "user", "content": [{"text": "again"}]}
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"$set": {"messages": [kept]}}, separators=(",", ":")) + "\n")
+        fh.write(json.dumps(kept, separators=(",", ":")) + "\n")
+    assert store.list_sessions()[0]["message_count"] == 1
+
+
+def test_gemini_branch_label_skips_the_session_context_record(gemini):
+    """The CLI opens every chat with a ``<session_context>`` user record, which
+    is context, not a prompt: an unsummarised conversation is labelled by the
+    first prompt the user typed, and by its short id when there is none."""
+    store, root = gemini
+    current, typed, empty = new_uuid(), new_uuid(), new_uuid()
+    chats = write_gemini_tree(root, GEMINI_SHORT_ID, [])
+    touch(_gemini_064_chat(chats, current, summary="Current"), 0)
+    touch(_gemini_064_chat(chats, typed, prompt="rename the module"), -60)
+    touch(_gemini_064_chat(chats, empty, prompt=None), -120)
+
+    labels = {b["session_id"]: b["label"] for b in store.list_branches(GEMINI_SHORT_ID)["branches"]}
+    assert labels == {typed: "rename the module", empty: empty[:8]}
+
+
+def test_gemini_lists_a_chat_before_its_first_prompt(gemini):
+    """gemini-cli 0.64.0 writes a chat's header record at startup, before the
+    first prompt. That chat is the folder's newest row, so a row or tile click
+    names the session the open terminal's ``--session-id`` carries and the
+    panel focuses that terminal instead of opening a second one
+    (DEF-PROV-334-NO-ROW)."""
+    store, root = gemini
+    older, newer = new_uuid(), new_uuid()
+    chats = write_gemini_tree(root, GEMINI_SHORT_ID, [])
+    touch(_gemini_064_chat(chats, older, prompt="rename the module"), -60)
+    header = {
+        "sessionId": newer,
+        "projectHash": "ab" * 32,
+        "startTime": "2026-10-19T18:00:00.000Z",
+        "lastUpdated": "2026-10-19T18:00:00.000Z",
+        "kind": "main",
+    }
+    path = chats / f"session-2026-10-19T18-00-{newer[:8]}.jsonl"
+    path.write_text(json.dumps(header, separators=(",", ":")) + "\n", encoding="utf-8")
+    touch(path, 0)
+
+    assert [row["session_id"] for row in store.list_sessions()] == [newer]
+
+
+def test_gemini_fork_then_resume_runs_the_copy_in_place(gemini):
+    """A fork is resumed like any row, by its own id: the CLI's ``--resume``
+    lookup reads the copy as an ordinary conversation, which needs the
+    source's ``projectHash`` and messages carried over."""
+    store, root = gemini
+    parent = new_uuid()
+    chats = write_gemini_tree(root, GEMINI_SHORT_ID, [])
+    _gemini_064_chat(chats, parent, summary="Parent")
+
+    child = store.fork(GEMINI_SHORT_ID, parent)
+    assert child and child != parent
+    copy = next(p for p in chats.iterdir() if child[:8] in p.name)
+    head = json.loads(copy.read_text(encoding="utf-8").split("\n", 1)[0])
+    assert head["sessionId"] == child and head["projectHash"] == "ab" * 32
+    assert gemini_provider.read_chat_meta(copy)["message_count"] == 5
+
+    argv = store.launch_argv("/bin/gemini", session_id=child)
+    assert argv == ["/bin/gemini", "--resume", child]
+    assert store.parse_session_id(cmdline(*argv)) == child
+
+
+def test_gemini_launch_argv_resumes_in_place_by_id_never_by_session_file(gemini):
+    """Resume names the conversation by its full id, never by its file.
+
+    gemini-cli 0.64.0 matches a full id before it reads ``--resume`` as a
+    listing index and goes on writing that conversation's file, while
+    ``--session-file`` imports the chat as a new conversation under an id the
+    CLI mints (docs/defects.md DEF-PROV-330-RESUME-COPY, acc-crit "Gemini /
+    Resume").
     """
     store, root = gemini
     session = new_uuid()
@@ -1383,8 +1543,8 @@ def test_gemini_launch_argv_resumes_by_chat_file_never_by_resume(gemini):
     chat_file = next(p for p in chats.iterdir() if session[:8] in p.name)
 
     argv = store.launch_argv("/bin/gemini", session_id=session)
-    assert argv == ["/bin/gemini", "--session-file", str(chat_file)]
-    assert "--resume" not in argv
+    assert argv == ["/bin/gemini", "--resume", session]
+    assert "--session-file" not in argv
 
     # A conversation whose file is gone REFUSES the launch: a bare ``gemini``
     # would open a brand-new conversation in the clicked row's place, which
@@ -1414,20 +1574,19 @@ def test_gemini_launch_argv_starts_and_modes(gemini):
     ]
 
 
-def test_gemini_parse_session_id_reads_the_chat_file(gemini):
-    """A resume carries a path, and the filename holds only the id's first
-    eight characters - so the whole id is read back out of the file itself."""
+def test_gemini_parse_session_id_never_claims_a_session_file_copy(gemini):
+    """The terminal is claimed for the id that receives its turns: the resume
+    this extension spawns reads back as that id, and a ``--session-file``
+    process - running an imported copy under an id the CLI minted - is never
+    claimed for the conversation it was imported from."""
     store, root = gemini
     session = new_uuid()
     chats = write_gemini_tree(root, GEMINI_SHORT_ID, [{"id": session}])
     chat_file = next(p for p in chats.iterdir() if session[:8] in p.name)
+    argv = store.launch_argv("/bin/gemini", session_id=session)
+    assert store.parse_session_id(cmdline(*argv)) == session
     assert (
         store.parse_session_id(cmdline("gemini", "--session-file", str(chat_file)))
-        == session
-    )
-    # A path that is not a conversation is never claimed for one.
-    assert (
-        store.parse_session_id(cmdline("gemini", "--session-file", "/nope.jsonl"))
         is None
     )
 

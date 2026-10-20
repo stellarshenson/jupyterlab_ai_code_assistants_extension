@@ -25,6 +25,7 @@ import { Message } from '@lumino/messaging';
 import { Menu, Widget } from '@lumino/widgets';
 
 import { ColourStore } from './colour';
+import { dialogRenderer } from './dialogs';
 import { branchMenuLabel, shortSessionId } from './labels';
 import {
   addIcon,
@@ -57,7 +58,7 @@ import {
   requestProvider,
   withQuery
 } from './request';
-import { TerminalManager } from './terminals';
+import { TerminalManager, beginSpinner, endSpinner } from './terminals';
 import {
   IBranch,
   IBranchesResponse,
@@ -235,11 +236,6 @@ export class AssistantSessionsPanel extends Widget {
 
   dispose(): void {
     this._stopPolling();
-    // The busy overlay lives on the shell, outside this widget's tree, so
-    // removing the panel does not remove it. Left behind it would show a
-    // spinner for a panel that no longer exists.
-    this._busyEl?.remove();
-    this._busyEl = null;
     // Disabling a provider must leave its running terminals alive and only
     // drop the tint this panel applied.
     void this._terminals.clearColours();
@@ -472,40 +468,6 @@ export class AssistantSessionsPanel extends Widget {
       'jp-aiAssistants-spinner jp-AiAssistantsPanel-loadingSpinner';
     loading.appendChild(loadingSpinner);
 
-    // Click-time busy overlay: raised synchronously when a row is opened or
-    // branched, before the terminal probe or the branch request, so the click
-    // never reads as ignored (DEF-PANE-318). It sits on the LAB SHELL, not on
-    // the panel: the feedback belongs in the main working area, where the
-    // launch spinner appears, and a panel that is hidden or scrolled must not
-    // keep it out of sight (DEF-PANE-318-1). It takes no pointer events and no
-    // focus: the context menu that launched a branch stays open until its
-    // command runs, and a focus change would close it.
-    const busy = document.createElement('div');
-    busy.className = 'jp-AiAssistants-busyOverlay';
-    busy.hidden = true;
-    const busySpinner = document.createElement('div');
-    busySpinner.className =
-      'jp-aiAssistants-spinner jp-AiAssistants-busySpinner';
-    busySpinner.setAttribute('aria-hidden', 'true');
-    busy.appendChild(busySpinner);
-    // The action, named in sight: under a reduced-motion preference the ring
-    // is held still, so the label carries the busy state with no animation.
-    // Hidden from assistive technology because the live region below
-    // announces the same words once.
-    const busyLabel = document.createElement('div');
-    busyLabel.className = 'jp-AiAssistants-busyLabel';
-    busyLabel.setAttribute('aria-hidden', 'true');
-    busy.appendChild(busyLabel);
-    // The spinner is decoration; a screen-reader user hears the action
-    // instead. The region sits on the root, always rendered and outside the
-    // overlay and the aria-busy body: a live region created inside a
-    // display:none container, or one whose update lands in an aria-busy
-    // subtree, can be withheld by assistive technology.
-    const busyText = document.createElement('div');
-    busyText.className = 'jp-AiAssistantsPanel-srOnly';
-    busyText.setAttribute('role', 'status');
-    busyText.setAttribute('aria-live', 'polite');
-
     // Inline error strip - a failed poll reports here and keeps retrying,
     // rather than tearing the panel down or raising a modal that would also
     // interrupt the other providers' panels.
@@ -521,72 +483,10 @@ export class AssistantSessionsPanel extends Widget {
     root.appendChild(error);
     root.appendChild(body);
     root.appendChild(loading);
-    root.appendChild(busyText);
-    // The shell carries the visible feedback; the panel carries the
-    // announcement.
-    this._app.shell.node.appendChild(busy);
 
     this._bodyEl = body;
     this._loadingEl = loading;
-    this._busyEl = busy;
-    this._busyLabelEl = busyLabel;
-    this._busyTextEl = busyText;
     this._errorEl = error;
-  }
-
-  /** Raise the click-time busy overlay. Each action gets a token, because an
-   * open and a branch can overlap; the overlay clears when the last one ends,
-   * and the label names the newest action still running. */
-  private _beginBusy(message: string): number {
-    const token = ++this._busySeq;
-    this._busyMessages.set(token, message);
-    if (this._busyEl) {
-      this._busyEl.hidden = false;
-      this._paintBusyMessage();
-      // The body is what the action changes; the root stays outside the
-      // busy subtree so the live region above is not withheld.
-      if (this._bodyEl) {
-        this._bodyEl.setAttribute('aria-busy', 'true');
-      }
-    }
-    return token;
-  }
-
-  private _endBusy(token: number): void {
-    this._busyMessages.delete(token);
-    if (this._busyMessages.size > 0) {
-      // Another action is still running; neither the visible label nor the
-      // live region may keep naming the one that just ended.
-      this._paintBusyMessage();
-      return;
-    }
-    if (this._busyEl) {
-      this._busyEl.hidden = true;
-      if (this._busyLabelEl) {
-        this._busyLabelEl.textContent = '';
-      }
-      if (this._busyTextEl) {
-        this._busyTextEl.textContent = '';
-      }
-      if (this._bodyEl) {
-        this._bodyEl.removeAttribute('aria-busy');
-      }
-    }
-  }
-
-  /** Name the newest still-running action in the visible label and the live
-   * region, so neither keeps naming an action that ended. */
-  private _paintBusyMessage(): void {
-    let message = '';
-    for (const active of this._busyMessages.values()) {
-      message = active;
-    }
-    if (this._busyLabelEl) {
-      this._busyLabelEl.textContent = message;
-    }
-    if (this._busyTextEl) {
-      this._busyTextEl.textContent = message;
-    }
   }
 
   /** Show / hide the filter input. Hiding also clears the active filter, so
@@ -847,7 +747,8 @@ export class AssistantSessionsPanel extends Widget {
       // to Remove - one Enter on a dialog that has just appeared and the
       // project history is gone (DEF-51). JupyterLab's own file browser sets
       // the same 0 on its delete, for the same reason.
-      defaultButton: 0
+      defaultButton: 0,
+      renderer: dialogRenderer
     });
     if (!confirm.button.accept) {
       return;
@@ -891,7 +792,8 @@ export class AssistantSessionsPanel extends Widget {
         Dialog.warnButton({ label: this._trans.__('Remove') })
       ],
       // Cancel, as above (DEF-51).
-      defaultButton: 0
+      defaultButton: 0,
+      renderer: dialogRenderer
     });
     if (!confirm.button.accept) {
       return;
@@ -917,7 +819,8 @@ export class AssistantSessionsPanel extends Widget {
     const dialog = new Dialog<unknown>({
       title: this._trans.__('Clean Up Parallel Sessions'),
       body,
-      buttons: [Dialog.okButton({ label: this._trans.__('Close') })]
+      buttons: [Dialog.okButton({ label: this._trans.__('Close') })],
+      renderer: dialogRenderer
     });
     // Close stays live while the work runs. Hiding it took away the only exit
     // a keyboard user has: the dialog listens for Escape on its own node, it
@@ -991,13 +894,18 @@ export class AssistantSessionsPanel extends Widget {
     sessionId?: string
   ): Promise<void> {
     // The click's own feedback, raised before the terminal walk and the
-    // launch - both can take seconds (DEF-PANE-318).
-    const busy = this._beginBusy(this._trans.__('Opening conversation'));
+    // launch - both can take seconds (DEF-PANE-318). The launch's title; the
+    // launch joins this dialog through the token.
+    const busy = beginSpinner(
+      this._trans.__('Opening %1', this._descriptor.label),
+      this._trans
+    );
     try {
       await this._terminals.openSession(
         session,
         this._launchMode(force),
-        sessionId
+        sessionId,
+        busy
       );
       // Not awaited: the open has succeeded, and the sync is not part of it.
       fileBrowserMoves = fileBrowserMoves.then(() =>
@@ -1013,7 +921,7 @@ export class AssistantSessionsPanel extends Widget {
         this._notifyLaunchError('Could not open that conversation', err);
       }
     } finally {
-      this._endBusy(busy);
+      endSpinner(busy);
       // Reuse or fresh launch, either way the picture changed. Pull fresh
       // state; a poll tick retries if this one fails.
       void this._fetch().catch(() => undefined);
@@ -1276,23 +1184,28 @@ export class AssistantSessionsPanel extends Widget {
     }
     // Raised on the click: the branch POST mints the fork server-side (for
     // Claude and Codex by running their own CLI) and can take seconds
-    // (DEF-PANE-318).
-    const busy = this._beginBusy(this._trans.__('Branching conversation'));
+    // (DEF-PANE-318). The menu that ran this command closed before running it,
+    // so the dialog taking the focus closes nothing.
+    const busy = beginSpinner(
+      this._trans.__('Branching %1 session', this._descriptor.label),
+      this._trans
+    );
     try {
-      await this._branchByServerCopy(session, undefined, force);
+      await this._branchByServerCopy(session, undefined, force, busy);
     } finally {
-      this._endBusy(busy);
+      endSpinner(busy);
     }
   }
 
   /** The server mints the new id and answers with it before the terminal
    * opens - `server-copy` copies the store entry, `server-native` drives the
    * assistant's own non-interactive fork path - so one refresh surfaces the
-   * branch. */
+   * branch. `spinner` is the click's token, which the launch joins. */
   private async _branchByServerCopy(
     session: ISession,
     name: string | undefined,
-    force: string | undefined
+    force: string | undefined,
+    spinner: number
   ): Promise<void> {
     // Let the parent's colour settle before the server reads it (DEF-74). The
     // server copies the store entry while minting the fork, so a colour picked
@@ -1337,7 +1250,8 @@ export class AssistantSessionsPanel extends Widget {
           session_id: fork.session_id,
           mode: this._launchMode(force)
         },
-        fork.session_id
+        fork.session_id,
+        spinner
       );
     } catch (err) {
       if (isResponseStatus(err, 400)) {
@@ -1413,7 +1327,8 @@ export class AssistantSessionsPanel extends Widget {
       title: 'Rename Session',
       label: `Name for this ${this._descriptor.label} conversation`,
       text: session.name_source === 'session' ? session.name : '',
-      placeholder: this._lookupName(session)
+      placeholder: this._lookupName(session),
+      renderer: dialogRenderer
     });
     if (!named.button.accept) {
       return;
@@ -2903,11 +2818,6 @@ export class AssistantSessionsPanel extends Widget {
   private readonly _removingPaths: Set<string> = new Set();
   private _bodyEl!: HTMLDivElement;
   private _loadingEl: HTMLElement | null = null;
-  private _busyEl: HTMLElement | null = null;
-  private _busyLabelEl: HTMLElement | null = null;
-  private _busyTextEl: HTMLElement | null = null;
-  private _busySeq = 0;
-  private _busyMessages = new Map<number, string>();
   private _errorEl: HTMLElement | null = null;
   private _refreshBtn: HTMLButtonElement | null = null;
   private _filterBtn: HTMLButtonElement | null = null;

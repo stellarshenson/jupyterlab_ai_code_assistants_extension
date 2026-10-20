@@ -388,6 +388,47 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - root-cause: 2026-10-17T20:02:08Z @kj the count subtracts one unconditionally after the metadata-only filter, instead of excluding the current session id
   - log: 2026-10-17T20:02:08Z @kj added
   - log: 2026-10-17T20:03:54Z @kj closed
+- [x] `DEF-PROV-330-RESUME-COPY` **Gemini resume opens a copy and the chat reader misreads CLI 0.64.0** - MAJOR; on gemini-cli 0.64.0 `--session-file` imports the chat as a new conversation (`session-<epoch ms>-<id8>.jsonl`, new id), so each row click starts a copy and the terminal is claimed for the old id; message_count counts a same-id rewrite twice (17 for 13); an unsummarised chat is labelled by its `<session_context>` preamble; `providers/gemini.py`
+  - evidence: pytest test_provider_stores.py, test_launch_missing_session.py: argv is --resume <id>, never --session-file; a --session-file argv claims no id; a same-id rewrite counts once; label skips <session_context>; a fork resumes in place; Jest 376/376, pytest 384, Galata 84/84 on 1.2.152; built 1.2.158
+  - related: ACC-GEMI-109
+  - repro: gemini-cli 0.64.0: click a Gemini row; chats/ gains session-<epoch ms>-<id8>.jsonl whose first message reads "Imported session from <path>"; list_sessions on a chat with 4 tool turns reads message_count 17, the CLI 13
+  - test-tags: UNIT
+  - root-cause: 2026-10-19T18:11:14Z @kj gemini.py was verified against 0.54.4; 0.64.0 resolveSessionId copies a --session-file under createSessionId(), writes each tool-calling gemini message twice under one id, and opens every chat with a <session_context> user record
+  - log: 2026-10-19T18:11:14Z @kj added
+  - log: 2026-10-19T18:11:25Z @kj reported: workflow gemini-real-chat confirm-1 (tmp/workflows/gemini-real-chat/confirm-1.json) on the user chats 6c0bdcff and its import dafbe723; 0.64.0 SessionSelector.findSession matches a full id before an index, so --resume <uuid> addresses one conversation
+  - log: 2026-10-19T20:04:59Z @kj fixed (gates pending): root cause confirmed; launch_argv resumes with --resume <id>, messages counted by id, <session_context> skipped as first prompt. Scratch HOME, CLI 0.64.0, local API stand-in: --resume 6c0bdcff appended the turn to session-2026-10-19T17-58-6c0bdcff.jsonl (62640 -> 80883 bytes), no new file; --session-file wrote session-1792439999365-d900bf98.jsonl
+  - log: 2026-10-19T22:55:33Z @kj closed: fixed: launch_argv resumes with --resume <id>, messages counted by id, <session_context> skipped as first prompt
+- [x] `DEF-PROV-333-NO-PROMPT` **Gemini row resumes a chat the CLI refuses** - MAJOR; a Gemini row or Launcher tile whose newest chat holds no typed prompt (only `<session_context>`, `/quit`) runs `gemini --resume <id>`; gemini-cli 0.64.0 prints `Invalid session identifier "<id>"` and exits; fix: a chat with no user text the CLI would resume is not listed; `providers/gemini.py`
+  - evidence: test_gemini_never_lists_a_chat_the_cli_cannot_resume and the updated label test redden under each mutation and pass; Jest 376/376, pytest 386, Galata 84/84, lint exit 0 on 1.2.161
+  - related: DEF-PROV-330-RESUME-COPY
+  - repro: gemini-cli 0.64.0: start Gemini, type /quit before any prompt; click the Gemini row
+  - test-tags: UNIT
+  - root-cause: 2026-10-19T23:56:19Z @kj GeminiStore._chats lists every chat; 0.64.0 --resume finds a chat only through listSessions, which drops one without resumable content: user text empty or starting with /, ?, <session_context>, <hook_context>
+  - log: 2026-10-19T23:56:19Z @kj added
+  - log: 2026-10-20T00:00:54Z @kj fixed (gates pending): _preview returns None for text starting with /, ?, <session_context>, <hook_context>; _chats skips a chat whose first_prompt is None; mutations: skip removed reddens 2 tests, prefixes reverted reddens test_gemini_never_lists_a_chat_the_cli_cannot_resume
+  - log: 2026-10-20T00:06:13Z @kj closed: fixed: a Gemini chat with no user text the CLI would resume is not listed and a launch naming it is refused
+  - log: 2026-10-20T00:25:04Z @kj regressed as DEF-PROV-333-NO-PROMPT-1
+- [x] `DEF-PROV-333-NO-PROMPT-1` **Gemini row resumes a chat the CLI refuses** - MINOR; a Gemini row whose newest chat has no resumable content runs `gemini --resume <id>`; gemini-cli 0.64.0 prints `Invalid session identifier "<id>"` and exits; such a chat remains only after an exit without the CLI cleanup, or before the first prompt; fix not planned; `providers/gemini.py`
+  - evidence: ruled MINOR, logged not fixed, user decision 2026-10-20; the only fix found is a /proc liveness read in the Gemini listing, larger than the defect; precedent DEF-PANE-143
+  - root-cause: 2026-10-20T06:30:39Z @kj gemini-cli 0.64.0 deletes a non-resumable chat only in exit cleanup (/quit, SIGHUP, SIGTERM, SIGINT); SIGKILL skips that cleanup; a chat is non-resumable before its first prompt; GeminiStore._chats must keep the header-only chat (DEF-PROV-334-NO-ROW), so only a process check tells a live pre-prompt chat from a dead one
+  - related: DEF-PROV-334-NO-ROW
+  - test-tags: MANUAL
+  - repro: gemini-cli 0.64.0: run bare `gemini` in a terminal and type nothing, or SIGKILL a Gemini terminal before its first prompt; click the Gemini row: the new terminal prints `Invalid session identifier` and exits
+  - log: 2026-10-20T00:25:04Z @kj regression of DEF-PROV-333-NO-PROMPT: reopened: round-2 review reverted the GeminiStore._chats skip, because it hid the header-only chat gemini-cli 0.64.0 writes at startup (DEF-PROV-334-NO-ROW); the stated repro does not reproduce, since /quit and SIGHUP, SIGTERM, SIGINT delete a chat without resumable content
+  - log: 2026-10-20T00:25:27Z @kj edited severity "MAJOR" -> "MINOR"; repro added "gemini-cli 0.64.0: run bare `gemini` in a terminal and type nothing, or SIGKILL a Gemini terminal before its first prompt; click the Gemini row: the new terminal prints `Invalid session identifier` and exits"
+  - log: 2026-10-20T00:25:34Z @kj amended text "a Gemini row or Launcher tile whose newest chat holds no typed prompt (only `<session_context>`, `/quit`) runs `gemini --resume <id>`; gemini-cli 0.64.0 prints `Invalid session identifier "<id>"` and exits; fix: a chat with no user text the CLI would resume is not listed; `providers/gemini.py`" -> "a Gemini row whose newest chat has no resumable content runs `gemini --resume <id>`; gemini-cli 0.64.0 prints `Invalid session identifier "<id>"` and exits; such a chat remains only after an exit without the CLI cleanup, or before the first prompt; fix not planned; `providers/gemini.py`"
+  - log: 2026-10-20T00:25:34Z @kj re-triaged MINOR: gemini-cli 0.64.0 bundle registers cleanupNonResumableCurrentSession (interactiveCli-66E5CZDR.js:34856-34864); /quit runs runExitCleanup (interactiveCli-66E5CZDR.js:33201-33205); SIGHUP, SIGTERM, SIGINT run gracefulShutdown -> runExitCleanup (chunk-HHALNKOO.js:89-97); deleteCurrentSessionIfNotResumableAsync removes the chat (chunk-PZ4GDG24.js:287508-287516); remaining paths read from the bundle, not run live; reason: carries the four bundle sites that justify the re-triage
+  - log: 2026-10-20T00:25:34Z @kj edited test-tags added "UNIT"
+  - log: 2026-10-20T00:25:45Z @kj edited test-tags "UNIT" -> "MANUAL"
+  - log: 2026-10-20T06:30:44Z @kj closed: ruled MINOR, logged not fixed - closed as ruled, the precedent of DEF-PANE-143
+- [x] `DEF-PROV-334-NO-ROW` **New Gemini session has no row until its first prompt** - MAJOR; after + or a Launcher tile starts Gemini, a row or tile click before the first prompt opens a second terminal on the older conversation instead of focusing the open one; fix: list the header-only chat again; `providers/gemini.py`
+  - evidence: test_gemini_lists_a_chat_before_its_first_prompt and the label test redden with the skip restored and pass; Jest 376/376, pytest 386, Galata 84/84, lint exit 0 on 1.2.162
+  - related: DEF-PROV-333-NO-PROMPT
+  - repro: gemini-cli 0.64.0: start Gemini with +; before typing a prompt, click the Gemini row: a second Gemini terminal opens
+  - test-tags: UNIT
+  - root-cause: 2026-10-20T00:24:09Z @kj the DEF-PROV-333-NO-PROMPT skip in GeminiStore._chats hides the header-only chat 0.64.0 writes at startup, so the row names the older chat and findForSession matches no --session-id argv
+  - log: 2026-10-20T00:24:09Z @kj added
+  - log: 2026-10-20T00:33:00Z @kj closed: fixed: removed the first_prompt skip from GeminiStore._chats; the header-only chat is the folder's newest row again
 
 ## Frontend / server contract `FRONT`
 
@@ -1398,6 +1439,59 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-10-19T14:08:55Z @kj manage-sessions is one command bound by both submenus, and _openManagePopup builds one popup whose per-row button always calls onOpen; the invoking mode is never passed.
   - log: 2026-10-19T14:08:55Z @kj added; reason: body must name both submenus, the onOpen call site and the expected per-mode labels
   - log: 2026-10-19T14:37:30Z @kj closed
+- [x] `DEF-PANE-327-BUSY-MODAL` **Click-time busy state floats instead of showing a modal** - MEDIUM; The click-time busy state is a ring and a label floating over the page with no backdrop and pointer-events none. The page behind stays visible and clickable while the action runs. It must behave like the launch spinner: a dimmed backdrop with a centred card holding the spinner and the action name, blocking pointer input until the action settles.
+  - root-cause: 2026-10-20T06:32:11Z @kj the busy state was built as an overlay with no backdrop and pointer-events none, not the launch Dialog, on a false premise: a Dialog taking the focus would close the context menu that ran Branch Session; Lumino's `Menu.triggerActiveItem` (@lumino/widgets 2.9.0) closes the root menu before it runs the command
+  - evidence: click-spinner.spec.ts: the busy overlay now has a dimmed backdrop, pointer-events auto and a centred card holding the spinner and the action name; the page behind cannot be clicked while the action runs; no JupyterLab Dialog and no focus change; Jest 356, pytest 378, Galata 81/81 at 1.2.124
+  - repro: click a row or Branch Session; the ring and 'Opening conversation' or 'Branching conversation' float over the live page, and the page stays clickable behind them.
+  - test-tags: UNIT, E2E
+  - log: 2026-10-19T16:00:42Z @kj added; reason: The text states the required modal behaviour, which the shorter form would lose
+  - log: 2026-10-19T16:10:34Z @kj closed
+  - log: 2026-10-19T16:52:32Z @kj regressed as DEF-PANE-327-BUSY-MODAL-1
+- [x] `DEF-PANE-327-BUSY-MODAL-1` **Branch or row click shows two spinner designs** - MEDIUM; a branch or row click shows a busy card of its own, then the launch shows the 'Opening Claude Code' dialog, a second design; fix: one spinner, the launch dialog (`showLaunchSpinner`), compact title and body, action named for the assistant session ('Branching Claude Code session', not 'Branching conversation'); `src/core/panel.ts`
+  - evidence: fixed: a branch or row click raises the launch dialog and the launch reuses it; click-spinner.spec.ts (4 tests) asserts one .jp-Dialog titled 'Branching Claude Code session' or 'Opening Claude Code'; terminals.spec.ts 'one spinner dialog' covers Hide; Jest 361, pytest 378, Galata 82/82 at 1.2.148
+  - root-cause: 2026-10-19T17:26:40Z @kj the click-time spinner was built as a card of its own on a false premise: that a Dialog taking the focus would close the context menu that ran Branch Session. Lumino's `Menu.triggerActiveItem` (@lumino/widgets 2.9.0) closes the root menu before it runs the command
+  - test-tags: UNIT, E2E
+  - repro: right-click a session row and pick Branch Session; a card reading 'Branching conversation' shows, then the 'Opening Claude Code' dialog with a Hide button
+  - log: 2026-10-19T16:52:32Z @kj regression of DEF-PANE-327-BUSY-MODAL: regressed: the fix built a card of its own; a branch or row click shows that card, then the launch shows a different dialog
+  - log: 2026-10-19T16:53:17Z @kj amended title "Click-time busy state floats instead of showing a modal" -> "Branch or row click shows two spinner designs"; text "The click-time busy state is a ring and a label floating over the page with no backdrop and pointer-events none. The page behind stays visible and clickable while the action runs. It must behave like the launch spinner: a dimmed backdrop with a centred card holding the spinner and the action name, blocking pointer input until the action settles." -> "MEDIUM; a branch or row click shows a busy card of its own, then the launch shows the 'Opening Claude Code' dialog, a second design; fix: one spinner, the launch dialog (`showLaunchSpinner`), compact title and body, action named for the assistant session ('Branching Claude Code session', not 'Branching conversation'); `src/core/panel.ts`"
+  - log: 2026-10-19T16:53:20Z @kj edited repro added "right-click a session row and pick Branch Session; a card reading 'Branching conversation' shows, then the 'Opening Claude Code' dialog with a Hide button"; test-tags added "UNIT, E2E"
+  - log: 2026-10-19T19:20:13Z @kj Hide kept the disposed dialog until every action ended, so a click or launch begun after Hide showed no dialog; fixed: a new action raises a fresh dialog and a launch joins its click's token, so only the hidden click stays hidden; Jest test in terminals.spec.ts covers it
+  - log: 2026-10-19T19:44:58Z @kj closed
+- [x] `DEF-PANE-328-FOCUS-RIM` **Dialog buttons show a focus rim** - MEDIUM; the extension's dialog buttons show a focus rim; fix: the primary button is marked by its fill, and no button in this extension's dialogs shows a focus rim; `style/base.css`
+  - evidence: fixed: extension dialog buttons have no outline; reject buttons are bordered surface buttons; click-spinner.spec.ts asserts focused Hide has no outline before and after Tab; rename.spec.ts 'DEF-PANE-328-FOCUS-RIM - the fill alone marks the primary' asserts filled Ok, surface Cancel; Jest 361, pytest 378, Galata 82/82 at 1.2.148
+  - root-cause: 2026-10-19T17:33:10Z @kj apputils dialog.css draws the rim with `button.jp-Dialog-button.jp-mod-styled.jp-mod-accept:focus` and its warn and reject siblings, on :focus rather than :focus-visible, and a Dialog focuses its default button when it attaches, so every dialog shows the rim, opened by mouse or key (Hide measured: outline solid 2px)
+  - repro: open the launch spinner dialog; the focused Hide button carries an outline ring
+  - test-tags: E2E
+  - log: 2026-10-19T16:53:33Z @kj added
+  - log: 2026-10-19T19:44:59Z @kj closed
+- [x] `DEF-PANE-329-SPINNER-SIZE` **Spinner dialog too small and shows scrollbars** - MEDIUM; the 'Opening Gemini' spinner dialog is about 172x111 px and a vertical scrollbar sits beside the ring; the compact pass went too far; fix: a larger dialog, title and ring, no scrollbar; `style/base.css`
+  - evidence: fixed: card measured 240 to 290 by 140 px, no scrollbar; click-spinner.spec.ts asserts title 15.6px weight 600, card width 240 to under 300 px, ring 24px, and 0 body and content overflow on both axes over 1 s of all 10 titles; Jest 361, pytest 378, Galata 82/82 at 1.2.148
+  - root-cause: 2026-10-19T18:03:14Z @kj spinner body is JupyterLab's .jp-Dialog-body, overflow: auto, 32px high (24px ring box, 4px padding each side); the turning ring's transformed box reaches 33.94px at 45 degrees and counts as scrollable overflow: scrollHeight 33 > clientHeight 32 at 45 degrees, 32 = 32 at 0; 27 of 91 frames overflowed
+  - related: DEF-PANE-327-BUSY-MODAL-1 - the compact pass of that open fix made the dialog too small
+  - repro: click a Gemini row in the panel; the spinner dialog shows a scrollbar beside the ring (/tmp/paste-clippings/paste-20261019-195639.png)
+  - test-tags: E2E
+  - log: 2026-10-19T18:00:25Z @kj added
+  - log: 2026-10-19T18:00:31Z @kj reported: "you went a little too far with the spinner modal, it is too small now and now has scrollbars"
+  - log: 2026-10-19T18:28:37Z @kj amended text "the 'Opening Gemini' spinner dialog is about 172x111 px and a vertical scrollbar sits beside the ring; the compact pass went too far; cause under investigation; fix: a larger dialog and ring, no scrollbar; `style/base.css`" -> "the 'Opening Gemini' spinner dialog is about 172x111 px and a vertical scrollbar sits beside the ring; the compact pass went too far; fix: a larger dialog, title and ring, no scrollbar; `style/base.css`"
+  - log: 2026-10-19T19:44:59Z @kj closed
+- [x] `DEF-PANE-331-ADD-ITEM` **Settings page offers an Add item control** - MEDIUM; the AI Code Assistants settings form ends with an Add item control; a key added through it is saved to the user settings and ignored; likely cause: `schema/plugin.json` top level sets `"additionalProperties": true` beside its 14 declared properties, origin under investigation; fix: no Add item control; `schema/plugin.json`
+  - evidence: pytest test_settings_schema.py def_pane_331 x3 (schema keyword falsy so no Add item; a saved undeclared key keeps declared values; every key read by name is declared), Galata settings-form.spec.ts (no Add item button) green; Jest 376/376, pytest 384, Galata 84/84 on 1.2.152, 10/10 on 1.2.158
+  - root-cause: 2026-10-19T20:00:05Z @kj `scripts/generate-schema.mjs` sets `additionalProperties: true` on purpose, so a key the schema no longer declares stays inert (ACC-PROV-14): jupyterlab_server serves `{}` for a saved file that fails the schema. JupyterLab's form draws Add item whenever the keyword is truthy (rjsf canExpand); left out, it admits the keys with no control
+  - repro: Settings Editor, AI Code Assistants form: an Add item control sits at the end of the form
+  - test-tags: UNIT, E2E
+  - log: 2026-10-19T19:48:07Z @kj added
+  - log: 2026-10-19T19:48:10Z @kj reported: "remove 'add item' from settings for this extension, it is there for no good reason -> defect"
+  - log: 2026-10-19T22:55:33Z @kj closed: fixed: schema leaves additionalProperties out; the form draws no Add item and stale keys stay inert
+- [x] `DEF-PANE-332-ICON-SIZE` **Assistant launcher icons oversized and uneven** - MINOR; Launcher AI Assistants cards: the Gemini star nearly fills its card, Claude Code and Codex glyphs are slightly larger than JupyterLab's own card icons (Terminal, Text File); cause under investigation; fix: all five assistant glyphs at JupyterLab's launcher icon size, standard size in tabs, panel header and menus; `src/core/icons.ts`, `src/providers/`
+  - evidence: Jest icon-size.spec.ts 15 cases (square viewBox, art share 0.833 of the terminal icon, centred), Galata launcher-tiles.spec.ts glyph-size test (each glyph within 1px of Terminal 43.33px) green; Jest 376/376, pytest 384, Galata 84/84 on 1.2.152, 10/10 on 1.2.158
+  - root-cause: 2026-10-19T19:54:02Z @kj Each assistant SVG's viewBox sits at or near its art's own bounds, while JupyterLab insets icon art to 20/24 of a square viewBox (terminal.svg: 2..22 in 24); every card draws in the same 52px box, so gemini, kimi and deepseek fill it, claude 0.875, codex 0.800, against 0.833
+  - repro: open the Launcher, dark theme; compare the AI Assistants cards with the Terminal card (/tmp/paste-clippings/paste-20261019-194706.png)
+  - test-tags: UNIT, E2E
+  - log: 2026-10-19T19:48:22Z @kj added
+  - log: 2026-10-19T19:48:25Z @kj reported: "defect, gemini seems too big; ther icons are only slightly too big" then "standardise the size please"
+  - log: 2026-10-19T20:02:07Z @kj edited test-tags "E2E" -> "UNIT, E2E"
+  - log: 2026-10-19T22:55:33Z @kj closed: fixed: five provider viewBoxes square at 1.2x the art larger side; no path or CSS changed
+  - log: 2026-10-19T22:55:49Z @kj edited evidence "Jest icon-size.spec.ts 15 cases (square viewBox, art share 0.833 of the terminal icon, centred), Galata launcher-tiles DEF-PANE-332 (each glyph within 1px of Terminal 43.33px) green; Jest 376/376, pytest 384, Galata 84/84 on 1.2.152, 10/10 on 1.2.158" -> "Jest icon-size.spec.ts 15 cases (square viewBox, art share 0.833 of the terminal icon, centred), Galata launcher-tiles.spec.ts glyph-size test (each glyph within 1px of Terminal 43.33px) green; Jest 376/376, pytest 384, Galata 84/84 on 1.2.152, 10/10 on 1.2.158"
 
 ## Colour store `COLO`
 

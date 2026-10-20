@@ -2,7 +2,7 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
-## [Unreleased]
+## [1.2.199] - 2026-10-20
 
 ### Changed
 
@@ -13,6 +13,9 @@
 
 - After Hide on the spinner dialog, the action's terminal is a tab behind the current one, whether it opens later or had already opened behind the dialog: the current tab and the keyboard focus stay where the user is, in a notebook cell being edited too, so keys typed elsewhere no longer reach the assistant's prompt
 - In Manage Sessions, a confirming click on Delete more than 600 ms after arming it deletes, even when the operating system counts it as the second click of a double-click; one double-click on Delete still only arms it
+- Branch Session on a Claude Code row branches a conversation whose last turn ran in a subfolder of the project or before the folder was renamed; it reported "Claude Code cannot branch this conversation."
+- When the terminal of a newly created branch fails to open, the panel no longer reports that the conversation cannot be branched, and the new branch appears in the list
+- A double-click on a session row no longer closes the spinner dialog: the second click landed on the dialog's backdrop; the dialog now closes only through Hide, not through its backdrop or Escape
 
 ## [1.2.163] - 2026-10-20
 

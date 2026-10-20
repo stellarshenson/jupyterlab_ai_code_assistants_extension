@@ -7,6 +7,12 @@
 ### Changed
 
 - The assistant icons in the Launcher's AI Assistants tiles are drawn at three quarters of the size of JupyterLab's own tile icons, centred in the tile; the section header icon, the sidebar tabs, the panel header and the menus keep their size
+- A button in the extension's dialogs shows JupyterLab's focus outline when the keyboard moved the focus to it; a button clicked with the mouse, or focused by a dialog opened with the mouse, still shows none
+
+### Fixed
+
+- After Hide on the spinner dialog, the action's terminal is a tab behind the current one, whether it opens later or had already opened behind the dialog: the current tab and the keyboard focus stay where the user is, in a notebook cell being edited too, so keys typed elsewhere no longer reach the assistant's prompt
+- In Manage Sessions, a confirming click on Delete more than 600 ms after arming it deletes, even when the operating system counts it as the second click of a double-click; one double-click on Delete still only arms it
 
 ## [1.2.163] - 2026-10-20
 

@@ -1,4 +1,4 @@
-import { JupyterFrontEnd } from '@jupyterlab/application';
+import { ILabShell, JupyterFrontEnd } from '@jupyterlab/application';
 import { Dialog, Notification } from '@jupyterlab/apputils';
 import { TranslationBundle, nullTranslator } from '@jupyterlab/translation';
 import { ServerConnection } from '@jupyterlab/services';
@@ -103,7 +103,8 @@ function titleSpinner(dialog: Dialog<unknown>, title: string): void {
  *
  * Hide does not abort the request - it only takes the app-wide scrim away, so
  * a stalled action cannot leave the user staring at a modal with no exit. If
- * the action later succeeds the terminal simply appears. */
+ * the action later succeeds the terminal opens as a tab behind the current
+ * one (DEF-PANE-339). */
 function showLaunchSpinner(
   title: string,
   trans: TranslationBundle
@@ -120,10 +121,13 @@ function showLaunchSpinner(
     title,
     body,
     // `Hide`, not `Cancel`. The button takes the scrim away and nothing else -
-    // the request is already on the wire and the terminal will still open and
-    // take focus. A button named Cancel that does not cancel is worse than no
-    // button.
+    // the request is already on the wire and the terminal will still open, as
+    // a tab behind the current one that does not take the keyboard. A button
+    // named Cancel that does not cancel is worse than no button.
     buttons: [Dialog.okButton({ label: trans.__('Hide') })],
+    // Hide is the only exit: the second click of a double-click on the row
+    // lands on the backdrop, and that is not a choice to hide (DEF-PANE-340).
+    hasClose: false,
     renderer: spinnerRenderer
   });
   // Scopes the compact layout in base.css to this one dialog.
@@ -144,6 +148,15 @@ function showLaunchSpinner(
 let spinnerDialog: Dialog<unknown> | null = null;
 let spinnerSeq = 0;
 const spinnerTitles = new Map<number, string>();
+
+/** Whether the user hid the dialog of `token`, an action still running. Hide
+ * disposes the dialog, and an action begun after it raises a fresh dialog that
+ * does not stand for the hidden one (DEF-PANE-339). */
+function spinnerHidden(token: number): boolean {
+  return (
+    !spinnerDialog || spinnerDialog.isDisposed || !spinnerTitles.has(token)
+  );
+}
 
 /** Show the spinner dialog for one action, or retitle the one already up so it
  * names the newest action. Pass the token to `endSpinner` when the action
@@ -182,9 +195,10 @@ export function endSpinner(token: number): void {
  * tint pass.
  *
  * Split out of the panel because none of it is presentation - it is process
- * identity. The panel asks for a conversation and gets a focused terminal
- * running exactly that conversation, or a fresh one; nothing in here knows
- * about sections, filters or menus.
+ * identity. The panel asks for a conversation and gets a terminal running
+ * exactly that conversation, or a fresh one, focused unless the user hid the
+ * action's spinner dialog; nothing in here knows about sections, filters or
+ * menus.
  */
 export class TerminalManager {
   constructor(options: TerminalManager.IOptions) {
@@ -274,7 +288,7 @@ export class TerminalManager {
     // when it carries the wanted conversation.
     const cached = this._byProject.get(session.project_path);
     if (cached && !cached.widget.isDisposed && cached.sessionId === wanted) {
-      this.focus(cached.widget);
+      this.focus(cached.widget, spinner);
       return;
     }
 
@@ -289,7 +303,7 @@ export class TerminalManager {
         sessionId: found.runningId ?? undefined
       });
       this._wireDisposal(session.project_path, found.widget);
-      this.focus(found.widget);
+      this.focus(found.widget, spinner);
       return;
     }
 
@@ -316,7 +330,7 @@ export class TerminalManager {
    * `spinner` is the token of the click this launch belongs to. The launch
    * joins that click's spinner instead of beginning its own, so the user sees
    * one dialog from the click to the terminal, and a click the user hid stays
-   * hidden.
+   * hidden and its terminal opens behind the current tab.
    */
   async launch(
     request: ILaunchRequest,
@@ -337,22 +351,64 @@ export class TerminalManager {
         this._serverSettings,
         { method: 'POST', body: JSON.stringify(request) }
       );
-      const widget: any = await this._app.commands.execute('terminal:open', {
-        name: launched.terminal_name
-      });
+      const token = spinner ?? own!;
+      const name = launched.terminal_name;
+      // `terminal:open` shows the new terminal's tab and moves the focus into
+      // it before it returns. When the user has hidden this action's dialog,
+      // that focus is stopped before the shell sees it, as JupyterLab's Dialog
+      // stops focus that leaves it, so the user's widget stays the current one.
+      // The focus goes back to the element it left once the user's tab is
+      // shown again (DEF-PANE-339).
+      let left = null as HTMLElement | null;
+      const keep = (event: FocusEvent): void => {
+        const target = event.target as HTMLElement;
+        if (
+          spinnerHidden(token) &&
+          this._liveTerminals().some(
+            w => w.content?.session?.name === name && w.node.contains(target)
+          )
+        ) {
+          event.stopPropagation();
+          left = event.relatedTarget as HTMLElement | null;
+          target.blur();
+        }
+      };
+      document.addEventListener('focus', keep, true);
+      let widget: any;
+      try {
+        widget = await this._app.commands.execute('terminal:open', { name });
+      } finally {
+        document.removeEventListener('focus', keep, true);
+      }
+      if (spinnerHidden(token)) {
+        this._showCurrentTab();
+        left?.focus();
+      }
       if (widget?.id) {
         this._byProject.set(request.project_path, {
           widget,
           sessionId: tagSessionId
         });
         this._wireDisposal(request.project_path, widget);
-        this.focus(widget);
+        this.focus(widget, token);
       }
       return widget ?? null;
     } finally {
       if (own !== undefined) {
         endSpinner(own);
       }
+    }
+  }
+
+  /** Show the current widget's tab again. Opening a terminal selects its tab,
+   * so for a hidden action the tab the user was on goes back in front
+   * (DEF-PANE-339). */
+  private _showCurrentTab(): void {
+    const shell = this._app.shell as ILabShell;
+    const current = shell.currentWidget;
+    const bar = current && shell.getMainAreaTabBar(current);
+    if (bar) {
+      bar.currentTitle = current.title;
     }
   }
 
@@ -369,13 +425,30 @@ export class TerminalManager {
    * under it ends up without the keyboard. Closing emits `disposed` before
    * that return, and the activation the tab then receives is processed after
    * it, so the terminal is the last to take the focus.
+   *
+   * `spinner` is the token of the action that asked. When the user hid that
+   * action's dialog the terminal is left where it is, and so is a terminal
+   * waiting for the dialog the user then hides (DEF-PANE-339).
    */
-  focus(widget: any): void {
+  focus(widget: any, spinner?: number): void {
     if (!widget || widget.isDisposed) {
       return;
     }
+    if (spinner !== undefined && spinnerHidden(spinner)) {
+      return;
+    }
     if (spinnerDialog && !spinnerDialog.isDisposed) {
-      spinnerDialog.disposed.connect(() => this.focus(widget));
+      spinnerDialog.disposed.connect(() => {
+        // The dialog closes on its own only with its last action. Closed with
+        // an action still running, the user hid it: the terminal is not
+        // activated, and its tab, shown behind the dialog, goes back behind
+        // the user's tab.
+        if (spinnerTitles.size > 0) {
+          this._showCurrentTab();
+        } else {
+          this.focus(widget);
+        }
+      });
       return;
     }
     this._app.shell.activateById(widget.id);

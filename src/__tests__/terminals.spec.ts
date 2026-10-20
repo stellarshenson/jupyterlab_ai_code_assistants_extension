@@ -373,4 +373,120 @@ describe('one spinner dialog (DEF-PANE-327-BUSY-MODAL-1)', () => {
       endSpinner(hidden);
     }
   });
+
+  it('activates a terminal waiting on the dialog only when the dialog closes on its own (DEF-PANE-339)', async () => {
+    manager = makeManager();
+    const activated = jest.spyOn((manager as any)._app.shell, 'activateById');
+
+    // Another action keeps the dialog up after this launch has ended, so its
+    // terminal waits for the dialog to close. The user hides the dialog.
+    const other = beginSpinner('Branching Testbed session', trans);
+    try {
+      await manager.launch(
+        { project_path: PROJECT, session_id: CURRENT },
+        CURRENT
+      );
+      await flush();
+      expect(spinners()).toHaveLength(1);
+      spinners()[0]
+        .querySelector<HTMLElement>('.jp-Dialog-footer .jp-Dialog-button')!
+        .click();
+      await flush();
+      expect(spinners()).toHaveLength(0);
+      expect(activated).not.toHaveBeenCalled();
+    } finally {
+      endSpinner(other);
+    }
+
+    // Without Hide the dialog closes with the last action and the terminal
+    // is activated.
+    const next = beginSpinner('Branching Testbed session', trans);
+    let opened: any;
+    try {
+      opened = await manager.launch(
+        { project_path: PROJECT, session_id: CURRENT },
+        CURRENT
+      );
+      await flush();
+      expect(activated).not.toHaveBeenCalled();
+    } finally {
+      endSpinner(next);
+    }
+    await flush();
+    expect(activated).toHaveBeenCalledWith(opened.id);
+  });
+
+  it("leaves a hidden action's terminal alone when a later action's dialog closes (DEF-PANE-339)", async () => {
+    manager = makeManager();
+    const activated = jest.spyOn((manager as any)._app.shell, 'activateById');
+
+    // The user hides the dialog, then a later action raises a fresh one that
+    // stands for the later action alone.
+    const hidden = beginSpinner('Opening Testbed', trans);
+    let later: number | undefined;
+    try {
+      await flush();
+      spinners()[0]
+        .querySelector<HTMLElement>('.jp-Dialog-footer .jp-Dialog-button')!
+        .click();
+      later = beginSpinner('Branching Testbed session', trans);
+      await flush();
+      expect(spinners()).toHaveLength(1);
+
+      // The hidden action's terminal opens while the later dialog is up, and
+      // that dialog then closes on its own: the terminal is not activated.
+      await manager.launch(
+        { project_path: PROJECT, session_id: CURRENT },
+        CURRENT,
+        hidden
+      );
+      endSpinner(later);
+      await flush();
+      expect(spinners()).toHaveLength(0);
+      expect(activated).not.toHaveBeenCalled();
+    } finally {
+      if (later !== undefined) {
+        endSpinner(later);
+      }
+      endSpinner(hidden);
+    }
+  });
+
+  it('keeps the dialog up through the second click of a double-click, and the terminal then takes the keyboard (DEF-PANE-340)', async () => {
+    manager = makeManager();
+    const activated = jest.spyOn((manager as any)._app.shell, 'activateById');
+    const answer = request.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    request.mockImplementation(((...args: Parameters<typeof answer>) =>
+      args[1] === 'launch'
+        ? held.then(() => answer(...args))
+        : answer(...args)) as any);
+    const call = manager.launch(
+      { project_path: PROJECT, session_id: CURRENT },
+      CURRENT
+    );
+    let opened: any;
+    try {
+      await flush();
+      expect(spinners()).toHaveLength(1);
+      // The second click of a double-click on the row lands on the backdrop,
+      // outside the dialog's content.
+      for (const type of ['mousedown', 'click']) {
+        spinners()[0].dispatchEvent(
+          new MouseEvent(type, { bubbles: true, cancelable: true, detail: 2 })
+        );
+      }
+      await flush();
+      expect(spinners()).toHaveLength(1);
+    } finally {
+      release();
+      opened = await call;
+    }
+    await flush();
+    expect(spinners()).toHaveLength(0);
+    expect(activated).toHaveBeenCalledWith(opened.id);
+  });
 });

@@ -31,8 +31,10 @@ test.use({ autoGoto: false, waitForApplication });
  * The dialog is compact - a semi-bold title one step above the base UI size,
  * a 240px minimum width, a 24px ring - and never shows a scrollbar: a turning ring's box grows to its
  * diagonal, and the dialog body scrolls. Its Hide button is the filled primary
- * with no focus rim. The ring turns under both motion preferences
- * (DEF-PANE-324).
+ * with no focus rim until the keyboard moves the focus
+ * (ACC-PANE-217-FOCUS-OUTLINE). The ring turns under both motion preferences
+ * (DEF-PANE-324). After Hide, the terminal opens behind the current tab and
+ * the keyboard stays where the user is (DEF-PANE-339-HIDE-FOCUS).
  */
 
 const PANEL = `#${panelId('claude')}`;
@@ -52,6 +54,8 @@ const SEEN_MS = 1500;
 const BRANCH_ROUTE = /\/providers\/[^/]+\/branch(\?|$)/;
 const PROBE_ROUTE = /\/providers\/[^/]+\/terminal\//;
 const LAUNCH_ROUTE = /\/providers\/[^/]+\/launch(\?|$)/;
+const SESSIONS_ROUTE = /\/providers\/claude\/sessions(\?|$)/;
+const TERMINALS_ROUTE = /\/api\/terminals(\?|$)/;
 
 /** The row whose name LINE reads exactly `name`. */
 function row(page: any, name: string) {
@@ -172,7 +176,9 @@ async function focusedOutline(page: any): Promise<string> {
 
 /** One spinner dialog is on screen, titled `title`, covering and blocking the
  * window, compact, and with a filled Hide button that has the focus and no
- * rim. Returns once all of that holds. */
+ * rim, and that shows JupyterLab's rim once Tab moves the focus
+ * (ACC-PANE-217-FOCUS-OUTLINE). Returns after that Tab, with the focus and
+ * the rim on Hide. */
 async function expectSpinnerDialog(page: any, title: string): Promise<void> {
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
   // One dialog of any kind: the launch never stacks a second.
@@ -250,8 +256,9 @@ async function expectSpinnerDialog(page: any, title: string): Promise<void> {
 
   // Hide is the one primary, marked by its fill - JupyterLab's accept fill,
   // which the light theme this suite runs in paints in the brand colour - and
-  // it has the focus with no rim, both as the dialog opened on the click and
-  // once the keyboard moves the focus (Tab wraps back to the only button).
+  // it has the focus. The dialog opened on a mouse click, so the focus shows no
+  // rim; once the keyboard moves the focus (Tab wraps back to the only button)
+  // JupyterLab's rim shows (ACC-PANE-217-FOCUS-OUTLINE).
   const hide = page.locator(HIDE);
   await expect(hide).toHaveCount(1);
   await expect(hide).toHaveClass(/jp-mod-accept/);
@@ -264,7 +271,57 @@ async function expectSpinnerDialog(page: any, title: string): Promise<void> {
   expect(await focusedOutline(page)).toMatch(/^none |^\S+ 0px$/);
   await page.keyboard.press('Tab');
   await expect(hide).toBeFocused();
-  expect(await focusedOutline(page)).toMatch(/^none |^\S+ 0px$/);
+  expect(await focusedOutline(page)).not.toMatch(/^none |^\S+ 0px$/);
+}
+
+/** The id of the current widget, which the main area shows. */
+async function currentWidgetId(page: any): Promise<string | null> {
+  return page.evaluate(
+    () => (window as any).jupyterapp.shell.currentWidget?.id ?? null
+  );
+}
+
+/** Wait until the terminal in the main area has its content revealed, then
+ * two frames, so the activation JupyterLab queued for it has run. */
+async function terminalRevealed(page: any): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const shell = (window as any).jupyterapp.shell;
+          const widget = Array.from(shell.widgets('main')).find((w: any) =>
+            w.node.querySelector('.jp-Terminal')
+          ) as any;
+          return !!widget?.isRevealed;
+        }),
+      { timeout: 30000 }
+    )
+    .toBe(true);
+  await page.evaluate(
+    () =>
+      new Promise(resolve =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      )
+  );
+  await page.waitForTimeout(500);
+}
+
+/** Where the terminal in the main area stands: a tab, on screen, the current
+ * widget, holding the keyboard - and which widget is current and on screen. */
+async function terminalStanding(page: any): Promise<Record<string, any>> {
+  return page.evaluate(() => {
+    const shell = (window as any).jupyterapp.shell;
+    const widget = Array.from(shell.widgets('main')).find((w: any) =>
+      w.node.querySelector('.jp-Terminal')
+    ) as any;
+    return {
+      tab: !!shell.getMainAreaTabBar(widget),
+      visible: widget.isVisible,
+      current: shell.currentWidget === widget,
+      shown: shell.currentWidget?.isVisible ? shell.currentWidget.id : null,
+      inTerminal: widget.node.contains(document.activeElement)
+    };
+  });
 }
 
 /** The keyboard is in a terminal: its xterm input has the focus. */
@@ -436,4 +493,244 @@ test('a reduced-motion click still turns the ring and names the action in sight'
   await expect(page.locator('.jp-Dialog')).toHaveCount(0, { timeout: 15000 });
   const banner = page.locator(PANEL).locator('.jp-AiAssistantsPanel-error');
   await expect(banner).toBeVisible({ timeout: 15000 });
+});
+
+test('a hidden click opens its terminal behind the current tab, without the keyboard', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // The launch answers only once the user has hidden the dialog and moved on.
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route(LAUNCH_ROUTE, async (route: any) => {
+    await held;
+    await route.continue();
+  });
+
+  const name = await currentName(page, 'spinner-fixture');
+  const before = await terminalCount(page);
+  const launched = page.waitForRequest(LAUNCH_ROUTE, { timeout: 30000 });
+  await row(page, name).click();
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
+  await launched;
+  await page.locator(HIDE).click();
+  await expect(page.locator('.jp-Dialog')).toHaveCount(0);
+
+  // The user works elsewhere: the panel's filter has the keyboard, and the
+  // main area shows the tab it showed before.
+  const panel = page.locator(PANEL);
+  await panel.getByTitle('Filter sessions').click();
+  const filter = panel.locator('.jp-AiAssistantsPanel-search');
+  await filter.click();
+  await expect(filter).toBeFocused();
+  const shown = await currentWidgetId(page);
+  expect(shown).not.toBeNull();
+
+  release();
+
+  await expect
+    .poll(() => terminalCount(page), { timeout: 30000 })
+    .toBe(before + 1);
+  await terminalRevealed(page);
+
+  // A tab, not the current widget and not on screen; the filter keeps the
+  // keyboard and the main area still shows the tab it showed.
+  expect(await terminalStanding(page)).toEqual({
+    tab: true,
+    visible: false,
+    current: false,
+    shown,
+    inTerminal: false
+  });
+  await expect(filter).toBeFocused();
+  await page.keyboard.type('zz');
+  await expect(filter).toHaveValue('zz');
+});
+
+test('a Hide while the terminal is being opened leaves it behind the current tab', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // `terminal:open` first reads the running terminals. That read answers only
+  // once the user has hidden the dialog and moved on.
+  let launchAnswered = false;
+  page.on('response', (response: any) => {
+    if (LAUNCH_ROUTE.test(response.url())) {
+      launchAnswered = true;
+    }
+  });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  let reading = false;
+  await page.route(TERMINALS_ROUTE, async (route: any) => {
+    if (launchAnswered && route.request().method() === 'GET') {
+      reading = true;
+      await held;
+    }
+    await route.continue();
+  });
+
+  const name = await currentName(page, 'spinner-fixture');
+  const before = await terminalCount(page);
+  await row(page, name).click();
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
+  await expect.poll(() => reading, { timeout: 30000 }).toBe(true);
+  await page.locator(HIDE).click();
+  await expect(page.locator('.jp-Dialog')).toHaveCount(0);
+
+  const panel = page.locator(PANEL);
+  await panel.getByTitle('Filter sessions').click();
+  const filter = panel.locator('.jp-AiAssistantsPanel-search');
+  await filter.click();
+  await expect(filter).toBeFocused();
+  const shown = await currentWidgetId(page);
+  expect(shown).not.toBeNull();
+
+  release();
+
+  await expect
+    .poll(() => terminalCount(page), { timeout: 30000 })
+    .toBe(before + 1);
+  await terminalRevealed(page);
+
+  expect(await terminalStanding(page)).toEqual({
+    tab: true,
+    visible: false,
+    current: false,
+    shown,
+    inTerminal: false
+  });
+  await expect(filter).toBeFocused();
+  await page.keyboard.type('zz');
+  await expect(filter).toHaveValue('zz');
+});
+
+test('a Hide keeps a notebook cell in edit mode with the keyboard when the terminal opens', async ({
+  page
+}) => {
+  await page.goto();
+  await page.notebook.createNew('hide-focus.ipynb');
+  await openPanelTab(page, 'claude');
+
+  // `terminal:open` first reads the running terminals. That read answers only
+  // once the user has hidden the dialog and gone back to typing in a cell,
+  // whose notebook the new terminal's tab then covers until it is shown again.
+  let launchAnswered = false;
+  page.on('response', (response: any) => {
+    if (LAUNCH_ROUTE.test(response.url())) {
+      launchAnswered = true;
+    }
+  });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  let reading = false;
+  await page.route(TERMINALS_ROUTE, async (route: any) => {
+    if (launchAnswered && route.request().method() === 'GET') {
+      reading = true;
+      await held;
+    }
+    await route.continue();
+  });
+
+  const name = await currentName(page, 'spinner-fixture');
+  const before = await terminalCount(page);
+  await row(page, name).click();
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
+  await expect.poll(() => reading, { timeout: 30000 }).toBe(true);
+  await page.locator(HIDE).click();
+  await expect(page.locator('.jp-Dialog')).toHaveCount(0);
+
+  const notebook = page.locator('.jp-NotebookPanel .jp-Notebook');
+  const editor = notebook.locator('.jp-Cell .cm-content').first();
+  await editor.click();
+  await page.keyboard.type('ab');
+  const shown = await currentWidgetId(page);
+
+  release();
+
+  await expect
+    .poll(() => terminalCount(page), { timeout: 30000 })
+    .toBe(before + 1);
+  await terminalRevealed(page);
+
+  // The notebook is in front and current, its cell still in edit mode with
+  // the keyboard, and what is typed next lands in the cell.
+  expect(await terminalStanding(page)).toEqual({
+    tab: true,
+    visible: false,
+    current: false,
+    shown,
+    inTerminal: false
+  });
+  await expect(editor).toBeFocused();
+  await expect(notebook).toHaveClass(/jp-mod-editMode/);
+  await page.keyboard.type('cd');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('ef');
+  expect(await editor.innerText()).toBe('abcd\nef');
+});
+
+test('a Hide after the terminal opened behind the dialog leaves it behind the current tab', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // The branch's terminal opens while the dialog waits on the list refresh
+  // that follows the launch. That refresh answers only once the user has
+  // hidden the dialog.
+  let launchAnswered = false;
+  page.on('response', (response: any) => {
+    if (LAUNCH_ROUTE.test(response.url())) {
+      launchAnswered = true;
+    }
+  });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route(SESSIONS_ROUTE, async (route: any) => {
+    if (launchAnswered) {
+      await held;
+    }
+    await route.continue();
+  });
+
+  // The user is on the Launcher tab.
+  await page
+    .locator('#jp-main-dock-panel .lm-TabBar-tab', { hasText: 'Launcher' })
+    .first()
+    .click();
+  const shown = await currentWidgetId(page);
+  expect(shown).not.toBeNull();
+  const parent = await currentName(page, 'spinner-fixture');
+  await branchRow(page, parent);
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
+  await terminalRevealed(page);
+  await expect(page.locator(DIALOG)).toBeVisible();
+
+  await page.locator(HIDE).click();
+  await expect(page.locator('.jp-Dialog')).toHaveCount(0);
+  await page.waitForTimeout(500);
+
+  // The terminal stays a tab behind the tab the user was on, without the
+  // keyboard.
+  expect(await terminalStanding(page)).toEqual({
+    tab: true,
+    visible: false,
+    current: false,
+    shown,
+    inTerminal: false
+  });
+  release();
 });

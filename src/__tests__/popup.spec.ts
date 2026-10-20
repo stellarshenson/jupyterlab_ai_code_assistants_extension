@@ -297,4 +297,30 @@ describe('Manage Sessions popup permanent Delete', () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(onDelete).toHaveBeenCalledWith([FIRST]);
   });
+
+  it('DEF-PANE-338-CONFIRM-WINDOW - a multi-click 600 ms after arming confirms', async () => {
+    checkbox(rows()[1]).click();
+    const del = deleteButton();
+    // The arm window is measured on the event clock, so each click carries
+    // its own timeStamp.
+    const click = (detail: number, timeStamp: number): void => {
+      const event = new MouseEvent('click', { bubbles: true, detail });
+      Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+      del.dispatchEvent(event);
+    };
+
+    // Within 600 ms of arming, a detail-2 click is the second click of a
+    // double-click.
+    click(1, 1000);
+    click(2, 1500);
+    await Promise.resolve();
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(del.classList.contains('jp-mod-armed')).toBe(true);
+
+    // Past 600 ms, a click the OS still counts into the double-click confirms.
+    click(2, 1700);
+    await Promise.resolve();
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(onDelete).toHaveBeenCalledWith([FIRST]);
+  });
 });

@@ -116,6 +116,9 @@ export function showManageSessionsPopup(
   // removal is permanent.
   let armed = false;
   let armTimer = 0;
+  // The arming click's event.timeStamp, which the confirm click is measured
+  // against.
+  let armedAt = 0;
 
   const body = document.createElement('div');
   body.className = 'jp-AiAssistantsPanel-branchPopup';
@@ -442,8 +445,10 @@ export function showManageSessionsPopup(
       return;
     }
     // The second click of a double-click is not a confirmation (DEF-PANE-336):
-    // the arm step holds only when the confirming click is a separate one.
-    if (armed && event.detail > 1) {
+    // a multi-click within 600 ms of arming is ignored. A later click confirms
+    // whatever its detail - the OS double-click interval can be longer than
+    // the user's pause, and the click would be dropped (DEF-PANE-338).
+    if (armed && event.detail > 1 && event.timeStamp - armedAt < 600) {
       return;
     }
     // No confirmation DIALOG here: a second Lumino dialog stacked on this popup
@@ -454,6 +459,7 @@ export function showManageSessionsPopup(
     // refused move may remove the conversation permanently or leave it.
     if (!armed) {
       armed = true;
+      armedAt = event.timeStamp;
       window.clearTimeout(armTimer);
       armTimer = window.setTimeout(() => {
         disarm();

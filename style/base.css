@@ -616,17 +616,23 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   border-width: 3px;
 }
 
-/* No focus rim on any button of this extension's dialogs: the primary action
-   is marked by its fill (jp-mod-accept). JupyterLab draws the rim from
+/* A focus rim on a button of this extension's dialogs only when the focus
+   came from the keyboard; the primary action is marked by its fill
+   (jp-mod-accept). JupyterLab draws the rim from
    `button.jp-Dialog-button.jp-mod-styled.jp-mod-accept:focus` and its warn and
    reject siblings in apputils' dialog.css - on :focus, not :focus-visible -
    and a Dialog focuses its default button when it attaches, so the rim showed
-   on a dialog opened with the mouse too. Scoped through the footer mark of
-   the extension's dialog renderer (src/core/dialogs.ts); the second selector
-   outranks those four-class rules. */
-.jp-Dialog:has(.jp-AiAssistantsPanel-dialogFooter) button:focus,
+   on a dialog opened with the mouse too (DEF-PANE-328-FOCUS-RIM). The rule
+   removes it where the browser does not mark the focus :focus-visible: after
+   a mouse click, and on the default button of a dialog opened with the
+   mouse. Keyboard focus keeps JupyterLab's rim (ACC-PANE-217-FOCUS-OUTLINE).
+   Scoped through the footer mark of the extension's dialog renderer
+   (src/core/dialogs.ts); the second selector outranks those four-class
+   rules. */
 .jp-Dialog:has(.jp-AiAssistantsPanel-dialogFooter)
-  button.jp-Dialog-button.jp-mod-styled:focus {
+  button:focus:not(:focus-visible),
+.jp-Dialog:has(.jp-AiAssistantsPanel-dialogFooter)
+  button.jp-Dialog-button.jp-mod-styled:focus:not(:focus-visible) {
   outline: none;
 }
 

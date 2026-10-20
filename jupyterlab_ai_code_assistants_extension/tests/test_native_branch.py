@@ -73,6 +73,37 @@ def test_claude_branch_uses_native_commands(scratch_stores, tmp_path, monkeypatc
     assert transcript.read_text() == original
 
 
+def test_claude_branch_runs_in_the_project_when_the_last_turn_ran_in_a_subfolder(
+    scratch_stores, tmp_path, monkeypatch
+):
+    """DEF-PROV-335: the CLI resolves the parent from its cwd's encoded store,
+    so the fork runs in the project the directory encodes, not in the
+    subfolder the parent's last record names."""
+    store = registry.get("claude").store
+    parent = "44444444-4444-4444-8444-444444444444"
+    child = "55555555-5555-4555-8555-555555555555"
+    project = tmp_path / "project"
+    (project / "sub").mkdir(parents=True)
+    encoded = claude._encode_path(str(project))
+    folder = scratch_stores / "claude" / "projects" / encoded
+    folder.mkdir(parents=True)
+    (folder / f"{parent}.jsonl").write_text(
+        json.dumps({"type": "user", "cwd": str(project)}) + "\n"
+        + json.dumps({"type": "assistant", "cwd": str(project / "sub")}) + "\n"
+    )
+    monkeypatch.setattr(claude.shutil, "which", lambda _: "/bin/claude")
+    monkeypatch.setattr(claude.uuid, "uuid4", lambda: child)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(kwargs["cwd"])
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(claude.subprocess, "run", run)
+    assert store.fork(encoded, parent, "analysis_1") == child
+    assert calls == [str(project), str(project)]
+
+
 async def test_branch_names_skip_used_suffixes(jp_fetch, present, monkeypatch):
     provider = registry.get("kimi")
     made = []

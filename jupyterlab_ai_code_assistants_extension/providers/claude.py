@@ -1470,7 +1470,7 @@ class ClaudeStore(SessionStore):
         cli = shutil.which(CLI_BINARY)
         if not parent.is_file() or not cli or not name:
             return None
-        cwd = _tail_records(parent).get("cwd")
+        cwd = (self._resolve_latest(project_dir, None, session_id) or {}).get("projectPath")
         if not isinstance(cwd, str) or not os.path.isdir(cwd):
             return None
         # The colour the parent SHOWS, so judged like every other read: a pick

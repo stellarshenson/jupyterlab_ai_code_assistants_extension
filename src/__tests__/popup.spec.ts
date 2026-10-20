@@ -276,4 +276,25 @@ describe('Manage Sessions popup permanent Delete', () => {
     expect(del.textContent).toBe('Delete (1)');
     expect(onDelete).not.toHaveBeenCalled();
   });
+
+  it('DEF-PANE-336 - a double-click arms and does not delete', async () => {
+    checkbox(rows()[1]).click();
+    const del = deleteButton();
+    const click = (detail: number): void => {
+      del.dispatchEvent(new MouseEvent('click', { bubbles: true, detail }));
+    };
+
+    // The two clicks a double-click dispatches: detail 1, then detail 2.
+    click(1);
+    click(2);
+    await Promise.resolve();
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(del.classList.contains('jp-mod-armed')).toBe(true);
+
+    // A separate click confirms.
+    click(1);
+    await Promise.resolve();
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(onDelete).toHaveBeenCalledWith([FIRST]);
+  });
 });

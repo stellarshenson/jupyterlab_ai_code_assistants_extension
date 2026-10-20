@@ -429,6 +429,13 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - root-cause: 2026-10-20T00:24:09Z @kj the DEF-PROV-333-NO-PROMPT skip in GeminiStore._chats hides the header-only chat 0.64.0 writes at startup, so the row names the older chat and findForSession matches no --session-id argv
   - log: 2026-10-20T00:24:09Z @kj added
   - log: 2026-10-20T00:33:00Z @kj closed: fixed: removed the first_prompt skip from GeminiStore._chats; the header-only chat is the folder's newest row again
+- [x] `DEF-PROV-335-FORK-CWD` **Claude Branch refused after a turn in a subfolder or a folder rename** - MAJOR; Branch on a Claude row toasts "Claude Code cannot branch this conversation." when the parent's last record carries a subfolder cwd or a pre-rename path; fix: fork in the project path the listing and the launch resolve; `providers/claude.py`
+  - evidence: test_native_branch.py subfolder-cwd test green, red with the raw tail cwd restored; Jest 378, pytest 387, Galata 84/84, lint:check 0 at 1.2.172
+  - repro: Claude conversation whose last turn ran in <project>/sub; row menu, Branch
+  - test-tags: UNIT
+  - root-cause: 2026-10-20T13:43:03Z @kj ClaudeStore.fork runs the CLI in the raw `_tail_records(parent)` cwd: a subfolder cwd makes `claude --resume` search the subfolder's encoded store and exit non-zero, a pre-rename cwd fails the isdir gate; listing and launch use `_resolve_latest` projectPath
+  - log: 2026-10-20T13:43:03Z @kj added
+  - log: 2026-10-20T13:54:19Z @kj closed: fixed: fork runs in the _resolve_latest projectPath of the parent
 
 ## Frontend / server contract `FRONT`
 
@@ -1492,6 +1499,20 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-10-19T20:02:07Z @kj edited test-tags "E2E" -> "UNIT, E2E"
   - log: 2026-10-19T22:55:33Z @kj closed: fixed: five provider viewBoxes square at 1.2x the art larger side; no path or CSS changed
   - log: 2026-10-19T22:55:49Z @kj edited evidence "Jest icon-size.spec.ts 15 cases (square viewBox, art share 0.833 of the terminal icon, centred), Galata launcher-tiles DEF-PANE-332 (each glyph within 1px of Terminal 43.33px) green; Jest 376/376, pytest 384, Galata 84/84 on 1.2.152, 10/10 on 1.2.158" -> "Jest icon-size.spec.ts 15 cases (square viewBox, art share 0.833 of the terminal icon, centred), Galata launcher-tiles.spec.ts glyph-size test (each glyph within 1px of Terminal 43.33px) green; Jest 376/376, pytest 384, Galata 84/84 on 1.2.152, 10/10 on 1.2.158"
+- [x] `DEF-PANE-336-DOUBLE-DELETE` **Double-click on Manage Sessions Delete deletes without confirming** - MAJOR; a double-click on Delete in the Manage Sessions popup arms and deletes in one gesture; with JupyterLab delete_to_trash off, or a refused trash move, the loss is permanent; fix: while armed, a click with event.detail above 1 is ignored; `src/core/popup.ts`
+  - evidence: popup.spec.ts 'DEF-PANE-336 - a double-click arms and does not delete' green, red with the guard severed; Jest 378, pytest 387, Galata 84/84, lint:check 0 at 1.2.172
+  - repro: Manage Sessions, tick one row, double-click Delete
+  - test-tags: UNIT
+  - root-cause: 2026-10-20T13:43:03Z @kj the deleteBtn click handler arms on one click and deletes on the next, with no check on `event.detail`, so the second click of a double-click is the confirmation
+  - log: 2026-10-20T13:43:03Z @kj added
+  - log: 2026-10-20T13:54:19Z @kj closed: fixed: while armed, a click with event.detail above 1 is ignored
+- [x] `DEF-PANE-337-BRANCH-LAUNCH` **Created branch reported as impossible when its terminal launch answers 400** - MAJOR; Branch toasts "<assistant> cannot branch this conversation." and skips the list refresh although the branch was minted and pinned; fix: the minted check runs before the 400 check; `src/core/panel.ts`
+  - evidence: panel.spec.ts branch-launch case over a 400 invalid_project_path green, red with the old catch order; Jest 378, pytest 387, Galata 84/84, lint:check 0 at 1.2.172
+  - repro: Branch a Kimi row whose project folder was moved away; the toast says cannot branch, the new branch row appears only on the next poll
+  - test-tags: UNIT
+  - root-cause: 2026-10-20T13:43:08Z @kj the `_branchByServerCopy` catch tests `isResponseStatus(err, 400)` before `minted`, and the launch preflight answers 400 `invalid_project_path` after the branch POST returned the minted id
+  - log: 2026-10-20T13:43:08Z @kj added
+  - log: 2026-10-20T13:54:19Z @kj closed: fixed: the minted check runs before the 400 check
 
 ## Colour store `COLO`
 

@@ -1254,12 +1254,7 @@ export class AssistantSessionsPanel extends Widget {
         spinner
       );
     } catch (err) {
-      if (isResponseStatus(err, 400)) {
-        Notification.error(
-          `${this._descriptor.label} cannot branch this conversation.`,
-          { autoClose: 4000 }
-        );
-      } else if (minted) {
+      if (minted) {
         // The branch was created and only its terminal was refused - the
         // launch preflight's 409 carries words for the user. "Could not
         // branch this session" would be false, and the early return would
@@ -1274,6 +1269,11 @@ export class AssistantSessionsPanel extends Widget {
           err
         );
         await this._fetch().catch(() => undefined);
+      } else if (isResponseStatus(err, 400)) {
+        Notification.error(
+          `${this._descriptor.label} cannot branch this conversation.`,
+          { autoClose: 4000 }
+        );
       } else {
         this._showActionError(
           'Could not branch this session - try again.',

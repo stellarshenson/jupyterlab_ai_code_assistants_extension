@@ -585,83 +585,92 @@ describe('click-time spinner dialog (DEF-PANE-318, DEF-PANE-327-BUSY-MODAL-1)', 
 });
 
 describe('a branch whose terminal launch was refused after the mint', () => {
-  it('says the branch was created and still lists it when the launch is refused', async () => {
-    // The DeepSeek preflight refuses the follow-up launch with a 409 whose
-    // body is words, but by then the branch POST has already returned 200 with
-    // the minted id - the row exists server-side. The user is told that, and
-    // the refresh that surfaces the row still runs; "Could not branch this
-    // session" would report the whole action as failed and leave the branch
-    // invisible until the next poll.
-    const target = makePanel({ ...DESCRIPTOR, forkStrategy: 'server-copy' });
-    const parent = session({ name: 'analysis', name_source: 'session' });
-    const child = session({
-      name: 'analysis_1',
-      session_id: 'child',
-      encoded_path: 'enc-child'
-    });
-    const refusal =
-      'the TUI profile is not mounted; run dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui';
-    (target as any)._terminals.launch = jest
-      .fn()
-      .mockRejectedValue(
-        Object.assign(new Error(refusal), { response: { status: 409 } })
+  it.each<[number, string]>([
+    [
+      409,
+      'the TUI profile is not mounted; run dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui'
+    ],
+    // DEF-PANE-337: the launch preflight's 400 for a project folder that is
+    // gone is not the branch POST's 400, and must not read as one.
+    [400, 'invalid_project_path']
+  ])(
+    'says the branch was created and still lists it when the launch is refused with %i',
+    async (status, refusal) => {
+      // The DeepSeek preflight refuses the follow-up launch with a 409 whose
+      // body is words, but by then the branch POST has already returned 200 with
+      // the minted id - the row exists server-side. The user is told that, and
+      // the refresh that surfaces the row still runs; "Could not branch this
+      // session" would report the whole action as failed and leave the branch
+      // invisible until the next poll.
+      const target = makePanel({ ...DESCRIPTOR, forkStrategy: 'server-copy' });
+      const parent = session({ name: 'analysis', name_source: 'session' });
+      const child = session({
+        name: 'analysis_1',
+        session_id: 'child',
+        encoded_path: 'enc-child'
+      });
+      (target as any)._terminals.launch = jest
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error(refusal), { response: { status } })
+        );
+      (target as any)._activeSession = parent;
+      request.mockImplementation((_id: string, path: string) =>
+        Promise.resolve(
+          path === 'branch'
+            ? { session_id: 'child' }
+            : path === 'sessions'
+              ? { sessions: [parent, child] }
+              : {}
+        )
       );
-    (target as any)._activeSession = parent;
-    request.mockImplementation((_id: string, path: string) =>
-      Promise.resolve(
-        path === 'branch'
-          ? { session_id: 'child' }
-          : path === 'sessions'
-            ? { sessions: [parent, child] }
-            : {}
-      )
-    );
-    const errored = jest
-      .spyOn(Notification, 'error')
-      .mockImplementation(() => '');
-    try {
-      await (target as any)._branchSession();
+      const errored = jest
+        .spyOn(Notification, 'error')
+        .mockImplementation(() => '');
+      try {
+        await (target as any)._branchSession();
 
-      // The refused launch still closes the click-time spinner dialog.
-      await flush();
-      expect(document.querySelector('.jp-Dialog')).toBeNull();
+        // The refused launch still closes the click-time spinner dialog.
+        await flush();
+        expect(document.querySelector('.jp-Dialog')).toBeNull();
 
-      // What the user is told: the branch was created, its terminal did not
-      // open, and the refusal's own words - neither sentence that blames the
-      // branch itself.
-      expect(errored).toHaveBeenCalledTimes(1);
-      const told = String(errored.mock.calls[0][0]);
-      expect(told).toContain('Branch created; its terminal did not open');
-      expect(told).toContain(refusal);
-      expect(told).not.toContain('cannot branch this conversation');
-      expect(told).not.toContain('Could not branch this session');
+        // What the user is told: the branch was created, its terminal did not
+        // open, and the refusal's own words - neither sentence that blames the
+        // branch itself.
+        expect(errored).toHaveBeenCalledTimes(1);
+        const told = String(errored.mock.calls[0][0]);
+        expect(told).toContain('Branch created; its terminal did not open');
+        expect(told).toContain(refusal);
+        expect(told).not.toContain('cannot branch this conversation');
+        expect(told).not.toContain('Could not branch this session');
 
-      // The toast budget, by arithmetic rather than by eye: JupyterLab shows
-      // a toast's first 140 characters and clips the rest, and a store may
-      // raise a message of up to 97 (tests/test_provider_stores.py holds the
-      // DeepSeek refusal to that), so the panel's copy plus ": " gets
-      // 140 - 2 - 97 = 41 characters. This reddens when a reworded copy
-      // grows past the budget - the 55-character "The branch was created,
-      // but its terminal could not open" only showed the cut in a browser
-      // toast, with the store's command sliced mid-name.
-      const copy = told.slice(0, told.indexOf(refusal) - 2);
-      expect(copy.length + 2 + 97).toBeLessThanOrEqual(140);
+        // The toast budget, by arithmetic rather than by eye: JupyterLab shows
+        // a toast's first 140 characters and clips the rest, and a store may
+        // raise a message of up to 97 (tests/test_provider_stores.py holds the
+        // DeepSeek refusal to that), so the panel's copy plus ": " gets
+        // 140 - 2 - 97 = 41 characters. This reddens when a reworded copy
+        // grows past the budget - the 55-character "The branch was created,
+        // but its terminal could not open" only showed the cut in a browser
+        // toast, with the store's command sliced mid-name.
+        const copy = told.slice(0, told.indexOf(refusal) - 2);
+        expect(copy.length + 2 + 97).toBeLessThanOrEqual(140);
 
-      // The list was re-read, so the new branch is on screen rather than
-      // waiting for the next poll.
-      expect(
-        (target as any)._sessions.map((s: ISession) => s.session_id)
-      ).toContain('child');
-      const names = Array.from(
-        target.node.querySelectorAll('.jp-AiAssistantsPanel-nameText')
-      ).map(node => node.textContent);
-      expect(names).toContain('analysis_1');
-    } finally {
-      errored.mockRestore();
-      target.dispose();
-      request.mockImplementation(() => Promise.resolve({}));
+        // The list was re-read, so the new branch is on screen rather than
+        // waiting for the next poll.
+        expect(
+          (target as any)._sessions.map((s: ISession) => s.session_id)
+        ).toContain('child');
+        const names = Array.from(
+          target.node.querySelectorAll('.jp-AiAssistantsPanel-nameText')
+        ).map(node => node.textContent);
+        expect(names).toContain('analysis_1');
+      } finally {
+        errored.mockRestore();
+        target.dispose();
+        request.mockImplementation(() => Promise.resolve({}));
+      }
     }
-  });
+  );
 });
 
 describe('DEF-46 - the row tooltip names only a mode the row launches with', () => {

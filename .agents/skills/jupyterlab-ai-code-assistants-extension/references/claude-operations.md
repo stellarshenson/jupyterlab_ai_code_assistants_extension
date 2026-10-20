@@ -214,7 +214,7 @@ Moving a conversation, in addition to `session-operations.md`:
 ## Branches
 
 - Every transcript with a `user` or `assistant` record in `$dir` is a branch; the panel shows a count badge and "Switch and Manage Sessions" when there is more than one
-- Branch from the CLI, in the conversation's cwd:
+- Branch from the CLI, in the project directory that encodes to `$dir`; a record's `cwd` can be a subfolder or a pre-rename path:
 
 ```bash
 new=$(python3 -c 'import uuid; print(uuid.uuid4())')

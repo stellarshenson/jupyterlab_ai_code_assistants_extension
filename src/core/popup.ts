@@ -437,8 +437,13 @@ export function showManageSessionsPopup(
     }
   };
 
-  deleteBtn.addEventListener('click', () => {
+  deleteBtn.addEventListener('click', event => {
     if (deleting || selected.size === 0) {
+      return;
+    }
+    // The second click of a double-click is not a confirmation (DEF-PANE-336):
+    // the arm step holds only when the confirming click is a separate one.
+    if (armed && event.detail > 1) {
       return;
     }
     // No confirmation DIALOG here: a second Lumino dialog stacked on this popup

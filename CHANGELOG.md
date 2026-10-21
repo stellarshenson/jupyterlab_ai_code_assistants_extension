@@ -2,6 +2,25 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.236] - 2026-10-21
+
+### Changed
+
+- Requires JupyterLab 4.6 or later: the extension's `@jupyterlab` dependencies are declared at `^4.6.0`, except `@jupyterlab/coreutils` at `^6.6.0` and `@jupyterlab/services` at `^7.6.0`, their versions in JupyterLab 4.6, so JupyterLab 4.5 or older lists the extension as incompatible and warns about it
+
+### Fixed
+
+- A second click on a session row whose hidden open is still running gives the terminal the keyboard when that click's own dialog closes, and leaves it behind the current tab when that dialog is hidden; if the first open fails, the second click opens the conversation itself
+- The second click of the double-click that raised the spinner dialog no longer presses Hide when Hide is under the pointer; a click on Hide more than 600 ms after the dialog appeared hides it whatever the operating system counts it as
+- After Hide on one open and a click on another session, the file browser ends on the folder of the newer click, whichever open finishes last
+- The session list no longer goes back to an older state when an earlier listing request answers after a later one
+- A panel click (a row, +, Branch Session) made while a Launcher tile launch of any assistant is still running, and a Launcher tile click made while a tile launch or a launch from the same assistant's panel is still running, run in click order: the newest click's terminal is the one shown last, and a resume no longer starts a second process on a conversation the other click is opening
+- A click on a session row opens it even when a list refresh redraws the rows between the press and the release of the mouse button; it used to do nothing
+- Holding Enter or Space on a session row no longer hides the spinner dialog through the key's repeats; a separate press on Hide still hides it
+- Hide on the spinner dialog acts when the mouse button or Space is pressed on it, as Enter already did: a press on Hide released after the action completed leaves the terminal behind the current tab; it used to put the terminal in front with the keyboard
+- A click on a session row, and Enter or Space on it, makes that conversation the project's current one, so plain `claude -c` in the project resumes the clicked session; a click that reuses a running terminal makes it current too, while a launch from a context menu still only opens it
+- A row clicked while an earlier switch for the same project is still in flight is the conversation plain `claude -c` resumes: the panel sends each project's switch requests in click order, one after the other, so an earlier write that the server answers later can no longer land last
+
 ## [1.2.199] - 2026-10-20
 
 ### Changed

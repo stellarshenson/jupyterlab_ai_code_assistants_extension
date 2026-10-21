@@ -37,7 +37,8 @@ jest.mock('../core/request', () => ({
   isRequestTimeout: (err: any) => err?.name === 'RequestTimeoutError',
   isResponseStatus: (err: any, status: number) =>
     err?.response?.status === status,
-  withQuery: (path: string) => path
+  withQuery: (path: string) => path,
+  REQUEST_TIMEOUT_MS: 60_000
 }));
 
 import { Notification } from '@jupyterlab/apputils';
@@ -379,18 +380,24 @@ describe('the tile click path resumes a folder that has a conversation', () => {
             : {}
       )
     );
-    const h = harness();
+    const h = harness({ sibling: false });
+    (h.panel as any)._app.commands.addCommand(BASIC_TERMINAL_LAUNCH, {
+      execute: () => ({ id: 'terminal-new-1' })
+    });
     await flush();
     request.mockClear();
     (h.panel as any)._sessions = [];
 
-    await h.panel.launchHere('proj');
+    const opened = await h.panel.launchHere('proj');
     const first = bodyOf('launch-argv');
     expect(typeof first.new_session_id).toBe('string');
     expect(first.session_id).toBeUndefined();
 
     listing = [session({ session_id: first.new_session_id })];
     request.mockClear();
+    // The first click's terminal has closed since, so the second click has no
+    // terminal to reuse and resumes the conversation in a new one.
+    opened.isDisposed = true;
 
     await h.panel.launchHere('proj');
     const second = bodyOf('launch-argv');
@@ -483,6 +490,151 @@ describe('the tile click path reports a refusal and stops', () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(error.mock.calls[0][0]).toContain('Could not open a terminal');
     expect(error.mock.calls[0][0]).toContain('no terminal service');
+  });
+});
+
+describe('DEF-PANE-345 - a tile launch and the panel launches run in click order', () => {
+  /** Register the sibling's command so that it holds every launch until the
+   * returned function runs. */
+  function holdSibling(h: IHarness): () => void {
+    let release!: () => void;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    (h.panel as any)._app.commands.addCommand(BASIC_TERMINAL_LAUNCH, {
+      execute: async (args: any) => {
+        h.launches.push(args);
+        await held;
+        return LAUNCHED_WIDGET;
+      }
+    });
+    return () => release();
+  }
+
+  it.each<[string, (panel: any) => jest.Mock]>([
+    [
+      'a row open',
+      panel => {
+        const open = jest.fn(() => Promise.resolve());
+        panel._terminals.openSession = open;
+        void panel._openSession(session());
+        return open;
+      }
+    ],
+    [
+      'a new session',
+      panel => {
+        const launch = jest.fn(() => Promise.resolve(null));
+        panel._terminals.launch = launch;
+        void panel._newSession();
+        return launch;
+      }
+    ],
+    [
+      'a branch',
+      panel => {
+        const branch = jest.fn(() => Promise.resolve());
+        panel._branchByServerCopy = branch;
+        panel._activeSession = session();
+        void panel._branchSession();
+        return branch;
+      }
+    ]
+  ])(
+    '%s clicked while a tile launch runs starts after it',
+    async (_, click) => {
+      routes({
+        sessions: { sessions: [] },
+        'launch-argv': { argv: ['testbed'] }
+      });
+      const h = harness({ sibling: false });
+      const release = holdSibling(h);
+      (h.panel as any)._syncFileBrowser = false;
+      await flush();
+
+      const tile = h.panel.launchHere('proj');
+      await flush();
+      expect(h.launches).toHaveLength(1);
+      const started = click(h.panel);
+      await flush();
+      expect(started).not.toHaveBeenCalled();
+
+      release();
+      expect(await tile).toBe(LAUNCHED_WIDGET);
+      await flush();
+      expect(started).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('a tile clicked while a panel open runs launches after it', async () => {
+    routes({
+      sessions: { sessions: [] },
+      'launch-argv': { argv: ['testbed'] }
+    });
+    const h = harness();
+    (h.panel as any)._syncFileBrowser = false;
+    await flush();
+    let finish!: () => void;
+    (h.panel as any)._terminals.openSession = jest.fn(
+      () =>
+        new Promise<void>(resolve => {
+          finish = resolve;
+        })
+    );
+    void (h.panel as any)._openSession(session());
+    await flush();
+
+    const tile = h.panel.launchHere('proj');
+    await flush();
+    expect(callsTo('launch-argv')).toHaveLength(0);
+    expect(h.launches).toEqual([]);
+
+    finish();
+    expect(await tile).toBe(LAUNCHED_WIDGET);
+    expect(h.launches).toHaveLength(1);
+  });
+
+  it("a row open after a tile resumed its conversation reuses the tile's terminal", async () => {
+    // The tile's terminal is new: the server cannot read its conversation off
+    // the process yet, and no tracker holds it here at all.
+    routes({
+      sessions: { sessions: [session()] },
+      'launch-argv': { argv: ['testbed'] }
+    });
+    const h = harness();
+    (h.panel as any)._syncFileBrowser = false;
+    await flush();
+
+    expect(await h.panel.launchHere('proj')).toBe(LAUNCHED_WIDGET);
+    await (h.panel as any)._openSession(session());
+    await flush();
+    expect(callsTo('launch')).toHaveLength(0);
+    expect(h.activated).toContain(LAUNCHED_WIDGET.id);
+  });
+
+  it("a tile after a row open of its conversation reuses the row's terminal", async () => {
+    routes({
+      sessions: { sessions: [session()] },
+      launch: { terminal_name: 'term-row' },
+      'launch-argv': { argv: ['testbed'] }
+    });
+    const h = harness();
+    (h.panel as any)._syncFileBrowser = false;
+    const rowTerminal = {
+      id: 'terminal-row-1',
+      disposed: { connect: () => undefined }
+    };
+    (h.panel as any)._app.commands.addCommand('terminal:open', {
+      execute: () => rowTerminal
+    });
+    await flush();
+
+    await (h.panel as any)._openSession(session());
+    await flush();
+    expect(callsTo('launch')).toHaveLength(1);
+    expect(await h.panel.launchHere('proj')).toBe(rowTerminal);
+    expect(callsTo('launch-argv')).toHaveLength(0);
+    expect(h.launches).toEqual([]);
   });
 });
 

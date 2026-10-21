@@ -929,6 +929,689 @@ describe('DEF-PANE-321 - a successful switch stays quiet', () => {
   });
 });
 
+describe('DEF-PANE-349 - a row click makes the clicked session the project current', () => {
+  // A row click opens or reuses a terminal, and it must also post the switch
+  // that writes the pin and the SWITCH_MTIME_LEAD_S stamp, or plain
+  // `claude -c` in the project can resolve to another conversation. Only the
+  // row's own controls do that: a launch from a menu leaves `claude -c`.
+  it('posts the switch for the row it opens', async () => {
+    const row = session({ name: 'proj' });
+    const open = jest.fn(() => Promise.resolve());
+    (panel as any)._terminals.openSession = open;
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation((_id: string, route: string) =>
+      Promise.resolve(
+        route === 'switch'
+          ? { requested: row.session_id, current: row.session_id }
+          : { sessions: [] }
+      )
+    );
+
+    render(panel, [row]);
+    panel.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!.click();
+    await flush();
+
+    expect(open).toHaveBeenCalledTimes(1);
+    const switchCall = request.mock.calls.find(call => call[1] === 'switch');
+    expect(switchCall).toBeDefined();
+    expect(JSON.parse((switchCall![3] as any).body)).toMatchObject({
+      encoded_path: row.encoded_path,
+      session_id: row.session_id
+    });
+  });
+
+  it('posts the switch again when the open only reuses the running terminal', async () => {
+    // This test uses the real terminal manager: the first click launches a
+    // terminal and the second finds it, and a reuse must make the
+    // conversation current exactly as a launch does.
+    const p = new AssistantSessionsPanel({
+      app: {
+        serviceManager: { serverSettings: {} },
+        shell: { activateById: jest.fn() },
+        commands: {
+          execute: jest.fn(async (id: string) =>
+            id === 'terminal:open'
+              ? { id: 'terminal-1', isDisposed: false }
+              : undefined
+          )
+        }
+      } as any,
+      descriptor: { ...DESCRIPTOR, iconName: 'testbed-reuse-349-spec' },
+      rootDir: '/home/user'
+    });
+    try {
+      await flush();
+      request.mockClear();
+      const row = session();
+      request.mockImplementation((_id: string, route: string) =>
+        Promise.resolve(
+          route === 'launch'
+            ? { terminal_name: 'term-1' }
+            : route === 'switch'
+              ? { requested: row.session_id, current: row.session_id }
+              : {}
+        )
+      );
+      (p as any)._fetch = jest.fn().mockResolvedValue(undefined);
+      render(p, [row]);
+
+      p.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!.click();
+      await flush();
+      p.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!.click();
+      await flush();
+
+      // One launch for two clicks, so the second click reused the terminal.
+      expect(
+        request.mock.calls.filter(([, route]) => route === 'launch')
+      ).toHaveLength(1);
+      // Both clicks made it current, the reuse included.
+      const switches = request.mock.calls.filter(
+        ([, route]) => route === 'switch'
+      );
+      expect(switches).toHaveLength(2);
+      expect(JSON.parse((switches[1][3] as any).body)).toMatchObject({
+        encoded_path: row.encoded_path,
+        session_id: row.session_id
+      });
+    } finally {
+      request.mockImplementation(() => Promise.resolve({}));
+      p.dispose();
+    }
+  });
+
+  it('posts the same switch for Enter and Space on a row', async () => {
+    for (const key of ['Enter', ' ']) {
+      request.mockClear();
+      const open = jest.fn(() => Promise.resolve());
+      (panel as any)._terminals.openSession = open;
+      (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+      const row = session({ name: key === 'Enter' ? 'enter' : 'space' });
+      request.mockImplementation((_id: string, route: string) =>
+        Promise.resolve(
+          route === 'switch'
+            ? { requested: row.session_id, current: row.session_id }
+            : { sessions: [] }
+        )
+      );
+
+      render(panel, [row]);
+      panel.node
+        .querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key }));
+      await flush();
+
+      expect(open).toHaveBeenCalledTimes(1);
+      const switchCall = request.mock.calls.find(call => call[1] === 'switch');
+      expect(switchCall).toBeDefined();
+      expect(JSON.parse((switchCall![3] as any).body)).toMatchObject({
+        encoded_path: row.encoded_path,
+        session_id: row.session_id
+      });
+    }
+  });
+
+  it('posts no switch for a launch that is not from a row', async () => {
+    // Resume in the context menu opens the same conversation, but only the
+    // row's own controls make it current - a launch must not move `claude -c`.
+    const row = session({ name: 'proj' });
+    const open = jest.fn(() => Promise.resolve());
+    (panel as any)._terminals.openSession = open;
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    (panel as any)._activeSession = row;
+
+    await (panel as any)._commands.execute(commandId('testbed', 'resume'));
+    await flush();
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls.map(call => call[1])).not.toContain('switch');
+  });
+
+  it('posts only the newest switch when two row opens finish out of order', async () => {
+    // The pin is a per-project value, and the server writes it when each
+    // switch request runs. A row click only takes its switch after its open
+    // resolves, so without an order token the click that finishes last pins
+    // the project, whatever the user clicked last (DEF-PANE-349).
+    const first = session({
+      name: 'first',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared'
+    });
+    const second = session({
+      name: 'second',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared',
+      session_id: 'sid-second'
+    });
+    let releaseFirst!: () => void;
+    const firstOpen = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    (panel as any)._terminals.openSession = jest.fn((s: ISession) =>
+      s.session_id === first.session_id ? firstOpen : Promise.resolve()
+    );
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation(
+      (_id: string, route: string, _settings: unknown, init: any) => {
+        if (route === 'switch') {
+          const body = JSON.parse(init.body);
+          return Promise.resolve({
+            requested: body.session_id,
+            current: body.session_id
+          });
+        }
+        return Promise.resolve({ sessions: [] });
+      }
+    );
+    try {
+      render(panel, [first, second]);
+      const rows = panel.node.querySelectorAll<HTMLElement>(
+        '.jp-AiAssistantsPanel-row'
+      );
+      expect(rows).toHaveLength(2);
+      rows[0].click();
+      await flush();
+      rows[1].click();
+      await flush();
+
+      const switches = (): any[] =>
+        request.mock.calls.filter(([, route]) => route === 'switch');
+      // The second click resolved first and pinned its conversation.
+      expect(switches()).toHaveLength(1);
+      expect(JSON.parse((switches()[0][3] as any).body).session_id).toBe(
+        'sid-second'
+      );
+
+      // The first click resolved after it; its older switch is dropped.
+      releaseFirst();
+      await flush();
+      expect(switches()).toHaveLength(1);
+      expect(JSON.parse((switches()[0][3] as any).body).session_id).toBe(
+        'sid-second'
+      );
+    } finally {
+      releaseFirst();
+      await flush();
+    }
+  });
+
+  it('drops a pending row switch when an explicit switch lands first', async () => {
+    const row = session({ name: 'proj' });
+    let releaseOpen!: () => void;
+    const pending = new Promise<void>(resolve => {
+      releaseOpen = resolve;
+    });
+    (panel as any)._terminals.openSession = jest.fn(() => pending);
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation(
+      (_id: string, route: string, _settings: unknown, init: any) => {
+        if (route === 'switch') {
+          const body = JSON.parse(init.body);
+          return Promise.resolve({
+            requested: body.session_id,
+            current: body.session_id
+          });
+        }
+        return Promise.resolve({ sessions: [] });
+      }
+    );
+    try {
+      render(panel, [row]);
+      panel.node
+        .querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!
+        .click();
+      await flush();
+
+      // The user picked another conversation before the open resolved.
+      await (panel as any)._switchBranch(row, 'sid-explicit');
+      await flush();
+
+      releaseOpen();
+      await flush();
+
+      const switches = request.mock.calls.filter(
+        ([, route]) => route === 'switch'
+      );
+      expect(switches).toHaveLength(1);
+      expect(JSON.parse((switches[0][3] as any).body).session_id).toBe(
+        'sid-explicit'
+      );
+    } finally {
+      releaseOpen();
+      await flush();
+    }
+  });
+
+  it('drops a pending row switch after a fork wrote the child pin', async () => {
+    // The fork route pins the minted conversation server-side. A row click
+    // still opening when the fork returns must not pin the parent back.
+    const row = session({ name: 'proj' });
+    let releaseOpen!: () => void;
+    const pending = new Promise<void>(resolve => {
+      releaseOpen = resolve;
+    });
+    (panel as any)._terminals.openSession = jest.fn(() => pending);
+    (panel as any)._terminals.launch = jest
+      .fn()
+      .mockResolvedValue({ id: 'term-fork' });
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation((_id: string, route: string) =>
+      Promise.resolve(
+        route === 'branch'
+          ? { session_id: 'sid-fork' }
+          : route === 'switch'
+            ? { requested: 'sid-fork', current: 'sid-fork' }
+            : { sessions: [] }
+      )
+    );
+    try {
+      render(panel, [row]);
+      panel.node
+        .querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!
+        .click();
+      await flush();
+
+      await (panel as any)._branchByServerCopy(row, undefined, undefined, 0);
+      await flush();
+
+      releaseOpen();
+      await flush();
+
+      // The fork is written again on the project's chain, but the held row
+      // click never posts: the parent is not pinned back.
+      const switches = request.mock.calls.filter(
+        ([, route]) => route === 'switch'
+      );
+      expect(switches).toHaveLength(1);
+      expect(JSON.parse((switches[0][3] as any).body).session_id).toBe(
+        'sid-fork'
+      );
+    } finally {
+      releaseOpen();
+      await flush();
+    }
+  });
+
+  it('posts the row switch when a held Branch answers before a later row open', async () => {
+    // The fork's number is the Branch click's, so a row clicked after it wins
+    // even when the fork route answers first (DEF-PANE-349).
+    const row = session({ name: 'proj' });
+    let releaseFork!: () => void;
+    const forkPending = new Promise<{ session_id: string }>(resolve => {
+      releaseFork = () => resolve({ session_id: 'sid-fork' });
+    });
+    let releaseOpen!: () => void;
+    const openPending = new Promise<void>(resolve => {
+      releaseOpen = resolve;
+    });
+    (panel as any)._activeSession = row;
+    (panel as any)._terminals.openSession = jest.fn(() => openPending);
+    (panel as any)._terminals.launch = jest
+      .fn()
+      .mockResolvedValue({ id: 'term-fork' });
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation(
+      (_id: string, route: string, _settings: unknown, init: any) => {
+        if (route === 'branch') {
+          return forkPending;
+        }
+        if (route === 'switch') {
+          const body = JSON.parse(init.body);
+          return Promise.resolve({
+            requested: body.session_id,
+            current: body.session_id
+          });
+        }
+        return Promise.resolve({ sessions: [] });
+      }
+    );
+    try {
+      render(panel, [row]);
+      const branched = (panel as any)._branchSession();
+      await flush();
+
+      panel.node
+        .querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!
+        .click();
+      await flush();
+
+      releaseFork();
+      await flush();
+
+      releaseOpen();
+      await flush();
+      await branched;
+
+      const switches = request.mock.calls.filter(
+        ([, route]) => route === 'switch'
+      );
+      // The fork's own re-post goes first; the later row click outranks it
+      // and is the last write.
+      expect(
+        switches.map(call => JSON.parse((call[3] as any).body).session_id)
+      ).toEqual(['sid-fork', row.session_id]);
+    } finally {
+      releaseFork();
+      releaseOpen();
+      await flush();
+    }
+  });
+
+  it('a fork answer does not lower the number of a newer row switch', async () => {
+    // Row B posts its switch while the fork and row A are held. The fork's
+    // older number must not let row A's later answer through (DEF-PANE-349).
+    const first = session({
+      name: 'first',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared'
+    });
+    const second = session({
+      name: 'second',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared',
+      session_id: 'sid-second'
+    });
+    let releaseFork!: () => void;
+    const forkPending = new Promise<{ session_id: string }>(resolve => {
+      releaseFork = () => resolve({ session_id: 'sid-fork' });
+    });
+    let releaseFirst!: () => void;
+    const firstOpen = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    (panel as any)._activeSession = first;
+    (panel as any)._terminals.openSession = jest.fn((s: ISession) =>
+      s.session_id === first.session_id ? firstOpen : Promise.resolve()
+    );
+    (panel as any)._terminals.launch = jest
+      .fn()
+      .mockResolvedValue({ id: 'term-fork' });
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation(
+      (_id: string, route: string, _settings: unknown, init: any) => {
+        if (route === 'branch') {
+          return forkPending;
+        }
+        if (route === 'switch') {
+          const body = JSON.parse(init.body);
+          return Promise.resolve({
+            requested: body.session_id,
+            current: body.session_id
+          });
+        }
+        return Promise.resolve({ sessions: [] });
+      }
+    );
+    try {
+      render(panel, [first, second]);
+      const branched = (panel as any)._branchSession();
+      await flush();
+
+      const rows = panel.node.querySelectorAll<HTMLElement>(
+        '.jp-AiAssistantsPanel-row'
+      );
+      expect(rows).toHaveLength(2);
+      rows[0].click();
+      await flush();
+      // Row B opens at once and posts its switch while row A and the fork
+      // are still held.
+      rows[1].click();
+      await flush();
+
+      const switches = (): any[] =>
+        request.mock.calls.filter(([, route]) => route === 'switch');
+      expect(switches()).toHaveLength(1);
+      expect(JSON.parse((switches()[0][3] as any).body).session_id).toBe(
+        'sid-second'
+      );
+
+      releaseFork();
+      await flush();
+      releaseFirst();
+      await flush();
+      await branched;
+
+      // Row B's newer decision stands: the fork's late answer re-posts it
+      // after the fork's own pin write, and row A's older click stays
+      // suppressed.
+      expect(switches()).toHaveLength(2);
+      for (const call of switches()) {
+        expect(JSON.parse((call[3] as any).body).session_id).toBe('sid-second');
+      }
+    } finally {
+      releaseFork();
+      releaseFirst();
+      await flush();
+    }
+  });
+
+  it('a correction re-post that resolves late leaves the newest row switch as the last write', async () => {
+    // Round-8 MAJOR. Row B's switch is held, the fork answer queues the
+    // correction, and row C is clicked while B's write is still in flight.
+    // The correction and row C's click both wait on the project's chain, so
+    // the correction runs after B's write and carries the newest decision, C.
+    // Without the chain the correction is sent alongside C and its slower
+    // answer lands last, leaving the pin and the mtime lead on B while the
+    // panel records C as its newest decision.
+    const first = session({
+      name: 'first',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared'
+    });
+    const second = session({
+      name: 'second',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared',
+      session_id: 'sid-second'
+    });
+    const third = session({
+      name: 'third',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared',
+      session_id: 'sid-third'
+    });
+    let releaseFork!: () => void;
+    const forkPending = new Promise<{ session_id: string }>(resolve => {
+      releaseFork = () => resolve({ session_id: 'sid-fork' });
+    });
+    // The switch answers the test holds, in dispatch order: row B's click,
+    // then the correction, which runs only after B's write answers and posts
+    // the newest decision, C. Any later request answers at once.
+    const held: Array<{ sessionId: string; release: () => void }> = [];
+    // Session ids in the order the server answers each switch - the order its
+    // writes land, which is what decides the pin.
+    const completed: string[] = [];
+    (panel as any)._activeSession = first;
+    (panel as any)._terminals.openSession = jest
+      .fn()
+      .mockResolvedValue(undefined);
+    (panel as any)._terminals.launch = jest
+      .fn()
+      .mockResolvedValue({ id: 'term-fork' });
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation(
+      (_id: string, route: string, _settings: unknown, init: any) => {
+        if (route === 'branch') {
+          return forkPending;
+        }
+        if (route !== 'switch') {
+          return Promise.resolve({ sessions: [] });
+        }
+        const body = JSON.parse(init.body);
+        if (held.length >= 2) {
+          completed.push(body.session_id);
+          return Promise.resolve({
+            requested: body.session_id,
+            current: body.session_id
+          });
+        }
+        let release!: () => void;
+        const answer = new Promise<unknown>(resolve => {
+          release = () => {
+            completed.push(body.session_id);
+            resolve({ requested: body.session_id, current: body.session_id });
+          };
+        });
+        held.push({ sessionId: body.session_id, release });
+        return answer;
+      }
+    );
+    try {
+      render(panel, [first, second, third]);
+      const branched = (panel as any)._branchSession();
+      await flush();
+
+      const rows = panel.node.querySelectorAll<HTMLElement>(
+        '.jp-AiAssistantsPanel-row'
+      );
+      expect(rows).toHaveLength(3);
+
+      // Row B's click takes the project current and holds its write.
+      rows[1].click();
+      await flush();
+      // The fork answers while row B's write is in flight, so the correction
+      // is queued behind it.
+      releaseFork();
+      await flush();
+      // Row C is clicked while B's write is still in flight; its switch is
+      // queued behind the correction rather than sent alongside it.
+      rows[2].click();
+      await flush();
+
+      const switchIds = (): string[] =>
+        request.mock.calls
+          .filter(([, route]) => route === 'switch')
+          .map(call => JSON.parse((call[3] as any).body).session_id);
+      expect(switchIds()).toEqual(['sid-second']);
+      expect(held).toHaveLength(1);
+
+      // Row B's write answers, so the correction runs, posts the newest
+      // decision, C, and holds its own write.
+      held[0].release();
+      await flush();
+      expect(switchIds()).toEqual(['sid-second', 'sid-third']);
+      expect(held).toHaveLength(2);
+      expect(completed).toEqual(['sid-second']);
+      held[1].release();
+      await flush();
+      await branched;
+
+      // The newest decision, C, is the project's last write; row C's own
+      // queued task finds it already posted and sends nothing.
+      expect(completed).toEqual(['sid-second', 'sid-third']);
+      expect((panel as any)._currentTokens.get('enc-shared')).toEqual({
+        click: expect.any(Number),
+        sessionId: 'sid-third'
+      });
+    } finally {
+      releaseFork();
+      await flush();
+    }
+  });
+
+  it('re-posts the fork after a row switch that was in flight when the Branch answered', async () => {
+    // Mirror of the round-8 sequence. Row B's switch is already in flight when
+    // the Branch is pressed, so the fork route's pin write can land before
+    // row B's write. The fork is recorded as the newest decision and queued on
+    // the project's chain behind row B, so it is written again last; without
+    // the queue row B's late write leaves the pin on row B while the panel
+    // records the fork.
+    const first = session({
+      name: 'first',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared'
+    });
+    const second = session({
+      name: 'second',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared',
+      session_id: 'sid-second'
+    });
+    let releaseFork!: () => void;
+    const forkPending = new Promise<{ session_id: string }>(resolve => {
+      releaseFork = () => resolve({ session_id: 'sid-fork' });
+    });
+    // The first switch request is held - row B's - and any later one answers
+    // at once.
+    let releaseSwitch: (() => void) | undefined;
+    const completed: string[] = [];
+    (panel as any)._activeSession = first;
+    (panel as any)._terminals.openSession = jest
+      .fn()
+      .mockResolvedValue(undefined);
+    (panel as any)._terminals.launch = jest
+      .fn()
+      .mockResolvedValue({ id: 'term-fork' });
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation(
+      (_id: string, route: string, _settings: unknown, init: any) => {
+        if (route === 'branch') {
+          return forkPending;
+        }
+        if (route !== 'switch') {
+          return Promise.resolve({ sessions: [] });
+        }
+        const body = JSON.parse(init.body);
+        if (releaseSwitch) {
+          completed.push(body.session_id);
+          return Promise.resolve({
+            requested: body.session_id,
+            current: body.session_id
+          });
+        }
+        const answer = new Promise<unknown>(resolve => {
+          releaseSwitch = () => {
+            completed.push(body.session_id);
+            resolve({ requested: body.session_id, current: body.session_id });
+          };
+        });
+        return answer;
+      }
+    );
+    try {
+      render(panel, [first, second]);
+      const rows = panel.node.querySelectorAll<HTMLElement>(
+        '.jp-AiAssistantsPanel-row'
+      );
+      expect(rows).toHaveLength(2);
+
+      // Row B's click takes the project current and holds its write.
+      rows[1].click();
+      await flush();
+      // The Branch is pressed after it; the fork answers while row B's write
+      // is still in flight.
+      const branched = (panel as any)._branchSession();
+      await flush();
+      releaseFork();
+      await flush();
+      await branched;
+
+      const switchIds = (): string[] =>
+        request.mock.calls
+          .filter(([, route]) => route === 'switch')
+          .map(call => JSON.parse((call[3] as any).body).session_id);
+      // The fork's re-post waits behind row B's held write.
+      expect(switchIds()).toEqual(['sid-second']);
+      expect(completed).toEqual([]);
+
+      releaseSwitch!();
+      await flush();
+
+      // It lands last, with the fork id, and the fork stays the newest
+      // recorded decision.
+      expect(switchIds()).toEqual(['sid-second', 'sid-fork']);
+      expect(completed).toEqual(['sid-second', 'sid-fork']);
+      expect((panel as any)._currentTokens.get('enc-shared')).toEqual({
+        click: expect.any(Number),
+        sessionId: 'sid-fork'
+      });
+    } finally {
+      releaseFork();
+      releaseSwitch?.();
+      await flush();
+    }
+  });
+});
+
 describe('the Manage Sessions popup is handed the current row name', () => {
   it('slices the short id past the provider prefix, as the branch rows do', () => {
     const prefixed: IProviderDescriptor = {
@@ -2053,6 +2736,76 @@ describe('ACC-SESS-190..192 - opening a session moves the file browser', () => {
       await flush();
       other.dispose();
     }
+  });
+
+  it('DEF-PANE-343 - an open that finishes after the open of a later click does not move the file browser', async () => {
+    // The first click's open (hidden, in the real panel) finishes last.
+    let finishFirst!: () => void;
+    stubOpen(panel).mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishFirst = resolve;
+        })
+    );
+    const first = (panel as any)._openSession(nested());
+    const second = (panel as any)._openSession(session({ name: 'notes' }));
+    await second;
+    await flush();
+    const MOVE_TO_NOTES = [
+      GO_TO_PATH,
+      { path: 'notes', dontShowBrowser: true }
+    ];
+    expect(moves(panel)).toEqual([MOVE_TO_NOTES]);
+
+    finishFirst();
+    await first;
+    await flush();
+    expect(moves(panel)).toEqual([MOVE_TO_NOTES]);
+  });
+});
+
+describe('DEF-PANE-344 - the session list', () => {
+  it('drops a listing answer older than the one already drawn', async () => {
+    let answerFirst!: (answer: unknown) => void;
+    request
+      .mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            answerFirst = resolve;
+          })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({ sessions: [session({ name: 'newer' })] })
+      );
+    const first = (panel as any)._fetch();
+    await (panel as any)._fetch();
+    answerFirst({ sessions: [session({ name: 'older' })] });
+    await first;
+    expect((panel as any)._sessions.map((s: ISession) => s.name)).toEqual([
+      'newer'
+    ]);
+  });
+
+  it('DEF-PANE-346 - waits with a redraw while a button is pressed in the list, until the click has been sent', async () => {
+    const names = (): string[] =>
+      Array.from(
+        panel.node.querySelectorAll('.jp-AiAssistantsPanel-nameText')
+      ).map(el => el.textContent ?? '');
+    const firstRow = (): HTMLElement =>
+      panel.node.querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!;
+    render(panel, [session({ name: 'alpha' })]);
+    const row = firstRow();
+    row.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    // A listing answer lands between the press and the release.
+    render(panel, [session({ name: 'alpha' }), session({ name: 'beta' })]);
+    expect(firstRow()).toBe(row);
+    // The release, and the click it sends in the same task, still find the
+    // row the press was on.
+    document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(firstRow()).toBe(row);
+    await flush();
+    expect(firstRow()).not.toBe(row);
+    expect(names()).toContain('beta');
   });
 });
 

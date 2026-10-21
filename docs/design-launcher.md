@@ -27,12 +27,13 @@ The Launcher passes `args.cwd` (file browser Contents-API path, kept live by `pa
 - **Entry point** - `AssistantSessionsPanel.launchHere(cwd)`; the command in `src/index.ts` is a one-line delegate to it, because the root join, the listing fetch, the terminal reuse ladder and the resolved launch mode are all already the panel's
 - **Folder** - `cwd` joined onto `status.root_dir` exactly as `_currentFolder()` does in `src/core/panel.ts`; empty root → no launch
 - **Listing** - `GET providers/<id>/sessions` through the panel's own `_fetch` on EVERY click, never the cached rows: the poll that fills the cache stops while the panel is hidden, and the tile is clickable then; a row with `project_path === folder` means the folder has a conversation
-- **Resume** - row found → `TerminalManager.findForSession(row.session_id)`; a terminal already running it is activated and focused, no launch
+- **Resume** - row found → the terminal a panel or tile launch last opened for that conversation in the folder (`TerminalManager.cached`, before the server can read it off the new process), else `TerminalManager.findForSession(row.session_id)`; a terminal already running it is activated and focused, no launch. A tile launch is remembered the same way (`TerminalManager.remember`), so a row click after it reuses its terminal
 - **New** - no row → new session; id minted client-side with `UUID.uuid4()` when `descriptor.mintsNewSessionId`, otherwise the CLI mints it
 - **Mode** - `resolveLaunchMode(descriptor.launchModes, settings)` with no forced mode, the `+` button's default
 - **Argv** - one request to the new route below; the server owns `cli_path`, mode flag, resume verb and pin bookkeeping
 - **Terminal** - `commands.execute('basic-terminal:launch', { argv, cwd })`; the sibling extension exec's argv shell-less behind its own init waiter and resolves to the terminal widget
 - **Launcher tab** - the command returns that widget, so the Launcher closes and the terminal takes its place, as notebook tiles do
+- **Click order** - the path past the guards waits for every launch clicked before it: tile launches of every assistant, and this panel's opens, branches and new sessions; a panel launch clicked later waits for the tile. The terminal shown last is the newest click's, and a resume finds the terminal an earlier click opened instead of starting a second process on the conversation. Each wait ends after `REQUEST_TIMEOUT_MS` (60 s) at the latest (`DEF-PANE-345`)
 
 ## Launch argv route
 

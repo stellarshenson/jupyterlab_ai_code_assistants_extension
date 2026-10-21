@@ -34,7 +34,13 @@ test.use({ autoGoto: false, waitForApplication });
  * with no focus rim until the keyboard moves the focus
  * (ACC-PANE-217-FOCUS-OUTLINE). The ring turns under both motion preferences
  * (DEF-PANE-324). After Hide, the terminal opens behind the current tab and
- * the keyboard stays where the user is (DEF-PANE-339-HIDE-FOCUS).
+ * the keyboard stays where the user is (DEF-PANE-339-HIDE-FOCUS). The second
+ * click of the double-click that raised the dialog does not press Hide
+ * (DEF-PANE-342-HIDE-DBLCLICK), nor do the repeats of a key held on the row
+ * (DEF-PANE-347-HIDE-KEYREPEAT), and a list redraw during a row click does not
+ * take the click from the row (DEF-PANE-346-PRESS-REDRAW). Hide acts on its
+ * press, so a press on Hide released after the action completed still hides
+ * (DEF-PANE-348-LATE-HIDE).
  */
 
 const PANEL = `#${panelId('claude')}`;
@@ -733,4 +739,212 @@ test('a Hide after the terminal opened behind the dialog leaves it behind the cu
     inTerminal: false
   });
   release();
+});
+
+test('the second click of a double-click on Hide keeps the dialog, and a later click hides it', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // The launch answers only after the test, so the dialog stays up for the
+  // clicks below.
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route(LAUNCH_ROUTE, async (route: any) => {
+    await held;
+    await route.continue();
+  });
+
+  const target = row(page, await currentName(page, 'spinner-fixture'));
+  await expect(target).toBeVisible({ timeout: 15000 });
+
+  // Where Hide sits: the dialog of a first click, hidden by a single click.
+  await target.click();
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
+  const hideBox = (await page.locator(HIDE).boundingBox())!;
+  const hideX = hideBox.x + hideBox.width / 2;
+  const hideY = hideBox.y + hideBox.height / 2;
+  await page.mouse.click(hideX, hideY);
+  await expect(page.locator('.jp-Dialog')).toHaveCount(0);
+
+  // One press of detail 2 on Hide - `mouse.click` with a click count would
+  // press once per count, the first of detail 1.
+  const secondClickOnHide = async (): Promise<void> => {
+    await page.mouse.move(hideX, hideY);
+    await page.mouse.down({ clickCount: 2 });
+    await page.mouse.up({ clickCount: 2 });
+  };
+
+  // The row again, and at once a click of detail 2 on Hide: the second click
+  // of a double-click whose first click raised the dialog (DEF-PANE-342).
+  await target.click();
+  await secondClickOnHide();
+  await page.waitForTimeout(300);
+  await expect(page.locator(DIALOG)).toHaveCount(1);
+
+  // Past 600 ms from the raise, the same click hides the dialog.
+  await page.waitForTimeout(400);
+  await secondClickOnHide();
+  await expect(page.locator('.jp-Dialog')).toHaveCount(0);
+  release();
+});
+
+test('an Enter or Space held on a row does not press Hide', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route(LAUNCH_ROUTE, async (route: any) => {
+    await held;
+    await route.continue();
+  });
+
+  const target = row(page, await currentName(page, 'spinner-fixture'));
+  await expect(target).toBeVisible({ timeout: 15000 });
+  for (const key of ['Enter', ' ']) {
+    await target.focus();
+    await page.keyboard.down(key);
+    await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
+    // The repeats of the held key reach Hide, which has the focus
+    // (DEF-PANE-347).
+    for (let i = 0; i < 3; i += 1) {
+      await page.keyboard.down(key);
+    }
+    await page.keyboard.up(key);
+    await page.waitForTimeout(300);
+    await expect(page.locator(DIALOG)).toHaveCount(1);
+    // A fresh press hides the dialog.
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.jp-Dialog')).toHaveCount(0);
+  }
+  release();
+});
+
+test('a list redraw between the press and the release of a row click still opens the row', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route(LAUNCH_ROUTE, async (route: any) => {
+    await held;
+    await route.continue();
+  });
+
+  const target = row(page, await currentName(page, 'spinner-fixture'));
+  await expect(target).toBeVisible({ timeout: 15000 });
+  await target.hover();
+  await page.mouse.down();
+  // What a listing answer does to the rows: draw them again (DEF-PANE-346).
+  await page.evaluate((id: string) => {
+    const shell = (window as any).jupyterapp.shell;
+    const panel = [...shell.widgets('left'), ...shell.widgets('right')].find(
+      (widget: any) => widget.id === id
+    );
+    panel._render();
+  }, panelId('claude'));
+  await page.mouse.up();
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
+  release();
+});
+
+/** Open the spinner-fixture row with the launch route held, press Hide with
+ * `press`, let the launch answer, wait for its terminal, then `release` the
+ * press: Hide acts on the press, so the action stays hidden although the
+ * dialog would have closed on its own before the release (DEF-PANE-348). */
+async function hideStraddlingTheClose(
+  page: any,
+  press: (hide: any) => Promise<void>,
+  release: () => Promise<void>
+): Promise<void> {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  let answer!: () => void;
+  const held = new Promise<void>(resolve => {
+    answer = resolve;
+  });
+  await page.route(LAUNCH_ROUTE, async (route: any) => {
+    await held;
+    await route.continue();
+  });
+
+  const name = await currentName(page, 'spinner-fixture');
+  const target = row(page, name);
+  await expect(target).toBeVisible({ timeout: 15000 });
+  // The tab the user is on: the Launcher, once JupyterLab has activated it.
+  await expect
+    .poll(() => currentWidgetId(page), { timeout: 15000 })
+    .not.toBeNull();
+  const shown = await currentWidgetId(page);
+  const before = await terminalCount(page);
+  const launched = page.waitForRequest(LAUNCH_ROUTE, { timeout: 30000 });
+  await target.click();
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: SEEN_MS });
+  await launched;
+
+  await press(page.locator(HIDE));
+  answer();
+  await expect
+    .poll(() => terminalCount(page), { timeout: 30000 })
+    .toBe(before + 1);
+  await terminalRevealed(page);
+  await release();
+  await page.waitForTimeout(500);
+
+  // As after a Hide: the terminal is a tab behind the tab the user was on,
+  // and the keyboard is on the row the dialog came from.
+  expect(await terminalStanding(page)).toEqual({
+    tab: true,
+    visible: false,
+    current: false,
+    shown,
+    inTerminal: false
+  });
+  expect(
+    await page.evaluate(
+      () =>
+        document.activeElement
+          ?.closest('.jp-AiAssistantsPanel-row')
+          ?.querySelector('.jp-AiAssistantsPanel-nameText')?.textContent ?? null
+    )
+  ).toBe(name);
+}
+
+test('a press on Hide released after the action completed leaves the terminal behind the current tab', async ({
+  page
+}) => {
+  await hideStraddlingTheClose(
+    page,
+    async hide => {
+      await hide.hover();
+      await page.mouse.down();
+    },
+    () => page.mouse.up()
+  );
+});
+
+test('a Space pressed on Hide and released after the action completed leaves the terminal behind the current tab', async ({
+  page
+}) => {
+  await hideStraddlingTheClose(
+    page,
+    async hide => {
+      await expect(hide).toBeFocused();
+      await page.keyboard.down(' ');
+    },
+    () => page.keyboard.up(' ')
+  );
 });

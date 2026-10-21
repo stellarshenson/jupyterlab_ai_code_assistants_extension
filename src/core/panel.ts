@@ -147,6 +147,15 @@ export const MOVE_PANELS_COMMAND = 'ai-code-assistants:move-panels';
  * order the answers arrived, and the file browser could end on the session
  * opened first. */
 let fileBrowserMoves: Promise<void> = Promise.resolve();
+/** The session opens of every panel, numbered in click order, and the number
+ * of the newest one whose move ran. An open that finishes after the open of a
+ * later click does not move the file browser, so it ends on the folder of the
+ * newest click that opened (DEF-PANE-343). The same counter orders the writes
+ * that decide a project's current conversation: a row click, an explicit
+ * switch and a fork each take a number, and a row click posts its deferred
+ * switch only while it is the newest (DEF-PANE-349). */
+let openClicks = 0;
+let movedClick = 0;
 
 function loadExpanded(storageKey: string): Record<SectionKey, boolean> {
   try {
@@ -235,6 +244,8 @@ export class AssistantSessionsPanel extends Widget {
   }
 
   dispose(): void {
+    document.removeEventListener('pointerup', this._onRelease, true);
+    document.removeEventListener('pointercancel', this._onRelease, true);
     this._stopPolling();
     // Disabling a provider must leave its running terminals alive and only
     // drop the tint this panel applied.
@@ -487,7 +498,31 @@ export class AssistantSessionsPanel extends Widget {
     this._bodyEl = body;
     this._loadingEl = loading;
     this._errorEl = error;
+
+    // A row drawn again between the press and the release of a click loses
+    // the click: the browser sends it to the list the two rows share, not to
+    // the row (DEF-PANE-346). A redraw asked for while a button is pressed in
+    // the list waits until that click has been sent.
+    body.addEventListener('pointerdown', () => {
+      this._pressed = true;
+    });
+    document.addEventListener('pointerup', this._onRelease, true);
+    document.addEventListener('pointercancel', this._onRelease, true);
   }
+
+  /** The press in the list has ended. The click it sends is dispatched in the
+   * same task as this release, so the waiting redraw runs in the next one. */
+  private _onRelease = (): void => {
+    if (!this._pressed) {
+      return;
+    }
+    this._pressed = false;
+    window.setTimeout(() => {
+      if (this._redrawWaits && !this.isDisposed) {
+        this._render();
+      }
+    }, 0);
+  };
 
   /** Show / hide the filter input. Hiding also clears the active filter, so
    * the user never returns to an "invisible" filter narrowing the rows. */
@@ -675,6 +710,9 @@ export class AssistantSessionsPanel extends Widget {
   // ------------------------------------------------------------------- data
 
   private async _fetch(): Promise<void> {
+    // This request's place in the order. Requests answer in any order, and an
+    // answer older than the one already drawn is dropped (DEF-PANE-344).
+    const request = ++this._fetchSent;
     // `cache: 'no-store'` so a manual refresh always re-reads the server's
     // view rather than a possibly stale browser-cached response.
     const data = await requestProvider<ISessionsListResponse>(
@@ -683,6 +721,10 @@ export class AssistantSessionsPanel extends Widget {
       this._serverSettings,
       { cache: 'no-store' }
     );
+    if (request < this._fetchDrawn) {
+      return;
+    }
+    this._fetchDrawn = request;
     this._sessions = data.sessions ?? [];
     this._setInlineError(null);
     this._terminals.setSessions(this._sessions);
@@ -891,7 +933,8 @@ export class AssistantSessionsPanel extends Widget {
   private async _openSession(
     session: ISession,
     force?: string,
-    sessionId?: string
+    sessionId?: string,
+    makeCurrent = false
   ): Promise<void> {
     // The click's own feedback, raised before the terminal walk and the
     // launch - both can take seconds (DEF-PANE-318). The launch's title; the
@@ -900,17 +943,29 @@ export class AssistantSessionsPanel extends Widget {
       this._trans.__('Opening %1', this._descriptor.label),
       this._trans
     );
+    const click = ++openClicks;
+    const mode = this._launchMode(force);
     try {
-      await this._terminals.openSession(
-        session,
-        this._launchMode(force),
-        sessionId,
-        busy
+      await this._terminals.inClickOrder(() =>
+        this._terminals.openSession(session, mode, sessionId, busy)
       );
+      if (makeCurrent) {
+        // The row's own controls make that conversation the project's current
+        // one - the pin and the `claude -c` mtime lead (DEF-PANE-349). Not
+        // awaited: the open has succeeded, and the switch is not part of it.
+        // It carries this click's number, so a switch or fork made after this
+        // click wins even when this open finishes last. Other launches leave
+        // `claude -c` alone.
+        void this._switchBranch(session, session.session_id, click);
+      }
       // Not awaited: the open has succeeded, and the sync is not part of it.
-      fileBrowserMoves = fileBrowserMoves.then(() =>
-        this._moveFileBrowserTo(session)
-      );
+      fileBrowserMoves = fileBrowserMoves.then(() => {
+        if (click < movedClick) {
+          return;
+        }
+        movedClick = click;
+        return this._moveFileBrowserTo(session);
+      });
     } catch (err) {
       if (isResponseStatus(err, 404)) {
         Notification.error(
@@ -1018,9 +1073,11 @@ export class AssistantSessionsPanel extends Widget {
    * The tile's whole click path lives here rather than in `src/index.ts`
    * because every input it needs is already the panel's: the root join, the
    * listing fetch, the terminal reuse ladder and the settings-resolved launch
-   * mode. Nothing here retries and nothing is scheduled: a guard that refuses
-   * shows one notification and launches nothing, and a request that fails
-   * writes nothing.
+   * mode. Nothing here retries: a guard that refuses shows one notification
+   * and launches nothing, and a request that fails writes nothing. Past the
+   * guards the path waits for the tile launches of every assistant and the
+   * launches of this panel clicked before it, and every launch of any panel
+   * clicked after it waits for it (DEF-PANE-345).
    *
    * `cwd` is a Contents-API path, `''` for the root.
    */
@@ -1058,7 +1115,16 @@ export class AssistantSessionsPanel extends Widget {
       return undefined;
     }
     const folder = this._currentFolder(cwd);
+    return this._terminals.tileInClickOrder(() => this._launchIn(folder));
+  }
+
+  /** The tile's click path past its guards, run after the tile launches of
+   * every assistant and the launches of this panel clicked before it, and
+   * before every launch clicked after it (DEF-PANE-345). */
+  private async _launchIn(folder: string): Promise<any> {
     let argv: string[];
+    // The conversation the new terminal runs, when its id is known here.
+    let conversation: string | undefined;
     try {
       // Every click asks the server for the listing (ACC-LNCH-151). `_sessions`
       // is written by `_fetch` and by the optimistic remove in
@@ -1077,13 +1143,16 @@ export class AssistantSessionsPanel extends Widget {
         // The folder is required as well: a transcript re-homed into another
         // project keeps its id, and that terminal is not this folder's
         // (DEF-PANE-319).
-        const found = await this._terminals.findForSession(
-          row.session_id,
-          folder
-        );
+        // The terminal a launch before this click opened for it counts too,
+        // before the server can read the conversation off its process
+        // (DEF-PANE-345).
+        const found =
+          this._terminals.cached(folder, row.session_id) ??
+          (await this._terminals.findForSession(row.session_id, folder))
+            ?.widget;
         if (found) {
-          this._terminals.focus(found.widget);
-          return found.widget;
+          this._terminals.focus(found);
+          return found;
         }
       }
       const request: ILaunchRequest = {
@@ -1105,6 +1174,7 @@ export class AssistantSessionsPanel extends Widget {
         { method: 'POST', body: JSON.stringify(request) }
       );
       argv = answer.argv;
+      conversation = request.session_id ?? request.new_session_id;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // The binary went away after the panel docked. Named, because the
@@ -1130,10 +1200,14 @@ export class AssistantSessionsPanel extends Widget {
     // and the Launcher keeps its tab (ACC-LNCH-157 covers the success path
     // only).
     try {
-      return await this._app.commands.execute(BASIC_TERMINAL_LAUNCH, {
+      const widget = await this._app.commands.execute(BASIC_TERMINAL_LAUNCH, {
         argv,
         cwd: folder
       });
+      if (widget?.id) {
+        this._terminals.remember(folder, widget, conversation);
+      }
+      return widget;
     } catch (err) {
       this._notifyLaunchError('Could not open a terminal for this folder', err);
       return undefined;
@@ -1156,21 +1230,28 @@ export class AssistantSessionsPanel extends Widget {
     const existing = (this._sessions ?? []).find(
       s => s.project_path === projectPath
     );
+    // Raised on the click, not by the launch: the launch waits for a tile
+    // launch clicked before it (DEF-PANE-345).
+    const busy = beginSpinner(
+      this._trans.__('Opening %1', this._descriptor.label),
+      this._trans
+    );
+    const request: ILaunchRequest = {
+      project_path: projectPath,
+      encoded_path: existing?.encoded_path,
+      new_session_id: newId,
+      mode: this._launchMode(force)
+    };
     try {
-      await this._terminals.launch(
-        {
-          project_path: projectPath,
-          encoded_path: existing?.encoded_path,
-          new_session_id: newId,
-          mode: this._launchMode(force)
-        },
-        newId
+      await this._terminals.inClickOrder(() =>
+        this._terminals.launch(request, newId, busy)
       );
     } catch (err) {
       // Same shape as `_openSession` above - the `finally` refetches, so an
       // inline banner would not survive to be read.
       this._notifyLaunchError('Could not start a new session', err);
     } finally {
+      endSpinner(busy);
       void this._fetch().catch(() => undefined);
     }
   }
@@ -1190,8 +1271,11 @@ export class AssistantSessionsPanel extends Widget {
       this._trans.__('Branching %1 session', this._descriptor.label),
       this._trans
     );
+    const click = ++openClicks;
     try {
-      await this._branchByServerCopy(session, undefined, force, busy);
+      await this._terminals.inClickOrder(() =>
+        this._branchByServerCopy(session, undefined, force, busy, click)
+      );
     } finally {
       endSpinner(busy);
     }
@@ -1205,7 +1289,8 @@ export class AssistantSessionsPanel extends Widget {
     session: ISession,
     name: string | undefined,
     force: string | undefined,
-    spinner: number
+    spinner: number,
+    click = ++openClicks
   ): Promise<void> {
     // Let the parent's colour settle before the server reads it (DEF-74). The
     // server copies the store entry while minting the fork, so a colour picked
@@ -1239,6 +1324,31 @@ export class AssistantSessionsPanel extends Widget {
         }
       );
       minted = true;
+      // The fork route has already written the child's pin, so a row click
+      // still opening from before the Branch must not put the parent back
+      // (DEF-PANE-349). The number is the Branch click's: a row clicked after
+      // it outranks it and a row clicked before it stays suppressed. A newer
+      // click has already switched the project, and the fork's own writes
+      // landed after the user chose that conversation, so the correction is
+      // queued on the project's chain - forced, because that decision may
+      // already be marked posted - and it re-posts the newest decision after
+      // the fork's writes. Otherwise the guard stops a fork that answers
+      // after that later row's switch from lowering the recorded number.
+      const recorded = this._currentTokens.get(session.encoded_path);
+      if (recorded && recorded.click > click) {
+        void this._enqueueSwitch(session, true);
+      } else if (click > (recorded?.click ?? 0)) {
+        this._currentTokens.set(session.encoded_path, {
+          click,
+          sessionId: fork.session_id
+        });
+        // A switch post dispatched before this fork can still land after the
+        // fork route's pin write, so the fork is queued on the project's chain
+        // behind it and written again once that post settles. The chain reads
+        // the newest recorded decision when it runs, so a row clicked later
+        // still wins.
+        void this._enqueueSwitch(session, true);
+      }
       // No colour write here. `BranchHandler` already inherited it while
       // minting this fork, from a read taken server-side at request time -
       // strictly fresher than the click-time read this would repeat, and the
@@ -1384,8 +1494,62 @@ export class AssistantSessionsPanel extends Widget {
     return `Rename failed: ${err}`;
   }
 
-  /** Make another conversation the row's current one. */
+  /** Make another conversation the row's current one. `click` is the number
+   * of the action that asked: a row click carries the number it took when it
+   * was pressed, so when its open resolves after a newer row click, an
+   * explicit switch or a fork, it leaves that newer decision in place and
+   * posts nothing (DEF-PANE-349). The decision is posted through the project's
+   * chain, so its write lands after every switch enqueued before it. */
   private async _switchBranch(
+    session: ISession,
+    sessionId: string,
+    click = ++openClicks
+  ): Promise<void> {
+    if (click <= (this._currentTokens.get(session.encoded_path)?.click ?? 0)) {
+      return;
+    }
+    this._currentTokens.set(session.encoded_path, { click, sessionId });
+    await this._enqueueSwitch(session);
+  }
+
+  /** Queue a switch post for `session`'s project behind every post already
+   * queued for it, so the server receives the writes in the order the user
+   * acted and the last one to land is the newest decision (DEF-PANE-349).
+   *
+   * A task reads the newest recorded decision when it runs: a row click's
+   * task posts it only if no task has posted that click yet, so clicks that
+   * queue behind one another collapse to the newest. A fork correction is
+   * forced - the fork's own pin write landed after the last post, so the
+   * newest decision has to be written again even when it is already marked
+   * posted. A chain entry is removed when its last task settles. */
+  private _enqueueSwitch(session: ISession, force = false): Promise<void> {
+    const key = session.encoded_path;
+    const run = (this._switchChains.get(key) ?? Promise.resolve()).then(
+      async () => {
+        const newest = this._currentTokens.get(key);
+        if (!newest) {
+          return;
+        }
+        if (!force && this._postedClicks.get(key) === newest.click) {
+          return;
+        }
+        this._postedClicks.set(key, newest.click);
+        await this._postSwitch(session, newest.sessionId);
+      }
+    );
+    this._switchChains.set(key, run);
+    void run.then(() => {
+      if (this._switchChains.get(key) === run) {
+        this._switchChains.delete(key);
+      }
+    });
+    return run;
+  }
+
+  /** Post `sessionId` as the project's current conversation and report the
+   * outcome. Neither reads nor writes the project's token: the project's
+   * chain chooses the id from the recorded decision - see `_enqueueSwitch`. */
+  private async _postSwitch(
     session: ISession,
     sessionId: string
   ): Promise<void> {
@@ -1416,8 +1580,8 @@ export class AssistantSessionsPanel extends Widget {
         { autoClose: 4000 }
       );
     } finally {
-      // Best-effort refresh - never let a transient failure reject this
-      // fire-and-forget switch (callers do not await it).
+      // Best-effort refresh - never let a transient failure reject the switch:
+      // the user action that asked for it is fire-and-forget.
       await this._fetch().catch(() => undefined);
     }
   }
@@ -1538,6 +1702,11 @@ export class AssistantSessionsPanel extends Widget {
   }
 
   private _render(): void {
+    if (this._pressed) {
+      this._redrawWaits = true;
+      return;
+    }
+    this._redrawWaits = false;
     const sessions = this._sessions ?? [];
 
     // Capture scrollTop per section so a polling refresh does not reset the
@@ -1829,7 +1998,9 @@ export class AssistantSessionsPanel extends Widget {
       if (removing) {
         return;
       }
-      void this._openSession(session);
+      // The row's own controls also make the conversation current, rather
+      // than only opening it (DEF-PANE-349).
+      void this._openSession(session, undefined, undefined, true);
     });
     row.addEventListener('contextmenu', e => {
       e.preventDefault();
@@ -1878,7 +2049,9 @@ export class AssistantSessionsPanel extends Widget {
       if (e.key === 'Enter' || e.key === ' ') {
         // Space would scroll the list otherwise.
         e.preventDefault();
-        void this._openSession(session);
+        // The keyboard's row click, so it makes the conversation current
+        // exactly as the pointer's does (DEF-PANE-349).
+        void this._openSession(session, undefined, undefined, true);
         return;
       }
       // The two keyboard routes to a context menu. Anchored on the row's own
@@ -2848,12 +3021,34 @@ export class AssistantSessionsPanel extends Widget {
   /** The last branch listing fetched, and the project it belongs to. Read only
    * when this open's own fetch did not arrive in time. */
   private _branchCache: { path: string; data: IBranchesResponse } | null = null;
+  /** The number and session id of the newest action that decided each
+   * project's current conversation, by encoded path - see `_switchBranch`
+   * (DEF-PANE-349). The id is kept so a fork's late server writes can be
+   * corrected by re-posting the newer decision. */
+  private _currentTokens = new Map<
+    string,
+    { click: number; sessionId: string }
+  >();
+  /** The switch posts queued per project, by encoded path, and the click
+   * number each project's chain posted last - see `_enqueueSwitch`. A chain
+   * entry is removed when its last task settles; the posted number stays, so a
+   * later task can tell an already-posted decision from a new one. */
+  private _switchChains = new Map<string, Promise<void>>();
+  private _postedClicks = new Map<string, number>();
   private _activeSession: ISession | null = null;
   private _activeRowEl: HTMLElement | null = null;
   private _pollHandle: number | null = null;
   /** The poll's own in-flight tick. Only the poll reads it - an explicit
    * Refresh must always issue, however long the last poll is taking. */
   private _polling: Promise<void> | null = null;
+  /** Listing requests sent, and the number of the newest one drawn - see
+   * `_fetch`. */
+  private _fetchSent = 0;
+  private _fetchDrawn = 0;
+  /** A button is pressed in the list, and a redraw waits for its release -
+   * see `_onRelease`. */
+  private _pressed = false;
+  private _redrawWaits = false;
   private _presentationMode: PresentationMode = DEFAULT_PRESENTATION_MODE;
   private _recentLimit: number = DEFAULT_RECENT_LIMIT;
   private _modes: Record<string, boolean> = {};

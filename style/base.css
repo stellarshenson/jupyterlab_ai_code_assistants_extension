@@ -571,7 +571,7 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
 }
 
 /* The spinner dialog (src/core/terminals.ts): one JupyterLab Dialog, raised
-   on the click that starts a branch or an open, and by a launch, and retitled
+   when the user starts an open, a branch or a new session, and retitled
    while actions overlap. Compact, about halfway between JupyterLab's default
    dialog and the smallest card: a semi-bold title one step above the base
    UI size (JupyterLab's default is two), a 240px minimum width, a 28px button

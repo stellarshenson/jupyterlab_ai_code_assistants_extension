@@ -12,7 +12,10 @@ jest.mock('@jupyter/web-components', () => ({
   provideJupyterDesignSystem: () => ({ register: () => undefined })
 }));
 
-jest.mock('../core/request', () => ({ requestProvider: jest.fn() }));
+jest.mock('../core/request', () => ({
+  requestProvider: jest.fn(),
+  REQUEST_TIMEOUT_MS: 60_000
+}));
 
 import { Dialog } from '@jupyterlab/apputils';
 import { nullTranslator } from '@jupyterlab/translation';
@@ -488,5 +491,242 @@ describe('one spinner dialog (DEF-PANE-327-BUSY-MODAL-1)', () => {
     await flush();
     expect(spinners()).toHaveLength(0);
     expect(activated).toHaveBeenCalledWith(opened.id);
+  });
+
+  /** Press the dialog's Hide button. */
+  const hide = (): void =>
+    spinners()[0]
+      .querySelector<HTMLElement>('.jp-Dialog-footer .jp-Dialog-button')!
+      .click();
+
+  /** Hold every launch request until the returned function runs. */
+  const holdLaunches = (): (() => void) => {
+    const answer = request.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    request.mockImplementation(((...args: Parameters<typeof answer>) =>
+      args[1] === 'launch'
+        ? held.then(() => answer(...args))
+        : answer(...args)) as any);
+    return () => release();
+  };
+
+  it('lets a click that joins a hidden open decide its terminal: its dialog closing gives the keyboard, its Hide does not (DEF-PANE-341)', async () => {
+    for (const hideJoined of [false, true]) {
+      // A fresh manager each time, so no terminal from the run before is
+      // reused.
+      manager?.dispose();
+      manager = makeManager();
+      const activated = jest.spyOn((manager as any)._app.shell, 'activateById');
+      const release = holdLaunches();
+      const first = beginSpinner('Opening Testbed', trans);
+      let second: number | undefined;
+      try {
+        const firstOpen = manager.openSession(
+          session(),
+          undefined,
+          CURRENT,
+          first
+        );
+        await flush();
+        hide();
+        // The same row again while the hidden open still runs: a fresh
+        // dialog for this click, which joins the open in flight.
+        second = beginSpinner('Opening Testbed', trans);
+        const secondOpen = manager.openSession(
+          session(),
+          undefined,
+          CURRENT,
+          second
+        );
+        await flush();
+        if (hideJoined) {
+          hide();
+        }
+        release();
+        await Promise.all([firstOpen, secondOpen]);
+        // What `_openSession` does when each click's action settles.
+        endSpinner(first);
+        endSpinner(second);
+        await flush();
+        const opened = terminals[terminals.length - 1];
+        if (hideJoined) {
+          expect(activated).not.toHaveBeenCalled();
+        } else {
+          expect(activated).toHaveBeenCalledWith(opened.id);
+        }
+      } finally {
+        release();
+        endSpinner(first);
+        if (second !== undefined) {
+          endSpinner(second);
+        }
+      }
+    }
+  });
+
+  it('opens the conversation for the joining click when the open it joined fails (DEF-PANE-341)', async () => {
+    manager = makeManager();
+    const answer = request.getMockImplementation()!;
+    let refuse!: () => void;
+    const refused = new Promise<void>(resolve => {
+      refuse = resolve;
+    });
+    let attempts = 0;
+    request.mockImplementation(((...args: Parameters<typeof answer>) => {
+      if (args[1] !== 'launch') {
+        return answer(...args);
+      }
+      attempts += 1;
+      return attempts === 1
+        ? refused.then(() => {
+            throw new Error('launch refused');
+          })
+        : answer(...args);
+    }) as any);
+    const first = beginSpinner('Opening Testbed', trans);
+    const second = beginSpinner('Opening Testbed', trans);
+    try {
+      const firstOpen = manager.openSession(
+        session(),
+        undefined,
+        CURRENT,
+        first
+      );
+      const secondOpen = manager.openSession(
+        session(),
+        undefined,
+        CURRENT,
+        second
+      );
+      refuse();
+      await expect(firstOpen).rejects.toThrow('launch refused');
+      // As a click made after the failure: its own open, which succeeds.
+      await secondOpen;
+      expect(attempts).toBe(2);
+      expect(terminals).toHaveLength(1);
+    } finally {
+      refuse();
+      endSpinner(first);
+      endSpinner(second);
+    }
+  });
+
+  it('keeps the dialog through a multi-click on Hide within 600 ms of the raise, and hides on a later or a single click (DEF-PANE-342)', async () => {
+    // The raise happens at 1000 on the clock that event timestamps use.
+    const now = jest.spyOn(performance, 'now').mockReturnValue(1000);
+    /** A press on Hide or, once released, its click, at `timeStamp`. Hide
+     * acts on the press (DEF-PANE-348). */
+    const send = (type: string, detail: number, timeStamp: number): void => {
+      const event = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        detail
+      });
+      Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+      spinners()[0]
+        .querySelector('.jp-Dialog-footer .jp-Dialog-button')!
+        .dispatchEvent(event);
+    };
+    let action = beginSpinner('Opening Testbed', trans);
+    try {
+      await flush();
+      // The second click of the double-click that raised the dialog, whose
+      // click comes past the 600 ms.
+      send('mousedown', 2, 1599);
+      send('click', 2, 1605);
+      await flush();
+      expect(spinners()).toHaveLength(1);
+      // 600 ms after the raise, a press hides whatever its detail.
+      send('mousedown', 2, 1600);
+      await flush();
+      expect(spinners()).toHaveLength(0);
+
+      endSpinner(action);
+      action = beginSpinner('Opening Testbed', trans);
+      await flush();
+      // A single press hides at once.
+      send('mousedown', 1, 1100);
+      await flush();
+      expect(spinners()).toHaveLength(0);
+    } finally {
+      endSpinner(action);
+      now.mockRestore();
+    }
+  });
+
+  it('activates the terminal of a tile launch at once under the dialog of a later click (DEF-PANE-345)', async () => {
+    manager = makeManager();
+    const activated = jest.spyOn((manager as any)._app.shell, 'activateById');
+    // A click made after the tile launch, whose action waits behind it.
+    const later = beginSpinner('Opening Testbed', trans);
+    try {
+      await flush();
+      const widget = terminal('tile');
+      manager.focus(widget);
+      expect(activated).toHaveBeenCalledWith(widget.id);
+    } finally {
+      endSpinner(later);
+    }
+  });
+
+  it('ignores a repeated Enter on Hide, and hides on a fresh press (DEF-PANE-347)', async () => {
+    const action = beginSpinner('Opening Testbed', trans);
+    try {
+      await flush();
+      const press = (repeat: boolean): void => {
+        spinners()[0]
+          .querySelector('.jp-Dialog-footer .jp-Dialog-button')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: 'Enter',
+              repeat,
+              bubbles: true,
+              cancelable: true
+            })
+          );
+      };
+      // The repeats of the Enter held on the row that raised the dialog.
+      press(true);
+      await flush();
+      expect(spinners()).toHaveLength(1);
+      press(false);
+      await flush();
+      expect(spinners()).toHaveLength(0);
+    } finally {
+      endSpinner(action);
+    }
+  });
+});
+
+describe('launches in click order (DEF-PANE-345)', () => {
+  /** Settle every promise that is ready, without letting time pass. */
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 10; i += 1) {
+      await Promise.resolve();
+    }
+  };
+
+  it('holds an action clicked after a tile launch until that launch settles, for REQUEST_TIMEOUT_MS at most', async () => {
+    jest.useFakeTimers();
+    try {
+      manager = makeManager();
+      // A tile launch that never settles, then a panel action.
+      void manager.tileInClickOrder(() => new Promise<void>(() => undefined));
+      const run = jest.fn(() => Promise.resolve());
+      void manager.inClickOrder(run);
+      await settle();
+      expect(run).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(59_999);
+      await settle();
+      expect(run).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      await settle();
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

@@ -9,7 +9,7 @@ import { Widget } from '@lumino/widgets';
 import { ColourStore, effectiveColour, sessionForCwds } from './colour';
 import { DialogRenderer } from './dialogs';
 import { LOG_PREFIX } from './registry';
-import { requestProvider } from './request';
+import { REQUEST_TIMEOUT_MS, requestProvider } from './request';
 import {
   IColourChoice,
   ILaunchRequest,
@@ -104,7 +104,8 @@ function titleSpinner(dialog: Dialog<unknown>, title: string): void {
  * Hide does not abort the request - it only takes the app-wide scrim away, so
  * a stalled action cannot leave the user staring at a modal with no exit. If
  * the action later succeeds the terminal opens as a tab behind the current
- * one (DEF-PANE-339). */
+ * one (DEF-PANE-339), unless a later click on the same conversation joined
+ * the action - that click's own dialog then decides (DEF-PANE-341). */
 function showLaunchSpinner(
   title: string,
   trans: TranslationBundle
@@ -122,14 +123,72 @@ function showLaunchSpinner(
     body,
     // `Hide`, not `Cancel`. The button takes the scrim away and nothing else -
     // the request is already on the wire and the terminal will still open, as
-    // a tab behind the current one that does not take the keyboard. A button
-    // named Cancel that does not cancel is worse than no button.
+    // a tab behind the current one that does not take the keyboard, unless a
+    // later click on the same conversation joins the action (DEF-PANE-341). A
+    // button named Cancel that does not cancel is worse than no button.
     buttons: [Dialog.okButton({ label: trans.__('Hide') })],
     // Hide is the only exit: the second click of a double-click on the row
     // lands on the backdrop, and that is not a choice to hide (DEF-PANE-340).
     hasClose: false,
     renderer: spinnerRenderer
   });
+  // Hide acts on its press, as Enter does in the dialog's own keydown
+  // handler, not on the click: a press begun on Hide hides even when the
+  // action completes and closes the dialog before the release, which then
+  // sends no click (DEF-PANE-348). The second click of that double-click can
+  // land on Hide itself, and it is not a choice to hide either
+  // (DEF-PANE-342): a multi-click press within 600 ms of the raise is
+  // ignored. The mousedown carries the click count; a pointerdown's detail is
+  // 0 in Chromium. A later press hides whatever its detail, as a later click
+  // confirms the armed Delete (DEF-PANE-338).
+  const raisedAt = performance.now();
+  dialog.node.addEventListener(
+    'mousedown',
+    event => {
+      if (
+        event.button === 0 &&
+        (event.target as Element).closest('.jp-Dialog-button') &&
+        !(event.detail > 1 && event.timeStamp - raisedAt < 600)
+      ) {
+        // The focus stays where the close gives it back.
+        event.preventDefault();
+        dialog.resolve(0);
+      }
+    },
+    true
+  );
+  // A multi-click press decided on its mousedown, so its click does not reach
+  // the dialog's own click listener, which would hide. Registered before
+  // `launch()` attaches that listener, so it runs first.
+  dialog.node.addEventListener(
+    'click',
+    event => {
+      if (event.detail > 1) {
+        event.stopImmediatePropagation();
+      }
+    },
+    true
+  );
+  // The same for the keyboard: Hide takes the focus, so the repeats of an
+  // Enter or Space held on the row land on it, and a repeat is not a press
+  // (DEF-PANE-347). A fresh Space presses Hide on the keydown, as Enter does.
+  dialog.node.addEventListener(
+    'keydown',
+    event => {
+      if (event.repeat) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      } else if (
+        event.key === ' ' &&
+        (event.target as Element).closest('.jp-Dialog-button')
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        dialog.resolve(0);
+      }
+    },
+    true
+  );
   // Scopes the compact layout in base.css to this one dialog.
   dialog.addClass('jp-AiAssistantsPanel-spinnerDialog');
   titleSpinner(dialog, title);
@@ -148,22 +207,28 @@ function showLaunchSpinner(
 let spinnerDialog: Dialog<unknown> | null = null;
 let spinnerSeq = 0;
 const spinnerTitles = new Map<number, string>();
+/** The newest click that joined an open still running, keyed by the token
+ * the open began with (DEF-PANE-341). */
+const spinnerJoins = new Map<number, number>();
 
 /** Whether the user hid the dialog of `token`, an action still running. Hide
  * disposes the dialog, and an action begun after it raises a fresh dialog that
- * does not stand for the hidden one (DEF-PANE-339). */
+ * does not stand for the hidden one (DEF-PANE-339). An open that a later click
+ * joined answers for that click's dialog instead (DEF-PANE-341). */
 function spinnerHidden(token: number): boolean {
+  const newest = spinnerJoins.get(token) ?? token;
   return (
-    !spinnerDialog || spinnerDialog.isDisposed || !spinnerTitles.has(token)
+    !spinnerDialog || spinnerDialog.isDisposed || !spinnerTitles.has(newest)
   );
 }
 
 /** Show the spinner dialog for one action, or retitle the one already up so it
  * names the newest action. Pass the token to `endSpinner` when the action
  * settles. Hide disposes the dialog for the actions then running: they stay
- * hidden and keep no dialog up, and the next action raises a fresh one. The
- * launch inside a click passes the click's token to `launch()`, so a hidden
- * click's launch raises nothing. */
+ * hidden and keep no dialog up, and the next action raises a fresh one. An open
+ * that a later click joins follows that click's dialog instead (DEF-PANE-341).
+ * The launch inside a click passes the click's token to `launch()`, so a
+ * hidden click's launch raises nothing. */
 export function beginSpinner(title: string, trans: TranslationBundle): number {
   const token = ++spinnerSeq;
   if (!spinnerDialog || spinnerDialog.isDisposed) {
@@ -189,6 +254,23 @@ export function endSpinner(token: number): void {
   spinnerDialog?.dispose();
   spinnerDialog = null;
 }
+
+/** Settles when `promise` settles, or after REQUEST_TIMEOUT_MS - the bound
+ * every request of this extension has - whichever comes first. Never rejects. */
+function settledOrLate(promise: Promise<unknown>): Promise<void> {
+  return new Promise(resolve => {
+    const timer = window.setTimeout(resolve, REQUEST_TIMEOUT_MS);
+    const done = (): void => {
+      window.clearTimeout(timer);
+      resolve();
+    };
+    promise.then(done, done);
+  });
+}
+
+/** The Launcher tile launches of every assistant, settled when the one
+ * clicked last has settled (DEF-PANE-345). */
+let tileLaunches: Promise<void> = Promise.resolve();
 
 /**
  * Terminals for one provider: the reuse ladder, the launch call and the tab
@@ -256,6 +338,13 @@ export class TerminalManager {
    * Concurrent clicks on the SAME conversation attach to the in-flight
    * promise; a different conversation of the same project launches
    * independently, so branches open side by side.
+   *
+   * The open in flight then follows the newest click's `spinner`: when that
+   * click's dialog closes on its own the terminal takes the keyboard, and when
+   * the user hides it the terminal opens behind the current tab - the outcome
+   * of a click made after the open had finished (DEF-PANE-341). An open that
+   * fails is followed by the joining click's own open, as a click after the
+   * failure would be.
    */
   async openSession(
     session: ISession,
@@ -267,15 +356,57 @@ export class TerminalManager {
     const key = this._key(session.project_path, wanted);
     const inFlight = this._pending.get(key);
     if (inFlight) {
-      return inFlight;
+      if (inFlight.spinner !== undefined && spinner !== undefined) {
+        spinnerJoins.set(inFlight.spinner, spinner);
+      }
+      return inFlight.promise.catch(() =>
+        this.openSession(session, mode, sessionId, spinner)
+      );
     }
     const promise = this._doOpenSession(session, mode, wanted, spinner).finally(
       () => {
         this._pending.delete(key);
+        if (spinner !== undefined) {
+          spinnerJoins.delete(spinner);
+        }
       }
     );
-    this._pending.set(key, promise);
+    this._pending.set(key, { promise, spinner });
     return promise;
+  }
+
+  /**
+   * Run one launch action of this panel - an open, a branch or a new session -
+   * after every Launcher tile launch clicked before it (DEF-PANE-345).
+   *
+   * A tile terminal is opened and shown by JupyterLab's Launcher, outside the
+   * spinner dialog, so without this order the terminal shown last, and
+   * whether a resume found the tile's terminal or started a second process on
+   * the same conversation, depended on which request answered first. The
+   * panel's own actions need no order among themselves: the dialog is modal,
+   * and an action whose dialog the user hid never takes the tab - an open that
+   * a later click joins takes it for that click alone, when that click's own
+   * dialog closes on its own (DEF-PANE-341).
+   */
+  inClickOrder<T>(run: () => Promise<T>): Promise<T> {
+    const action = tileLaunches.then(run);
+    this._actions.add(action);
+    const drop = (): void => {
+      this._actions.delete(action);
+    };
+    action.then(drop, drop);
+    return action;
+  }
+
+  /** Run one Launcher tile launch after every launch clicked before it: the
+   * tile launches of every assistant and this panel's own actions. Each wait
+   * ends after REQUEST_TIMEOUT_MS at the latest, so a launch that never
+   * settles does not hold every later one (DEF-PANE-345). */
+  tileInClickOrder<T>(run: () => Promise<T>): Promise<T> {
+    const earlier = [tileLaunches, ...[...this._actions].map(settledOrLate)];
+    const launch = Promise.all(earlier).then(run);
+    tileLaunches = settledOrLate(launch);
+    return launch;
   }
 
   private async _doOpenSession(
@@ -286,9 +417,9 @@ export class TerminalManager {
   ): Promise<void> {
     // 1. Microcache - the most recent terminal of this project, reused only
     // when it carries the wanted conversation.
-    const cached = this._byProject.get(session.project_path);
-    if (cached && !cached.widget.isDisposed && cached.sessionId === wanted) {
-      this.focus(cached.widget, spinner);
+    const cached = this.cached(session.project_path, wanted);
+    if (cached) {
+      this.focus(cached, spinner);
       return;
     }
 
@@ -330,7 +461,9 @@ export class TerminalManager {
    * `spinner` is the token of the click this launch belongs to. The launch
    * joins that click's spinner instead of beginning its own, so the user sees
    * one dialog from the click to the terminal, and a click the user hid stays
-   * hidden and its terminal opens behind the current tab.
+   * hidden and its terminal opens behind the current tab - unless a later
+   * click joins the open this launch belongs to and that click's dialog closes
+   * on its own (DEF-PANE-341).
    */
   async launch(
     request: ILaunchRequest,
@@ -385,11 +518,7 @@ export class TerminalManager {
         left?.focus();
       }
       if (widget?.id) {
-        this._byProject.set(request.project_path, {
-          widget,
-          sessionId: tagSessionId
-        });
-        this._wireDisposal(request.project_path, widget);
+        this.remember(request.project_path, widget, tagSessionId);
         this.focus(widget, token);
       }
       return widget ?? null;
@@ -398,6 +527,25 @@ export class TerminalManager {
         endSpinner(own);
       }
     }
+  }
+
+  /** The terminal this manager last opened for `projectPath`, when it is
+   * still open and was opened for the conversation `sessionId`; else null. */
+  cached(projectPath: string, sessionId: string): any | null {
+    const cached = this._byProject.get(projectPath);
+    return cached && !cached.widget.isDisposed && cached.sessionId === sessionId
+      ? cached.widget
+      : null;
+  }
+
+  /** Remember `widget` as the newest terminal of `projectPath`, opened for
+   * the conversation `sessionId`. A launch is remembered before the server
+   * can read the conversation off the new process, so the next open of the
+   * same conversation - from a row or a Launcher tile - reuses this terminal
+   * instead of starting a second process on it (DEF-PANE-345). */
+  remember(projectPath: string, widget: any, sessionId?: string): void {
+    this._byProject.set(projectPath, { widget, sessionId });
+    this._wireDisposal(projectPath, widget);
   }
 
   /** Show the current widget's tab again. Opening a terminal selects its tab,
@@ -427,8 +575,13 @@ export class TerminalManager {
    * it, so the terminal is the last to take the focus.
    *
    * `spinner` is the token of the action that asked. When the user hid that
-   * action's dialog the terminal is left where it is, and so is a terminal
-   * waiting for the dialog the user then hides (DEF-PANE-339).
+   * action's dialog the terminal is left where it is - unless a later click
+   * joined the action and that click's dialog closes on its own
+   * (DEF-PANE-341) - and so is a terminal waiting for the dialog the user then
+   * hides (DEF-PANE-339). Without a token no dialog stands for the action - a
+   * Launcher tile launch, which runs before every action clicked after it - so
+   * the terminal is activated at once, and a dialog up for a later click
+   * decides after it (DEF-PANE-345).
    */
   focus(widget: any, spinner?: number): void {
     if (!widget || widget.isDisposed) {
@@ -437,7 +590,7 @@ export class TerminalManager {
     if (spinner !== undefined && spinnerHidden(spinner)) {
       return;
     }
-    if (spinnerDialog && !spinnerDialog.isDisposed) {
+    if (spinner !== undefined && spinnerDialog && !spinnerDialog.isDisposed) {
       spinnerDialog.disposed.connect(() => {
         // The dialog closes on its own only with its last action. Closed with
         // an action still running, the user hid it: the terminal is not
@@ -1113,8 +1266,15 @@ export class TerminalManager {
     { widget: any; sessionId?: string }
   > = new Map();
   // In-flight launches keyed per CONVERSATION, so two branches of one project
-  // open independently and concurrently.
-  private readonly _pending: Map<string, Promise<void>> = new Map();
+  // open independently and concurrently, each with the spinner token it began
+  // with.
+  private readonly _pending: Map<
+    string,
+    { promise: Promise<void>; spinner?: number }
+  > = new Map();
+  // This panel's launch actions still running, which a tile launch clicked
+  // after them waits for - see `inClickOrder`.
+  private readonly _actions: Set<Promise<unknown>> = new Set();
   private _sessions: ISession[] = [];
   private _colouredTabs = true;
   private _colourHandle: number | null = null;

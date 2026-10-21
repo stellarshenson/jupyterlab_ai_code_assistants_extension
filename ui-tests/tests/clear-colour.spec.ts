@@ -15,16 +15,19 @@ const SESSIONS =
   '/jupyterlab-ai-code-assistants-extension/providers/claude/sessions';
 const COLOURS =
   '/jupyterlab-ai-code-assistants-extension/providers/claude/colours';
+const SWITCH =
+  '/jupyterlab-ai-code-assistants-extension/providers/claude/switch';
 const TERMINAL =
   '/jupyterlab-ai-code-assistants-extension/providers/claude/terminal/';
 const CURRENT_TAB = '#jp-main-dock-panel .lm-TabBar-tab.lm-mod-current';
 
 /**
  * The branchy project's transcript directory name, once this test has read the
- * seeded listing. `/clear` gives the replacement a transcript of its own,
- * which would make it the project's current conversation for every later spec
- * file; the hook below removes it again so the seeded conversation stays
- * current and the fixtures those files compare against still hold.
+ * seeded listing. `/clear` gives the replacement a transcript of its own, and
+ * this test switches the project to it for the reopening below; the hook
+ * removes that transcript again, so the pin is dangling and recency keeps the
+ * seeded conversation current for every later spec file whose fixtures compare
+ * against it.
  */
 let branchyEncoding: string | null = null;
 
@@ -173,10 +176,17 @@ test('a /clear replacement inherits the cleared conversation colour', async ({
   // Same widget, same tint: the tab never lost the colour across `/clear`.
   expect(await currentTabColour(page)).toBe(parentTabColour);
 
-  // The replacement transcript is the project's current conversation, so the
-  // row that reopens the project names the replacement. The row's own colour
-  // field is Claude's transcript-recorded `/color`, which the replacement does
-  // not carry; its colour is the store entry proved above.
+  // The click made the cleared conversation the project's current one
+  // (DEF-PANE-349), so the replacement does not overtake it by recency: switch
+  // to the replacement, as the panel's switch action does, so the row that
+  // reopens the project names it. The row's own colour field is Claude's
+  // transcript-recorded `/color`, which the replacement does not carry; its
+  // colour is the store entry proved above.
+  const switched = await page.request.post(SWITCH, {
+    data: { encoded_path: branchyEncoding, session_id: childId }
+  });
+  expect(switched.ok()).toBe(true);
+  expect((await switched.json()).current).toBe(childId);
   await expect
     .poll(() => branchySession(page).then(session => session?.session_id), {
       timeout: 30000

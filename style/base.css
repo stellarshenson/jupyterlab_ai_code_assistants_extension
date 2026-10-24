@@ -713,6 +713,27 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   margin: 0 auto;
 }
 
+/* The two entries that delete history (Clean Up Parallel Sessions, Remove
+   from ...) carry this class from their command options. The glyph's
+   `jp-icon3` fill is theme-driven, so `color` alone would leave it grey. */
+.jp-AiAssistantsContextMenu-danger,
+.jp-AiAssistantsContextMenu-danger .jp-icon3[fill] {
+  color: var(--jp-error-color1);
+  fill: var(--jp-error-color1);
+}
+
+/* Active (pointer or keyboard): a filled error-colour row with inverse text,
+   because red on JupyterLab's active grey is below 3:1 in the dark theme.
+   `.lm-Menu-item` lifts it above JupyterLab's `.lm-Menu-item.lm-mod-active`. */
+.lm-Menu-item.jp-AiAssistantsContextMenu-danger.lm-mod-active {
+  background: var(--jp-error-color1);
+  color: var(--jp-ui-inverse-font-color1);
+}
+
+.lm-Menu-item.jp-AiAssistantsContextMenu-danger.lm-mod-active .jp-icon3[fill] {
+  fill: var(--jp-ui-inverse-font-color1);
+}
+
 /* ============================================================
    Manage Sessions popup - driven entirely by JupyterLab theme variables so a
    theme flip (light / dark / custom) restyles the whole screen at once. The

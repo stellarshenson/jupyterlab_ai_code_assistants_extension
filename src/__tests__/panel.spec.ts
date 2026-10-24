@@ -425,6 +425,28 @@ describe('DEF-45 - both destructive menu entries are marked alike', () => {
   });
 });
 
+describe('ACC-PANE-218 - the history-deleting entries carry the danger class', () => {
+  it('puts the class on cleanup-parallel and remove, and on no other entry', () => {
+    // base.css draws this class in --jp-error-color1; the menu item takes it
+    // from the command options.
+    const commands = (panel as any)._commands as CommandRegistry;
+    const marked = commands
+      .listCommands()
+      .filter(id => commands.className(id, {}) !== '');
+    expect(marked.sort()).toEqual(
+      [
+        commandId(DESCRIPTOR.id, 'cleanup-parallel'),
+        commandId(DESCRIPTOR.id, 'remove')
+      ].sort()
+    );
+    for (const id of marked) {
+      expect(commands.className(id, {})).toBe(
+        'jp-AiAssistantsContextMenu-danger'
+      );
+    }
+  });
+});
+
 describe('ACC-SESS-203 - automatic branch names', () => {
   it.each(['server-copy', 'server-native'] as const)(
     '%s requests a numbered name and resumes the returned child without a dialog',

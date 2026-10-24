@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [Unreleased]
+
+### Changed
+
+- The two entries of a session row's context menu that delete history, Clean Up Parallel Sessions and Remove from followed by the assistant's name, show their label and icon in JupyterLab's error colour (red) in the light and the dark theme; the entry under the pointer or the keyboard is a red row with its label and icon in the theme's inverse text colour; every other entry keeps its colour
+
 ## [1.2.236] - 2026-10-21
 
 ### Changed

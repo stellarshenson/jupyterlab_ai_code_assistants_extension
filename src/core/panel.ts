@@ -2485,6 +2485,8 @@ export class AssistantSessionsPanel extends Widget {
       // item beside an ordinary one (DEF-45). The sweep variant of the trash
       // glyph, because this one deletes several at once.
       icon: cleanupIcon,
+      // Both history-deleting entries draw in the error colour (base.css).
+      className: 'jp-AiAssistantsContextMenu-danger',
       isVisible: () => (active()?.extra_sessions ?? 0) > 0,
       execute: () => {
         const s = active();
@@ -2585,6 +2587,7 @@ export class AssistantSessionsPanel extends Widget {
     this._commands.addCommand(this._cmd('remove'), {
       label: `Remove from ${this._descriptor.label}`,
       icon: removeIcon,
+      className: 'jp-AiAssistantsContextMenu-danger',
       execute: () => {
         const s = active();
         if (s) {

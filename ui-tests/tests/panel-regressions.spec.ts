@@ -343,6 +343,72 @@ test('DEF-45 - both destructive context-menu entries carry a glyph', async ({
   await page.keyboard.press('Escape');
 });
 
+test('ACC-PANE-218 - the history-deleting entries are drawn in the error colour', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  for (const theme of ['JupyterLab Light', 'JupyterLab Dark']) {
+    await page.theme.setTheme(theme);
+    const menu = await openRowMenu(page, 'branchy');
+    // The token as the browser paints it, so the theme's hex and the
+    // computed rgb() compare equal.
+    const token = (name: string) =>
+      page.evaluate(name => {
+        const probe = document.createElement('span');
+        probe.style.color = `var(${name})`;
+        document.body.appendChild(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      }, name);
+    const error = await token('--jp-error-color1');
+    const inverse = await token('--jp-ui-inverse-font-color1');
+    const item = (label: string) =>
+      menu.locator('.lm-Menu-item', { hasText: label }).first();
+    const paint = (label: string) =>
+      item(label).evaluate((el: HTMLElement) => ({
+        label: getComputedStyle(el.querySelector('.lm-Menu-itemLabel')!).color,
+        icon: getComputedStyle(el.querySelector('.lm-Menu-itemIcon path')!).fill
+      }));
+    const danger = { label: error, icon: error };
+    const filled = { label: inverse, icon: inverse };
+
+    expect(await paint('Clean Up Parallel Sessions')).toEqual(danger);
+    expect(await paint('Remove from Claude Code')).toEqual(danger);
+    const neighbour = await paint('Open Terminal');
+    expect(neighbour.label).not.toBe(error);
+    expect(neighbour.icon).not.toBe(error);
+
+    // Active under the keyboard (ArrowUp from no selection takes the last
+    // entry), then under the pointer: a filled error-colour row with inverse
+    // label and glyph, while the other danger entry stays red.
+    await menu.press('ArrowUp');
+    await expect(item('Remove from Claude Code')).toHaveClass(/lm-mod-active/);
+    await expect(item('Remove from Claude Code')).toHaveCSS(
+      'background-color',
+      error
+    );
+    expect(await paint('Remove from Claude Code')).toEqual(filled);
+    expect(await paint('Clean Up Parallel Sessions')).toEqual(danger);
+    await item('Clean Up Parallel Sessions').hover();
+    await expect(item('Clean Up Parallel Sessions')).toHaveClass(
+      /lm-mod-active/
+    );
+    await expect(item('Clean Up Parallel Sessions')).toHaveCSS(
+      'background-color',
+      error
+    );
+    expect(await paint('Clean Up Parallel Sessions')).toEqual(filled);
+    expect(await paint('Remove from Claude Code')).toEqual(danger);
+
+    await menu.press('Escape');
+    await expect(menu).toBeHidden();
+  }
+  await page.theme.setTheme('JupyterLab Light');
+});
+
 test('DEF-55 - the cleanup dialog keeps a way out while the request is in flight', async ({
   page
 }) => {

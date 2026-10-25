@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.2.282] - 2026-10-25
+
+### Changed
+
+- The Clean Up Parallel Sessions confirmation shows a warning box when a parallel conversation it removes was active after the conversation it keeps, and states its hint in one short sentence of at most twelve words
+
+### Fixed
+
+- The live-conversation rule, and Clean Up's protection of the conversation a running terminal is on, now hold on every operating system, not only on Linux: where the process identity cannot be read, the live process id alone decides, as it did before the identity guard
+- The Clean Up Parallel Sessions confirmation carries an accessible name that follows its question, and its warning about a newer parallel conversation is announced when it appears
+- The Clean Up Parallel Sessions confirmation states that a refused trash move deletes permanently, instead of promising the trash with no mention of the permanent removal
+- The Clean Up Parallel Sessions confirmation says that nothing is left to clean up and refreshes the row when a second client has already cleaned the project, instead of disappearing with no message on a stale list; the outcome dialog is named and its message is announced
+
 ## [1.2.271] - 2026-10-25
 
 ### Changed

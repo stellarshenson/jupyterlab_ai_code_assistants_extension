@@ -18,3 +18,4 @@ docs/acc-crit-jupyterlab-ai-code-assistants.md
 # Prettier wants a five-space indent under a three-digit entry number, and the
 # journal format has four.
 .claude
+.agents

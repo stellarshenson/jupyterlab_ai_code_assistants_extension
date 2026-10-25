@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -2935,3 +2936,258 @@ def test_kimi_a_return_to_the_clicked_conversation_takes_the_row_back(kimi):
     assert store.resolve_current(KIMI_WD) == clicked
     assert store.list_sessions()[0]["session_id"] == clicked
     assert store.delete_branches(KIMI_WD, [clicked, new]) == [new]
+
+
+# ------------------------- a running terminal names the row's primary
+
+
+def _live_terminal_record(
+    root, session_id, *, pid=None, cwd=PROJECT_PATH, entrypoint="cli", age_ms=0
+):
+    """A ``sessions/<pid>.json`` for an interactive terminal on ``session_id``."""
+    sessions = root / claude_provider.SESSIONS_DIRNAME
+    sessions.mkdir(parents=True, exist_ok=True)
+    pid = os.getpid() if pid is None else pid
+    (sessions / f"{pid}.json").write_text(
+        json.dumps(
+            {
+                "pid": pid,
+                "sessionId": session_id,
+                "cwd": cwd,
+                "entrypoint": entrypoint,
+                "updatedAt": int(time.time() * 1000) - age_ms,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.fixture
+def claude_pid_identity(monkeypatch):
+    """Claim every fixture pid as Claude, the identity a live record needs.
+
+    The fixture's pid is the test process, which is not Claude; the store asks
+    ``process_comm`` whether the process at a record's pid is the assistant
+    before the record counts as a live terminal (DEF-SERV-359). A test that
+    needs a NON-Claude pid omits this fixture.
+    """
+    monkeypatch.setattr(claude_provider, "process_comm", lambda _pid: "claude")
+
+
+@pytest.mark.parametrize("snapshot", [False, True], ids=["legacy-pin", "snapshot-pin"])
+def test_claude_a_live_terminal_s_conversation_is_the_row_s_primary(
+    claude, claude_pid_identity, snapshot
+):
+    """DEF-SERV-352-CLEAR-PIN-2. ``/clear`` creates the new conversation and
+    moves the terminal onto it, and nothing rewrites the pin. A snapshot-less
+    pin - the shape every pin in the owner's state file has - used to keep the
+    abandoned conversation as the row's primary, and Clean Up kept that one and
+    deleted the conversation the terminal was in. The live conversation is
+    primary and no branch; the abandoned one is the branch Clean Up may take.
+    The new conversation is a metadata-only stub here: it has no message until
+    the next turn, and the terminal is already on it."""
+    store, root = claude
+    abandoned, live = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(root, [{"id": abandoned, "turns": 1}])
+    touch(project_dir / f"{abandoned}.jsonl", -600)
+    state.write_pin(
+        "claude", CLAUDE_ENCODED, abandoned, [abandoned] if snapshot else None
+    )
+    (project_dir / f"{live}.jsonl").write_text(
+        json.dumps({"type": "last-prompt", "lastPrompt": "hello"}) + "\n",
+        encoding="utf-8",
+    )
+    touch(project_dir / f"{live}.jsonl", -60)
+    _live_terminal_record(root, live)
+
+    assert store.resolve_current(CLAUDE_ENCODED) == live
+    row = store.list_sessions()[0]
+    assert row["session_id"] == live
+    assert row["extra_sessions"] == 1
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == live
+    assert [b["session_id"] for b in listing["branches"]] == [abandoned]
+    # Clean Up sends the branch ids; the live conversation must survive even a
+    # stale list that still names it.
+    assert store.delete_branches(CLAUDE_ENCODED, [abandoned, live]) == [abandoned]
+
+
+def test_claude_a_live_terminal_outranks_a_newer_conversation_stays_a_branch(
+    claude, claude_pid_identity
+):
+    """The live rule outranks the supersede scan and recency, and the branch
+    list excludes the live conversation even when it holds messages - the shape
+    that makes Clean Up's own list safe."""
+    store, root = claude
+    abandoned, live, newer = new_uuid(), new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [
+            {"id": abandoned, "turns": 1},
+            {"id": live, "turns": 1},
+            {"id": newer, "turns": 1},
+        ],
+    )
+    touch(project_dir / f"{abandoned}.jsonl", -900)
+    touch(project_dir / f"{live}.jsonl", -300)
+    touch(project_dir / f"{newer}.jsonl", -60)
+    state.write_pin("claude", CLAUDE_ENCODED, abandoned, [abandoned])
+    _live_terminal_record(root, live)
+
+    assert store.resolve_current(CLAUDE_ENCODED) == live
+    assert store.list_sessions()[0]["session_id"] == live
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == live
+    assert {b["session_id"] for b in listing["branches"]} == {abandoned, newer}
+    assert store.delete_branches(CLAUDE_ENCODED, [abandoned, live, newer]) == [
+        abandoned,
+        newer,
+    ]
+
+
+def test_claude_a_live_conversation_that_is_the_pin_outranks_a_newer_conversation(
+    claude,
+    claude_pid_identity,
+):
+    """The terminal runs the pinned conversation and a conversation created
+    after the pin holds a message. The live rule outranks the pin's supersede
+    snapshot: the row stays on the conversation the terminal is in and Clean Up
+    keeps it, instead of deleting it for the newer one."""
+    store, root = claude
+    live, newer = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(root, [{"id": live, "turns": 1}])
+    touch(project_dir / f"{live}.jsonl", -600)
+    # The pin carries the snapshot a row click writes.
+    state.write_pin("claude", CLAUDE_ENCODED, live, [live])
+    write_claude_tree(root, [{"id": newer, "turns": 1}])
+    touch(project_dir / f"{newer}.jsonl", -30)
+    _live_terminal_record(root, live)
+
+    assert store.resolve_current(CLAUDE_ENCODED) == live
+    assert store.list_sessions()[0]["session_id"] == live
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == live
+    assert [b["session_id"] for b in listing["branches"]] == [newer]
+    assert store.delete_branches(CLAUDE_ENCODED, [live, newer]) == [newer]
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"pid": 0},
+        {"entrypoint": "sdk-cli"},
+        {"cwd": "/home/lab/projects/elsewhere"},
+    ],
+    ids=["dead-pid", "sdk-cli", "other-project"],
+)
+def test_claude_a_record_that_is_not_a_live_terminal_leaves_resolution_alone(
+    claude, claude_pid_identity, record
+):
+    """Only a live interactive terminal OF THIS PROJECT claims the row. A dead
+    pid, a background/SDK record and a terminal in another project leave the
+    pin and recency deciding exactly as before."""
+    store, root = claude
+    pinned, other = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": pinned, "turns": 1}, {"id": other, "turns": 1}]
+    )
+    touch(project_dir / f"{pinned}.jsonl", -600)
+    touch(project_dir / f"{other}.jsonl", -60)
+    state.write_pin("claude", CLAUDE_ENCODED, pinned)
+    _live_terminal_record(root, other, **record)
+
+    assert store.resolve_current(CLAUDE_ENCODED) == pinned
+    state.clear_pin("claude", CLAUDE_ENCODED)
+    assert store.resolve_current(CLAUDE_ENCODED) == other
+
+
+def test_claude_every_live_terminal_s_conversation_is_excluded(
+    claude, claude_pid_identity
+):
+    """DEF-SERV-358. Two live terminals on different conversations of one
+    project: the newest is the row's primary and NEITHER is a branch or an
+    extra session, so Clean Up can delete neither. The older live conversation
+    used to be listed as a branch and removed out from under its terminal."""
+    store, root = claude
+    older, newer, other = new_uuid(), new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root,
+        [
+            {"id": older, "turns": 1},
+            {"id": newer, "turns": 1},
+            {"id": other, "turns": 1},
+        ],
+    )
+    touch(project_dir / f"{older}.jsonl", -900)
+    touch(project_dir / f"{newer}.jsonl", -300)
+    touch(project_dir / f"{other}.jsonl", -60)
+    state.write_pin("claude", CLAUDE_ENCODED, other)
+    _live_terminal_record(root, older, pid=os.getpid(), age_ms=5000)
+    _live_terminal_record(root, newer, pid=os.getppid())
+
+    assert store.resolve_current(CLAUDE_ENCODED) == newer
+    row = store.list_sessions()[0]
+    assert row["session_id"] == newer
+    assert row["extra_sessions"] == 1
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == newer
+    assert [b["session_id"] for b in listing["branches"]] == [other]
+    # Clean Up sends the branch ids; both live conversations must survive even
+    # a stale list that still names them.
+    assert store.delete_branches(CLAUDE_ENCODED, [older, newer, other]) == [other]
+    assert (project_dir / f"{older}.jsonl").is_file()
+    assert (project_dir / f"{newer}.jsonl").is_file()
+
+
+def test_claude_a_stale_record_on_a_reused_pid_leaves_the_pin_deciding(claude):
+    """DEF-SERV-359. Claude never prunes ``sessions/``, so a record left by a
+    dead process can name the pid an unrelated live process later gets. Only a
+    record whose process is Claude is a live terminal; the reused pid leaves
+    the pin, the branch list and Clean Up unchanged."""
+    store, root = claude
+    pinned, stale = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": pinned, "turns": 1}, {"id": stale, "turns": 1}]
+    )
+    touch(project_dir / f"{pinned}.jsonl", -600)
+    touch(project_dir / f"{stale}.jsonl", -60)
+    state.write_pin("claude", CLAUDE_ENCODED, pinned)
+    # The test process is alive and is not Claude: the reused-pid shape.
+    assert store.owns_pid(os.getpid()) is False
+    _live_terminal_record(root, stale)
+
+    assert store.resolve_current(CLAUDE_ENCODED) == pinned
+    row = store.list_sessions()[0]
+    assert row["session_id"] == pinned
+    assert row["extra_sessions"] == 1
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == pinned
+    assert [b["session_id"] for b in listing["branches"]] == [stale]
+    assert store.delete_branches(CLAUDE_ENCODED, [stale]) == [stale]
+
+
+def test_claude_off_linux_a_live_pid_alone_names_the_row(claude, monkeypatch):
+    """The identity guard is a Linux rule: ``/proc`` is what answers it, and
+    ``process_comm`` returns nothing anywhere else. Off Linux the pid-alive
+    rule is therefore the whole live rule: a running terminal's conversation
+    outranks the newer conversation recency would pick, and Clean Up keeps it
+    instead of deleting it."""
+    store, root = claude
+    live, newer = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": live, "turns": 1}, {"id": newer, "turns": 1}]
+    )
+    touch(project_dir / f"{live}.jsonl", -600)
+    touch(project_dir / f"{newer}.jsonl", -60)
+    # The test process is alive; on this host the identity read would answer
+    # for it, so the platform is the thing under test here.
+    _live_terminal_record(root, live)
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    assert store.resolve_current(CLAUDE_ENCODED) == live
+    row = store.list_sessions()[0]
+    assert row["session_id"] == live
+    listing = store.list_branches(CLAUDE_ENCODED)
+    assert listing["current"] == live
+    assert [b["session_id"] for b in listing["branches"]] == [newer]
+    assert store.delete_branches(CLAUDE_ENCODED, [live, newer]) == [newer]

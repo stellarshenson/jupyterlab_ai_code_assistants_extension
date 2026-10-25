@@ -29,6 +29,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -540,6 +541,125 @@ def _session_state_by_cwd(root: Path) -> dict[str, dict]:
     return by_cwd
 
 
+def _is_claude_process(pid: int) -> bool:
+    """Whether the process at ``pid`` is Claude Code, whichever distribution.
+
+    The native installer ships a binary whose comm is ``claude``, so the base
+    rule's comm match is exact for it and is checked first. The npm
+    distribution (``@anthropic-ai/claude-code``) runs ``cli.js`` under node,
+    whose comm is the runtime's, never ``claude`` - a comm match alone would
+    leave such a terminal unrecognised forever: no reuse after a reload, no
+    tab tint. For a node comm the argv decides, and the match is an argv
+    ELEMENT whose last path segment is ``claude`` - the bin symlink as invoked
+    - or that ends with the package's ``cli.js`` when node is called directly.
+    A script started inside a folder named ``claude`` is not claimed, because
+    the folder is only a prefix of the script's path; a bare argument that is
+    such a folder's path would be.
+
+    ``sessions/<pid>.json`` is keyed by whatever process held the pid when it
+    was written, and Claude never prunes the directory, so this is also the
+    guard that rejects a stale record whose pid an unrelated process reused
+    (DEF-SERV-359).
+    """
+    comm = process_comm(pid)
+    if comm == CLI_BINARY:
+        return True
+    if comm not in NODE_COMMS:
+        return False
+    cmdline = process_cmdline(pid)
+    if cmdline is None:
+        return False
+    return any(
+        arg.rsplit("/", 1)[-1] == CLI_BINARY
+        or arg.endswith("@anthropic-ai/claude-code/cli.js")
+        for arg in cmdline_args(cmdline)
+    )
+
+
+def _live_terminal_by_cwd(root: Path) -> dict[str, list[dict]]:
+    """Map ``cwd`` to every conversation a running terminal of it is on.
+
+    ``sessions/<pid>.json`` is written for every session Claude runs, but only
+    an interactive one is a terminal the user works in: an ``entrypoint`` of
+    ``cli``, or absent because the field postdates older records. ``sdk-cli``
+    is a background agent or an SDK run and must never take a row. A live pid,
+    a conversation id and a cwd are required - the caller decides whether that
+    cwd belongs to its project - and the process at the pid must be Claude:
+    the pid file outlives its process, so a stale record can name the pid an
+    unrelated process later gets (DEF-SERV-359). Every record is kept, because
+    one project can have several live terminals and every conversation they
+    run has to stay out of Clean Up (DEF-SERV-358).
+    """
+    by_cwd: dict[str, list[dict]] = {}
+    sessions_dir = root / SESSIONS_DIRNAME
+    if not sessions_dir.is_dir():
+        return by_cwd
+    for entry in sessions_dir.glob("*.json"):
+        data = load_json(entry)
+        if not isinstance(data, dict):
+            continue
+        # The cheap fields first: most records in this directory are agent
+        # runs, and ``pid_alive`` and the identity read are syscalls per record.
+        if data.get("entrypoint") not in (None, "cli"):
+            continue
+        session_id = data.get("sessionId")
+        if not is_safe_segment(session_id):
+            continue
+        cwd = data.get("cwd")
+        if not isinstance(cwd, str) or not cwd:
+            continue
+        pid = data.get("pid")
+        if not isinstance(pid, int) or isinstance(pid, bool) or not pid_alive(pid):
+            continue
+        # Where the identity read cannot answer, pid-alive is the only signal.
+        if sys.platform == "linux" and not _is_claude_process(pid):
+            continue
+        # Type-checked for the reason ``_session_state_by_cwd`` records: the
+        # value is compared, and a string here 500s the whole listing.
+        updated_at = data.get("updatedAt") or data.get("startedAt") or 0
+        if not isinstance(updated_at, (int, float)) or isinstance(updated_at, bool):
+            updated_at = 0
+        by_cwd.setdefault(cwd, []).append(
+            {"session_id": session_id, "updated_at": updated_at}
+        )
+    return by_cwd
+
+
+def _live_conversations(
+    live_by_cwd: dict[str, list[dict]], project_dir: Path
+) -> tuple[str | None, set[str]]:
+    """The conversations live terminals of ``project_dir`` run, and the newest.
+
+    A cwd at the project path or inside it belongs to the project, like every
+    other cwd test in this module; a terminal of a different project is
+    excluded twice over, by the cwd and by its transcript being filed under
+    that project's own directory. Several terminals for one project - the root
+    and a subfolder, or two windows on different conversations - are all
+    returned: the newest ``updatedAt`` is the row's primary, and every one of
+    them must stay out of the branch list and out of Clean Up, because
+    deleting the conversation a terminal is in loses the work it holds
+    (DEF-SERV-358).
+
+    A metadata-only stub counts: after ``/clear`` the new conversation has no
+    message until the next turn, and the terminal is already on it.
+    """
+    dirname = project_dir.name
+    best: tuple[float, str] | None = None
+    live: set[str] = set()
+    for cwd, records in live_by_cwd.items():
+        if _project_path_for_cwd(cwd, dirname) is None:
+            continue
+        for record in records:
+            session_id = record["session_id"]
+            if not (project_dir / f"{session_id}.jsonl").is_file():
+                continue
+            live.add(session_id)
+            updated_at = record["updated_at"]
+            if best is None or updated_at > best[0]:
+                best = (updated_at, session_id)
+    return (best[1] if best else None), live
+
+
 def _session_id_from_pidfile(pid: int) -> str | None:
     """The conversation Claude records for its own process at ``pid``.
 
@@ -980,7 +1100,11 @@ class ClaudeStore(SessionStore):
     # -- resolution ------------------------------------------------------
 
     def _resolve_latest(
-        self, project_dir: Path, index: dict | None, pinned: str | None
+        self,
+        project_dir: Path,
+        index: dict | None,
+        pinned: str | None,
+        live_by_cwd: dict[str, dict] | None = None,
     ) -> dict | None:
         """Pick a project's representative conversation, trusting the filesystem.
 
@@ -998,6 +1122,16 @@ class ClaudeStore(SessionStore):
         recency scan resumes. Once a conversation created after the pin holds a
         message, the pin is superseded and the recency scan ranks every
         transcript, the clicked one included (``state.pick_current``).
+
+        A conversation a running terminal of this project is on wins over both
+        (DEF-SERV-352-CLEAR-PIN-2). ``/clear`` creates the new conversation and
+        moves the terminal onto it, but nothing rewrites the pin, so pin and
+        recency both still answered the old one - and Clean Up, which keeps
+        this function's answer, deleted the conversation the user was working
+        in. The terminal's pid file is the only record that knows, so when it
+        names a conversation of this project that conversation is chosen, any
+        switch stamp on the abandoned one is released, and the pin resumes
+        deciding once no terminal runs another conversation.
 
         A pin whose transcript records a cwd that does not encode to this
         directory is HONOURED. The cwd check below ranks unpinned transcripts,
@@ -1024,6 +1158,17 @@ class ClaudeStore(SessionStore):
             return None
         jsonls.sort(key=_mtime, reverse=True)
         dirname = project_dir.name
+
+        # The terminal's conversation outranks the pin and recency - also when
+        # it IS the pin: a plain id drops the pin's ``known`` snapshot, so a
+        # newer conversation cannot supersede the terminal. Release the stamp
+        # only when the terminal has left the pinned one; it is thirty days
+        # ahead and would keep `claude -c` on the conversation it left.
+        live, _ = _live_conversations(live_by_cwd or {}, project_dir)
+        if live:
+            if live != pinned:
+                self.release_switch(dirname)
+            pinned = live
 
         # A conversation created after the pin supersedes it: the pin stops
         # deciding and the unpinned ranking below runs over every transcript
@@ -1130,6 +1275,8 @@ class ClaudeStore(SessionStore):
 
         pins = state.load_state(self.provider_id)["pins"]
         states = _session_state_by_cwd(claude_dir())
+        # One terminal scan per poll, shared by every row.
+        live_by_cwd = _live_terminal_by_cwd(claude_dir())
         # One lookup per poll, shared by every row - and this poll IS what keeps
         # the snapshot fresh for the cache-served branches path.
         bg_owned = _bg_agents_refresh()
@@ -1140,9 +1287,10 @@ class ClaudeStore(SessionStore):
                 continue
             index = load_json(project_dir / INDEX_FILENAME)
             pinned = pins.get(project_dir.name) or _read_legacy_pin(project_dir)
-            latest = self._resolve_latest(project_dir, index, pinned)
+            latest = self._resolve_latest(project_dir, index, pinned, live_by_cwd)
             if latest is None:
                 continue
+            _live, live_ids = _live_conversations(live_by_cwd, project_dir)
 
             # ``_resolve_latest`` already picked the cwd consistent with this
             # directory's name when one exists, so its ``projectPath`` is
@@ -1193,7 +1341,9 @@ class ClaudeStore(SessionStore):
                 "extra_sessions": sum(
                     1
                     for p in project_dir.glob("*.jsonl")
-                    if p.stem != session_id and _has_conversation(p)
+                    if p.stem != session_id
+                    and p.stem not in live_ids
+                    and _has_conversation(p)
                 ),
                 "remote_control": bool(session_state.get("remote_control")),
                 # The conversation's own ``/color``, already read from the tail
@@ -1246,12 +1396,17 @@ class ClaudeStore(SessionStore):
         if project_dir is None:
             return None
         index = load_json(project_dir / INDEX_FILENAME)
+        live_by_cwd = _live_terminal_by_cwd(claude_dir())
         latest = self._resolve_latest(
-            project_dir, index, self._pin(encoded_path, project_dir)
+            project_dir,
+            index,
+            self._pin(encoded_path, project_dir),
+            live_by_cwd,
         )
         if latest is None:
             return None
         current = latest.get("sessionId")
+        _live, live_ids = _live_conversations(live_by_cwd, project_dir)
 
         summaries: dict[str, str] = {}
         if isinstance(index, dict):
@@ -1264,11 +1419,16 @@ class ClaudeStore(SessionStore):
         # Metadata-only transcripts are the shape Claude writes while a fork
         # or bridge session is being created, not conversations, so they are no
         # branches. The current conversation is exempt whatever its shape: the
-        # row already names it, and this path must not second-guess that.
+        # row already names it, and this path must not second-guess that. Every
+        # conversation a live terminal of this project runs is exempt too - a
+        # terminal's conversation is not a branch Clean Up may take
+        # (DEF-SERV-358).
         jsonls = [
             p
             for p in project_dir.glob("*.jsonl")
-            if p.stem != current and _has_conversation(p)
+            if p.stem != current
+            and p.stem not in live_ids
+            and _has_conversation(p)
         ]
         jsonls.sort(key=_activity_ms, reverse=True)
         bg_owned = bg_agents_cached() if include_extras else {}
@@ -1291,16 +1451,25 @@ class ClaudeStore(SessionStore):
             "branches": branches,
         }
 
-    def resolve_current(self, encoded_path: str) -> str | None:
-        project_dir = self._project_dir(encoded_path)
-        if project_dir is None:
-            return None
+    def _current(
+        self, encoded_path: str, project_dir: Path, live_by_cwd: dict[str, list[dict]]
+    ) -> str | None:
+        """The project's current conversation, from one terminal scan."""
         latest = self._resolve_latest(
             project_dir,
             load_json(project_dir / INDEX_FILENAME),
             self._pin(encoded_path, project_dir),
+            live_by_cwd,
         )
         return latest.get("sessionId") if latest else None
+
+    def resolve_current(self, encoded_path: str) -> str | None:
+        project_dir = self._project_dir(encoded_path)
+        if project_dir is None:
+            return None
+        return self._current(
+            encoded_path, project_dir, _live_terminal_by_cwd(claude_dir())
+        )
 
     def switch(self, encoded_path: str, session_id: str) -> dict | None:
         """Make ``session_id`` the project's current conversation.
@@ -1439,11 +1608,13 @@ class ClaudeStore(SessionStore):
     def delete_branches(
         self, encoded_path: str, session_ids: list, to_trash: bool = False
     ) -> list[str] | None:
-        """Drop the named conversations, never the current one.
+        """Drop the named conversations, never the current or a live one.
 
         Per item, so one unwritable transcript costs its own conversation and
         not the rest of the selection - and the id is left out of the answer,
-        which is what keeps the survivor's stored colour.
+        which is what keeps the survivor's stored colour. One terminal scan
+        keeps the row's primary AND every other live conversation of the
+        project, whatever a stale branch list names (DEF-SERV-358).
         """
         if not isinstance(session_ids, list) or not session_ids:
             return None
@@ -1452,11 +1623,17 @@ class ClaudeStore(SessionStore):
         project_dir = self._project_dir(encoded_path)
         if project_dir is None:
             return None
-        keep = self.resolve_current(encoded_path)
+        live_by_cwd = _live_terminal_by_cwd(claude_dir())
+        keep = self._current(encoded_path, project_dir, live_by_cwd)
+        _live, live_ids = _live_conversations(live_by_cwd, project_dir)
         removed: list[str] = []
         for sid in session_ids:
             # Already gone was removed by someone else, silently.
-            if sid == keep or not (project_dir / f"{sid}.jsonl").is_file():
+            if (
+                sid == keep
+                or sid in live_ids
+                or not (project_dir / f"{sid}.jsonl").is_file()
+            ):
                 continue
             try:
                 self._dispose_conversation(project_dir, sid, to_trash)
@@ -1672,31 +1849,11 @@ class ClaudeStore(SessionStore):
     def owns_pid(self, pid: int) -> bool:
         """Whether the process at ``pid`` is Claude Code, whichever distribution.
 
-        The native installer ships a binary whose comm is ``claude``, so the
-        base rule's comm match is exact for it and is checked first. The npm
-        distribution (``@anthropic-ai/claude-code``) runs ``cli.js`` under
-        node, whose comm is the runtime's, never ``claude`` - a comm match
-        alone would leave such a terminal unrecognised forever: no reuse after
-        a reload, no tab tint. For a node comm the argv decides, and the match
-        is an argv ELEMENT whose last path segment is ``claude`` - the bin
-        symlink as invoked - or that ends with the package's ``cli.js`` when
-        node is called directly. A script started inside a folder named
-        ``claude`` is not claimed, because the folder is only a prefix of the
-        script's path; a bare argument that is such a folder's path would be.
+        One identity guards both the terminal probe and the pid-file scan:
+        ``sessions/<pid>.json`` can outlive its process, so a live record and
+        an opened terminal must answer it the same way.
         """
-        comm = process_comm(pid)
-        if comm == self.comm_name:
-            return True
-        if comm not in NODE_COMMS:
-            return False
-        cmdline = process_cmdline(pid)
-        if cmdline is None:
-            return False
-        return any(
-            arg.rsplit("/", 1)[-1] == CLI_BINARY
-            or arg.endswith("@anthropic-ai/claude-code/cli.js")
-            for arg in cmdline_args(cmdline)
-        )
+        return _is_claude_process(pid)
 
     def parse_session_id(self, cmdline: bytes) -> str | None:
         """The conversation a Claude cmdline is running, from its flags.

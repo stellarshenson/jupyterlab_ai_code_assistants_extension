@@ -683,6 +683,35 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   color: var(--jp-error-color1);
 }
 
+/* The cleanup confirmation's question, hint, caution and warning. The warning
+   box is separate from the body text because it answers one question - is a
+   conversation this removal deletes newer than the one kept? - and it uses the
+   warning colour, not the error colour: the removal is still the user's call.
+   The tint is mixed with the surface colour, so both themes keep the text
+   readable. */
+.jp-AiAssistantsPanel-cleanupConfirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 440px;
+}
+
+.jp-AiAssistantsPanel-cleanupConfirm p {
+  margin: 0;
+}
+
+.jp-AiAssistantsPanel-cleanupWarning {
+  padding: 6px 8px;
+  border-left: 3px solid var(--jp-warn-color1);
+  border-radius: 2px;
+  background: color-mix(
+    in srgb,
+    var(--jp-warn-color1) 12%,
+    var(--jp-layout-color1)
+  );
+  color: var(--jp-ui-font-color1);
+}
+
 .jp-AiAssistantsPanel-row.jp-mod-busy {
   opacity: 0.55;
   pointer-events: none;

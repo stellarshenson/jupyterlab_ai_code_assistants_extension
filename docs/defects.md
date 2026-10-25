@@ -184,6 +184,14 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - log: 2026-10-24T20:42:18Z @kj closed: closed: fixed: a conversation created after the pin supersedes it in the row, Clean Up, Manage Sessions and claude -c
   - log: 2026-10-24T21:31:16Z @kj regressed as DEF-SERV-352-CLEAR-PIN-1
   - log: 2026-10-24T21:31:39Z @kj refinement in DEF-SERV-352-CLEAR-PIN-1: once a later conversation supersedes the pin, the pin stops deciding and recency ranks every conversation, the meaning clear_pin gives supersedes
+  - log: 2026-10-25T02:46:52Z @kj regressed as DEF-SERV-352-CLEAR-PIN-2
+- [x] `DEF-SERV-352-CLEAR-PIN-2` **The /clear replacement is not the row's top session** - CRITICAL; after Claude Code /clear the new conversation is current, but the project's panel row keeps the earlier conversation as its primary, so the row's name and order and Clean Up describe the wrong conversation and Clean Up removes the active one; the active conversation must be the row's top
+  - evidence: pytest test_provider_stores.py 129 passed incl. live-equals-pin; M1 round-1 conditional reddens only it (1 failed/128), M2 live rule severed reddens 4 live cases (4 failed/125); verifier repro 40/40; make install 1.2.275 byte-identical; make test Jest 425, pytest 415, Galata 96/96, lint and pm check exit 0
+  - root-cause: 2026-10-25T03:59:04Z @kj resolve_current ranked only the pin and transcript recency and read no live session id; a pin with no known snapshot (all 22 on the owner's store, from a pre-snapshot server) was accepted unconditionally, so after /clear the earlier conversation stayed primary and Clean Up deleted the conversation the terminal ran
+  - repro: run /clear in a Claude Code terminal of the project; the new conversation is current while the panel row still shows the earlier conversation as its primary; Clean Up lists the active conversation among the extras
+  - log: 2026-10-25T02:46:52Z @kj regression of DEF-SERV-352-CLEAR-PIN: owner reports: after Claude Code /clear the new conversation is current but is not the row's top (primary) session; the active session must be top; reason: regression of the supersede rule on the owner's live project
+  - log: 2026-10-25T02:47:07Z @kj edited title "Clean Up deletes the conversation continued after /clear" -> "The /clear replacement is not the row's top session"; text "after a row click, a /clear or a conversation started by hand leaves the row on the clicked conversation, so Clean Up Parallel Sessions or Manage Sessions delete the one the user continued in; a row click whose switch lands after New Session (+) does the same; fix: a conversation created after the pin supersedes it; `core/state.py`" -> "after Claude Code /clear the new conversation is current, but the project's panel row keeps the earlier conversation as its primary, so the row's name and order and Clean Up describe the wrong conversation and Clean Up removes the active one; the active conversation must be the row's top"; repro added "run /clear in a Claude Code terminal of the project; the new conversation is current while the panel row still shows the earlier conversation as its primary; Clean Up lists the active conversation among the extras"
+  - log: 2026-10-25T03:59:06Z @kj closed: the live terminal's conversation outranks the pin, its snapshot and recency, so the /clear replacement is the row primary and Clean Up keeps it
 - [x] `DEF-SERV-352-CLEAR-PIN-1` **Clean Up deletes the clicked conversation after a return to it** - CRITICAL; after a row click and a turn in a later conversation, a return to the clicked one leaves the row on the later one, so Clean Up or Manage Sessions delete the clicked conversation while in use; fix: a superseded pin stops deciding and recency ranks every conversation; `core/state.py`
   - evidence: pytest return-to-clicked cases for Claude and Kimi green, each red under the fresh-only line; scratch claude 2.1.310 /clear, turn, resume X, turn: row, resolve_current and claude -c all X; Jest 418, pytest 401, Galata 95/95, lint:check 0 at 1.2.263
   - related: DEF-FRONT-222
@@ -204,6 +212,25 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - log: 2026-10-24T22:27:36Z @kj added
   - log: 2026-10-24T22:27:40Z @kj reported: round-3 residual named in the round-4 review state (fork in flight, then +); the r3-3 empty-id guard leaves the client nothing to post, and no route clears a pin; timing-dependent, so fixed, not logged
   - log: 2026-10-24T23:39:26Z @kj closed
+- [x] `DEF-SERV-358-LIVE-SET` **Clean Up deletes a live conversation when the project has two live terminals** - CRITICAL; _live_terminal_by_cwd keeps only the newest record per cwd, so with two live terminals the older live conversation is a branch; delete_branches keeps only the resolved current, so Clean Up deletes the conversation the second terminal runs; owner's store: pid 586899 on 8436bec4, pid 633023 on b44a523d, both /home/lab/workspace
+  - evidence: New pytest test_claude_every_live_terminal_s_conversation_is_excluded (two live records on different conversations: both excluded from branches, neither deleted, newest primary); severing _live_conversations reddened exactly it (1 failed/130 passed); provider file 131 passed; make test EXIT 0 (Jest 425, pytest 417); make install 1.2.276 with wheel byte-identical; Galata 96 passed; lint EXIT 0.
+  - root-cause: 2026-10-25T04:29:57Z @kj _live_terminal_by_cwd kept only the newest record per cwd and delete_branches kept only the resolved current, so a project with two live terminals listed the older live conversation as a parallel session and deleted its transcript; the live rule modelled a project as having one terminal.
+  - repro: scratch store: two alive session records on different conversations of one project; Clean Up counts the older live conversation as a parallel session and deletes its transcript
+  - log: 2026-10-25T04:00:26Z @kj added
+  - log: 2026-10-25T04:30:02Z @kj closed: Every conversation a live terminal of the project runs is excluded from list_branches, delete_branches and extra_sessions; the newest live one by updatedAt is the row's primary.
+- [x] `DEF-SERV-359-STALE-PID` **A stale sessions record whose pid a non-Claude process reused fires the live rule** - MAJOR; _live_terminal_by_cwd accepts any alive pid, so a stale sessions record whose pid an unrelated process reused makes that dead conversation the row's primary, outranking the pin and Clean Up's keep set; no collision is alive today, so the failure is latent until a reboot reassigns the pid
+  - evidence: New pytest test_claude_a_stale_record_on_a_reused_pid_leaves_the_pin_deciding (record names the live pytest pid, owns_pid false: pin decides row and current, branches [stale], delete_branches([stale]) = [stale]); severing the identity skip reddened exactly it (1 failed/130 passed); make test EXIT 0 (Jest 425, pytest 417); make install 1.2.276; Galata 96 passed; lint EXIT 0.
+  - root-cause: 2026-10-25T04:29:59Z @kj the live scan trusted pid_alive alone, so a stale sessions/<pid>.json whose pid an unrelated process reused counted as a live terminal and outranked the pin; the module already had the comm/argv identity guard for pid reuse but the scan never called it.
+  - repro: scratch store: a month-old sessions record whose pid belongs to a live non-Claude process, plus a pinned conversation; resolve_current returns the stale conversation instead of the pin
+  - log: 2026-10-25T04:00:31Z @kj added
+  - log: 2026-10-25T04:30:05Z @kj closed: A record is a live terminal only when its pid is alive and the process at it is the assistant CLI (comm claude, or node with a claude argv element); a live pid owned by another process leaves the pin deciding.
+- [x] `DEF-SERV-360-LIVE-PLATFORM` **The live-terminal identity guard rejects every session record off Linux** - MAJOR; process_comm answers None on every non-Linux host and _is_claude_process maps that to False, so _live_terminal_by_cwd drops every record; the live rule, the branch list's live-set exclusion and Clean Up's protection of a live terminal's conversation become inert; jupyterlab_ai_code_assistants_extension/providers/claude.py
+  - evidence: New pytest test_claude_off_linux_a_live_pid_alone_names_the_row passes; severing the platform condition reddens it, severing the guard reddens DEF-SERV-359; pytest 418 passed on build 1.2.277.
+  - repro: on a non-Linux host, or with sys.platform patched to darwin, a live sessions record's conversation is not the row's primary and delete_branches removes it
+  - test-tags: UNIT
+  - root-cause: 2026-10-25T04:51:55Z @kj process_comm reads /proc and answers None everywhere else; _is_claude_process maps None to False, and the live scan treated that as not-Claude and dropped the record
+  - log: 2026-10-25T04:51:55Z @kj added
+  - log: 2026-10-25T05:02:19Z @kj closed
 
 ## Providers `PROV`
 
@@ -613,6 +640,12 @@ Package manifest, shared-package and template leftovers that decide whether the 
   - repro: grep -n 'jupyterlab>=' pyproject.toml .github/workflows/*.yml
   - log: 2026-09-18T21:27:13Z @kj added
   - log: 2026-09-18T21:27:13Z @kj closed
+- [x] `DEF-PACK-362-README-COLOUR` **README narrows the Kimi/DeepSeek colour exception to + launches** - MINOR; a hand-started Kimi or DeepSeek conversation loses its tab colour too, because a bare kimi or dsh tui launch never puts the id on the process command line, so _captureColour files no pick; the round-8 rewrite narrowed the pre-delta sentence to '+' launches; README.md
+  - evidence: README line 41 names a Kimi or DeepSeek conversation never resumed, including one started with +, as the colour exception; lint and doc gates exit 0 on 1.2.277.
+  - repro: set a tab colour on a conversation started by a bare kimi or dsh tui, reopen it: the colour is not kept, and README's exception names only '+' launches
+  - root-cause: 2026-10-25T04:51:58Z @kj the round-8 README rewrite narrowed 'a conversation that has never been resumed' to 'started with +', while the unreadable id covers every hand-started conversation
+  - log: 2026-10-25T04:51:58Z @kj added
+  - log: 2026-10-25T05:02:19Z @kj closed
 
 ## Retirement and migration `RETI`
 
@@ -1752,6 +1785,42 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-10-24T21:34:28Z @kj added
   - log: 2026-10-24T21:34:33Z @kj reported: round-3 review; the DEF-SERV-352-CLEAR-PIN log recorded it as a Codex residual (round-2 plan risk b); timing-dependent, so fixed, not logged
   - log: 2026-10-24T21:44:34Z @kj closed: fixed: _newSession records a click-numbered decision with an empty id; the switch chain posts nothing for it
+- [x] `DEF-PANE-361-CLEANUP-NAME` **The Clean Up confirmation opens with no accessible name and its newer-session warning is never announced** - MAJOR; showDialog sets the dialog node's aria-label only when options.body is a string, and this confirmation's body is a Widget, so the dialog is unnamed and focus starts on Cancel; the warning div appended while focus is in the footer carries no live region and is silent; src/core/panel.ts
+  - evidence: Jest case 'opens at once and warns when the branch list lands later' asserts the dialog aria-label carries the question and the warning, and the warning carries role=alert; both mutations redden it; Jest 425 passed, Galata 96 passed on 1.2.277.
+  - repro: open Clean Up Parallel Sessions with a screen reader: the dialog announces no name, and a later-arriving newer-session warning is not announced
+  - test-tags: UNIT
+  - root-cause: 2026-10-25T04:51:57Z @kj the round-8 Widget body left JupyterLab's string-body naming path behind, and the warning carried no role
+  - log: 2026-10-25T04:51:57Z @kj added
+  - log: 2026-10-25T05:02:19Z @kj closed
+- [x] `DEF-PANE-363-CAUTION-REFUSAL` **The Clean Up caution does not name the refused trash move** - MAJOR; With delete_to_trash on, the hint promises the trash while a refused trash move deletes permanently (ACC-SESS-211); the caution said only 'A permanent removal cannot be undone', never that the permanent removal can happen. A user confirms believing the conversations are recoverable and loses them.
+  - evidence: Jest 'states its hint in at most twelve words, in both disposal settings' asserts the trash-on caution contains 'A refused trash move deletes permanently' and passed; reverting the caution to _irreversibleNote.trim() reddened it with Received 'A permanent removal cannot be undone.'; the Galata case's 'cannot be undone' assertion still holds
+  - repro: with delete_to_trash on (the default), open Clean Up Parallel Sessions: the hint promises the trash and the caution never says a refused move deletes permanently
+  - test-tags: UNIT
+  - root-cause: 2026-10-25T05:22:18Z @kj the caution reused the Remove-from dialog's irreversible note, whose body states the refusal; the Clean Up hint does not
+  - log: 2026-10-25T05:22:18Z @kj added
+  - log: 2026-10-25T05:22:45Z @kj closed: fixed: the Clean Up caution names the refused trash move when delete_to_trash is on, while the Remove-from dialog keeps its own note
+- [x] `DEF-PANE-364-CLEANUP-EMPTY` **Clean Up offers Remove with zero parallel sessions when the fetched list is empty** - MINOR; The confirmation builds from the row's extra_sessions, one poll old, while the branch fetch runs beside it; when the fetched list is empty the question said 'Remove 0 parallel sessions' and the red Remove stayed offered. DEF-GUARD-96 fixed only the accept path; a second client reaches it.
+  - evidence: Jest 'ends the confirmation when the fetched list is empty' mirrors the deferred-fetch case with branches([]): after the list lands the .jp-Dialog is gone, _cleanupParallel resolves, and request ran once (branches only, no DELETE); removing the empty-list branch left 'Remove 0 parallel sessions' on screen and reddened it; panel.spec.ts 124/124
+  - repro: clean the project from a second tab, then open Clean Up in the first before its next poll: the dialog asks to remove 0 parallel sessions and offers the red Remove
+  - test-tags: UNIT
+  - root-cause: 2026-10-25T05:22:19Z @kj the branchesReady handler restated the count unconditionally and had no empty-list branch to end the confirmation
+  - log: 2026-10-25T05:22:19Z @kj added
+  - log: 2026-10-25T05:24:21Z @kj closed: fixed: the branchesReady handler ends the confirmation as Cancel when the fetched branch list is empty, and ACC-SESS-62 names the new case
+  - log: 2026-10-25T06:00:22Z @kj superseded: the empty-list ending is now the accept path's zero-id guard, which states the outcome and refreshes the list; the round-10 Cancel ending never reached the user (DEF-PANE-365)
+- [x] `DEF-PANE-365-EMPTY-OUTCOME` **The Clean Up empty-list outcome is never shown and its refresh never runs** - MAJOR; The empty-list ending is set and disposed in one task: the question and the dialog name are written into the dialog, then it is resolved as Cancel, whose dispose detaches the node before any paint or accessibility event. No user sees or hears the outcome, the row is never refreshed, and the accept path's zero-id guard is skipped.
+  - evidence: Jest 'states the empty outcome and refreshes the list when the fetched list is empty': the Close-only dialog says 'Nothing left to clean up.', no DELETE, one listing after the branches fetch. Mutations, sources restored byte-equal: resolve(0) nulled the outcome dialog, deleting the branch timed out with the confirmation open, removing the refresh left zero listings
+  - repro: clean the project from a second tab, then open Clean Up in the first before its next poll: the confirmation disappears with no message and the row keeps its stale parallel count until the next poll
+  - test-tags: UNIT
+  - root-cause: 2026-10-25T06:00:13Z @kj round-10 empty-list branch wrote the statement and its aria-label into the dialog it disposed in the same task and returned before the accept path's refresh
+  - log: 2026-10-25T06:00:13Z @kj added; reason: the two findings are one cause: the dead writes and the skipped refresh
+  - log: 2026-10-25T06:00:19Z @kj closed; reason: records the three mutation checks and their exact results
+- [x] `DEF-PANE-366-EMPTY-OUTCOME` **The Clean Up outcome dialog has no accessible name and its statement is never announced** - MAJOR; When a second client has already cleaned the project, Clean Up opens its outcome dialog through the accept path; the dialog carries no accessible name because its body is a Widget and apputils names only string-bodied dialogs, and its 'Nothing left to clean up.' message is a plain div, so a screen reader is never told why the confirmation closed. The message also changes after the dialog is up for the normal 'Removed N.' and 'Cleanup failed' outcomes, and that change was never announced.
+  - evidence: Jest 'states the empty outcome and refreshes the list when the fetched list is empty' asserts the .jp-Dialog aria-label contains 'Nothing left to clean up.' and the cleanup message's role is 'status'; 'Clean Up Parallel Sessions: Enter on the Remove button still cleans up' asserts the progress dialog's aria-label carries the title. Mutations, sources restored byte-equal: severing message.setAttribute('role', 'status') reddened the role assertion, severing the build-time dialog.node.setAttribute('aria-label', title) reddened the progress-dialog name, severing the guard's aria-label reddened the outcome name; Jest 426/426, pytest 418, Galata 96/96 at 1.2.281.
+  - repro: on a row another client has already cleaned, open Clean Up Parallel Sessions and accept; the fetch returns an empty list and the outcome dialog opens with no aria-label, its message a plain div
+  - test-tags: UNIT
+  - root-cause: 2026-10-25T06:49:19Z @kj the accept-path dialog's body is a Widget, so showDialog has no string to name it from; the zero-id guard rewrote the message without renaming the dialog, and the message div was created without role=status, so a change after the dialog was read is never announced
+  - log: 2026-10-25T06:49:19Z @kj added; reason: filed from the round-12 review finding: the outcome dialog is unnamed and its statement is never announced
+  - log: 2026-10-25T06:59:32Z @kj closed; reason: the outcome dialog is named, its message is a status region, and the three attribute writes are mutation-checked
 
 ## Colour store `COLO`
 

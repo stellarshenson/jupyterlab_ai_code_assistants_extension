@@ -836,14 +836,44 @@ export class AssistantSessionsPanel extends Widget {
   }
 
   private async _cleanupParallel(session: ISession): Promise<void> {
-    const extra = session.extra_sessions;
     const name = this._lookupName(session);
-    const confirm = await showDialog({
-      title: this._trans.__('Clean Up Parallel Sessions'),
-      body:
-        `Remove ${extra} parallel session${extra === 1 ? '' : 's'} from ` +
-        `"${name}"? The current conversation is kept; the rest are ` +
-        `${this._disposalVerb}.${this._irreversibleNote}`,
+    const confirmBody = new Widget();
+    confirmBody.node.className = 'jp-AiAssistantsPanel-cleanupConfirm';
+    const question = document.createElement('p');
+    // Announced politely when the fetch restates it; the warning keeps
+    // role=alert for the case that needs attention.
+    question.setAttribute('role', 'status');
+    let extra = session.extra_sessions;
+    const askCount = (count: number): void => {
+      question.textContent =
+        `Remove ${count} parallel session${count === 1 ? '' : 's'} from ` +
+        `"${name}"?`;
+    };
+    askCount(extra);
+    confirmBody.node.appendChild(question);
+    // One sentence, twelve words or fewer: what happens, not the detail.
+    const hint = document.createElement('p');
+    hint.className = 'jp-AiAssistantsPanel-cleanupHint';
+    hint.textContent = this._deleteToTrash
+      ? 'The current conversation is kept; the rest go to the trash.'
+      : 'The current conversation is kept; the rest are deleted permanently.';
+    confirmBody.node.appendChild(hint);
+    // The irreversible note is a safety statement, not the hint, so it keeps
+    // its own line. With the trash on it names the refusal: a refused move
+    // deletes permanently, while the hint promises the trash
+    // (DEF-PANE-363-CAUTION-REFUSAL).
+    const caution = document.createElement('p');
+    caution.className = 'jp-AiAssistantsPanel-cleanupCaution';
+    caution.textContent = this._deleteToTrash
+      ? 'A refused trash move deletes permanently and cannot be undone.'
+      : this._irreversibleNote.trim();
+    confirmBody.node.appendChild(caution);
+
+    const title = this._trans.__('Clean Up Parallel Sessions');
+    let warning: HTMLElement | null = null;
+    const confirmDialog = new Dialog<unknown>({
+      title,
+      body: confirmBody,
       buttons: [
         Dialog.cancelButton(),
         Dialog.warnButton({ label: this._trans.__('Remove') })
@@ -852,6 +882,66 @@ export class AssistantSessionsPanel extends Widget {
       defaultButton: 0,
       renderer: dialogRenderer
     });
+    // showDialog names a dialog only when its body is a string, and this body
+    // is a Widget: name it here, and again when the question is restated and
+    // the warning joins it.
+    const nameDialog = (): void => {
+      confirmDialog.node.setAttribute(
+        'aria-label',
+        [
+          title,
+          question.textContent ?? '',
+          hint.textContent ?? '',
+          caution.textContent ?? '',
+          warning?.textContent ?? ''
+        ]
+          .filter(part => part)
+          .join(' ')
+      );
+    };
+    nameDialog();
+
+    // Alongside the question, never in front of it: the request layer allows
+    // 60 s, and the confirmation must open at once. When the list lands the
+    // question states its length and a conversation newer than the kept one
+    // adds the warning, drawn last so it reads after the caution. The same
+    // list is what the removal deletes. A failed fetch leaves the question as
+    // the row reported it, with no warning, and the removal fetches again
+    // below.
+    const branchesReady = this._fetchBranches(session).then(
+      fetched => {
+        const list = fetched?.branches;
+        if (list && list.length === 0) {
+          // The row is up to one poll old, and a second client may have
+          // cleaned the project since (DEF-GUARD-96): a red Remove with zero
+          // targets is a dead end. End the confirmation through the accept
+          // path, whose zero-id guard states the empty outcome and refreshes
+          // the list (DEF-PANE-365); resolving after the user already
+          // accepted or cancelled is a no-op.
+          confirmDialog.resolve(1);
+        } else if (list) {
+          extra = list.length;
+          askCount(extra);
+          const newer = list.filter(
+            branch => branch.file_mtime > session.file_mtime
+          ).length;
+          if (newer > 0) {
+            warning = document.createElement('div');
+            warning.className = 'jp-AiAssistantsPanel-cleanupWarning';
+            warning.setAttribute('role', 'alert');
+            warning.textContent =
+              `${newer} parallel session${newer === 1 ? ' was' : 's were'} ` +
+              'active after the one kept.';
+            confirmBody.node.appendChild(warning);
+          }
+          nameDialog();
+        }
+        return fetched;
+      },
+      () => null
+    );
+
+    const confirm = await confirmDialog.launch();
     if (!confirm.button.accept) {
       return;
     }
@@ -861,6 +951,7 @@ export class AssistantSessionsPanel extends Widget {
 
     const message = document.createElement('div');
     message.className = 'jp-AiAssistantsPanel-cleanupMessage';
+    message.setAttribute('role', 'status');
     message.textContent = `Removing ${extra} parallel session${
       extra === 1 ? '' : 's'
     }...`;
@@ -879,6 +970,7 @@ export class AssistantSessionsPanel extends Widget {
       buttons: [Dialog.okButton({ label: this._trans.__('Close') })],
       renderer: dialogRenderer
     });
+    dialog.node.setAttribute('aria-label', title);
     // Close stays live while the work runs. Hiding it took away the only exit
     // a keyboard user has: the dialog listens for Escape on its own node, it
     // puts focus on this button and nowhere else, and focusing a hidden button
@@ -890,9 +982,12 @@ export class AssistantSessionsPanel extends Widget {
 
     try {
       // The extras ARE the branch list - the current conversation is not in
-      // it - so cleaning up is deleting exactly those ids.
-      const listed = await this._fetchBranches(session);
-      const ids = listed.branches.map(b => b.session_id);
+      // it - so cleaning up is deleting exactly those ids. Reuse the list the
+      // question was built from, waiting for it here where the progress
+      // dialog is already up; only a failed fetch re-reads.
+      const fetched =
+        (await branchesReady) ?? (await this._fetchBranches(session));
+      const ids = (fetched?.branches ?? []).map(b => b.session_id);
       if (ids.length === 0) {
         // The menu item is gated on a row up to one poll old, so by the time
         // the refetch lands another tab may have cleaned the project already.
@@ -901,6 +996,10 @@ export class AssistantSessionsPanel extends Widget {
         // to remove N.
         bar.remove();
         message.textContent = 'Nothing left to clean up.';
+        dialog.node.setAttribute(
+          'aria-label',
+          `${title}. ${message.textContent ?? ''}`
+        );
         this._branchCache = null;
         await this._fetch();
         return;

@@ -154,7 +154,10 @@ beforeEach(async () => {
   // (DEF-30), so the GET goes out after the call rather than during it.
   // Cleared once it has, or it counts against the first test to look.
   await flush();
-  request.mockClear();
+  // Every case starts from the module factory's empty answer; `mockClear`
+  // alone left the previous case's implementation in place for the next one.
+  request.mockReset();
+  request.mockImplementation(() => Promise.resolve({}));
 });
 
 afterEach(async () => {
@@ -261,28 +264,52 @@ describe('DEF-51 - the destructive dialogs open with Cancel under the keyboard',
     pressEnter();
     await done;
 
-    // Cancelling stops before the branch fetch, so nothing is requested and no
-    // progress dialog is raised.
-    expect(request).not.toHaveBeenCalled();
+    // The question's own branches fetch has run; cancelling stops before the
+    // removal, so no DELETE is sent and no progress dialog is raised.
+    expect(
+      request.mock.calls.filter(call => call[3]?.method === 'DELETE')
+    ).toHaveLength(0);
     expect(
       document.querySelector('.jp-AiAssistantsPanel-cleanupBody')
     ).toBeNull();
   });
 
   it('Clean Up Parallel Sessions: Enter on the Remove button still cleans up', async () => {
-    // Same non-vacuity guard as above.
-    request.mockImplementation(() => Promise.resolve({ branches: [] }));
-    void ((panel as any)._cleanupParallel(
-      session({ extra_sessions: 3 })
-    ) as Promise<void>);
+    // Same non-vacuity guard as above: the harness can see the removal, so
+    // "no DELETE" above means the keyboard landed elsewhere and not that the
+    // probe is blind.
+    request.mockImplementation(() =>
+      Promise.resolve({
+        current: 'sid-proj',
+        total: 2,
+        branches: [
+          { session_id: 'sid-branch', file_mtime: 1, label: 'Branch' }
+        ],
+        removed_count: 1
+      })
+    );
+    const done = (panel as any)._cleanupParallel(
+      session({ name: 'proj', extra_sessions: 3 })
+    ) as Promise<void>;
     (await openButtons())[1].focus();
     pressEnter();
     await flush();
 
-    expect(request).toHaveBeenCalled();
+    const deletes = request.mock.calls.filter(
+      call => call[3]?.method === 'DELETE'
+    );
+    expect(deletes).toHaveLength(1);
+    expect(JSON.parse(deletes[0][3].body).session_ids).toEqual(['sid-branch']);
     expect(
       document.querySelector('.jp-AiAssistantsPanel-cleanupBody')
     ).not.toBeNull();
+    // The progress dialog's body is a Widget, which leaves showDialog no
+    // string to name it from, so the panel names it from the title.
+    expect(
+      document.querySelector('.jp-Dialog')!.getAttribute('aria-label')
+    ).toContain('Clean Up Parallel Sessions');
+    // Let the removal finish before the dialog is dismissed below.
+    await done;
   });
 });
 
@@ -2268,7 +2295,20 @@ describe('ACC-SESS-61, ACC-SESS-62 - what the destructive confirmations state', 
   });
 
   it('ACC-SESS-62 - the cleanup confirmation states how many go and that one stays', async () => {
-    const row = session({ name: 'ledger-tools', extra_sessions: 3 });
+    // The fetched list is what the question counts: three branches despite a
+    // row that claims nine. It also gives Cancel a DELETE to withhold.
+    request.mockImplementationOnce(() =>
+      Promise.resolve({
+        current: 'sid-ledger-tools',
+        total: 4,
+        branches: [0, 1, 2].map(index => ({
+          session_id: `sid-branch-${index}`,
+          file_mtime: 1,
+          label: `Branch ${index}`
+        }))
+      })
+    );
+    const row = session({ name: 'ledger-tools', extra_sessions: 9 });
     const done = (panel as any)._cleanupParallel(row) as Promise<void>;
     await openButtons();
     const body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
@@ -2278,7 +2318,10 @@ describe('ACC-SESS-61, ACC-SESS-62 - what the destructive confirmations state', 
     expect(body).toContain('current conversation is kept');
     pressEnter();
     await done;
-    expect(request).not.toHaveBeenCalled();
+    // Cancelling after the question's branches fetch sends no DELETE.
+    expect(
+      request.mock.calls.filter(call => call[3]?.method === 'DELETE')
+    ).toHaveLength(0);
   });
 
   it('ACC-SESS-62 - one parallel session is counted in the singular', async () => {
@@ -2288,6 +2331,253 @@ describe('ACC-SESS-61, ACC-SESS-62 - what the destructive confirmations state', 
     const body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
 
     expect(body).toContain('1 parallel session from');
+    pressEnter();
+    await done;
+  });
+});
+
+describe('ACC-PANE-221, ACC-PANE-222 - the cleanup confirmation warning and hint', () => {
+  const HOUR = 3_600_000;
+
+  const openButtons = async (): Promise<HTMLButtonElement[]> => {
+    await flush();
+    const dialog = document.querySelector('.jp-Dialog');
+    expect(dialog).not.toBeNull();
+    return Array.from(
+      dialog!.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+    );
+  };
+
+  const pressEnter = (): void => {
+    document
+      .querySelector('.jp-Dialog')!
+      .dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+  };
+
+  /** The branch list a provider answers with: the kept conversation is not in
+   * it, exactly as `list_branches` returns it. */
+  const branches = (mtimes: number[]): any => ({
+    current: 'sid-kept',
+    total: mtimes.length + 1,
+    branches: mtimes.map((file_mtime, index) => ({
+      session_id: `sid-branch-${index}`,
+      file_mtime,
+      label: `Branch ${index}`
+    }))
+  });
+
+  it('opens at once and warns when the branch list lands later', async () => {
+    const now = Date.now();
+    let release: ((value: any) => void) | undefined;
+    // The request layer allows 60 s: the question must not wait for it.
+    request.mockImplementationOnce(
+      () => new Promise(resolve => (release = resolve))
+    );
+    const row = session({
+      name: 'ledger-tools',
+      extra_sessions: 2,
+      file_mtime: now - 2 * HOUR
+    });
+
+    const done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+    // Up already, on the row's own count.
+    expect(document.querySelector('.jp-Dialog-body')!.textContent).toContain(
+      '2 parallel sessions'
+    );
+    // The restated question is announced politely.
+    expect(
+      document.querySelector('.jp-Dialog-body p')!.getAttribute('role')
+    ).toBe('status');
+    // The Widget body leaves showDialog no string to name the dialog from, so
+    // the name is set here and carries the question on screen.
+    expect(
+      document.querySelector('.jp-Dialog')!.getAttribute('aria-label')
+    ).toContain('Remove 2 parallel sessions from "ledger-tools"?');
+
+    // The list lands while the dialog is open: the count becomes the list's
+    // and the newer conversation adds the warning.
+    release!(branches([now - HOUR]));
+    await flush();
+    expect(document.querySelector('.jp-Dialog-body')!.textContent).toContain(
+      'Remove 1 parallel session from'
+    );
+    const warning = document.querySelector(
+      '.jp-AiAssistantsPanel-cleanupWarning'
+    )!;
+    expect(warning.textContent).toBe(
+      '1 parallel session was active after the one kept.'
+    );
+    // The warning is announced, and the dialog's name follows the restated
+    // question and the warning.
+    expect(warning.getAttribute('role')).toBe('alert');
+    const label = document
+      .querySelector('.jp-Dialog')!
+      .getAttribute('aria-label');
+    expect(label).toContain('Remove 1 parallel session from "ledger-tools"?');
+    expect(label).toContain(warning.textContent!);
+
+    pressEnter();
+    await done;
+  });
+
+  it('states the empty outcome and refreshes the list when the fetched list is empty', async () => {
+    const now = Date.now();
+    let release: ((value: any) => void) | undefined;
+    request.mockImplementationOnce(
+      () => new Promise(resolve => (release = resolve))
+    );
+    const row = session({
+      name: 'ledger-tools',
+      extra_sessions: 2,
+      file_mtime: now - 2 * HOUR
+    });
+
+    const done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+    // The row is a poll old and a second client cleaned the project: the
+    // confirmation ends through the accept path, whose zero-id guard states
+    // the empty outcome, instead of restating "Remove 0 parallel sessions"
+    // with the red Remove still offered (DEF-PANE-364, DEF-PANE-365).
+    release!(branches([]));
+    await done;
+    await flush();
+
+    // The outcome dialog, not a bare dismissal: the user is told why.
+    expect(document.querySelector('.jp-Dialog-body')!.textContent).toContain(
+      'Nothing left to clean up.'
+    );
+    expect(
+      Array.from(
+        document.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+      ).map(button => button.textContent)
+    ).toEqual(['Close']);
+    // The dialog's name carries the outcome statement, so a screen reader
+    // hears why the confirmation closed, and the message is a status region
+    // for an outcome that lands after the dialog has been read
+    // (DEF-PANE-366-EMPTY-OUTCOME).
+    expect(
+      document.querySelector('.jp-Dialog')!.getAttribute('aria-label')
+    ).toContain('Nothing left to clean up.');
+    expect(
+      document
+        .querySelector('.jp-AiAssistantsPanel-cleanupMessage')!
+        .getAttribute('role')
+    ).toBe('status');
+    // The branches fetch only: nothing was deleted.
+    expect(
+      request.mock.calls.filter(call => call[3]?.method === 'DELETE')
+    ).toHaveLength(0);
+    // The guard refreshed the list once, after the fetch it answered.
+    const paths = request.mock.calls.map(call => call[1]);
+    expect(paths.filter(path => path === 'branches')).toHaveLength(1);
+    expect(paths.filter(path => path === 'sessions')).toHaveLength(1);
+    expect(paths.indexOf('sessions')).toBeGreaterThan(
+      paths.indexOf('branches')
+    );
+  });
+
+  it('warns when a conversation it removes was active after the one kept', async () => {
+    const now = Date.now();
+    const row = session({
+      name: 'ledger-tools',
+      extra_sessions: 2,
+      file_mtime: now - 2 * HOUR
+    });
+    request.mockResolvedValueOnce(branches([now - HOUR, now - 3 * HOUR]));
+
+    const done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+
+    const warning = document.querySelector(
+      '.jp-AiAssistantsPanel-cleanupWarning'
+    );
+    expect(warning).not.toBeNull();
+    // It names the one conversation that was newer, not the whole list.
+    expect(warning!.textContent).toContain('1 parallel session was');
+    // The question counts the fetched list, which is the list the removal
+    // deletes - not the row's count from an older poll.
+    expect(document.querySelector('.jp-Dialog-body')!.textContent).toContain(
+      '2 parallel sessions'
+    );
+    pressEnter();
+    await done;
+  });
+
+  it('does not warn when every conversation it removes is older or equal', async () => {
+    const now = Date.now();
+    const row = session({
+      name: 'ledger-tools',
+      extra_sessions: 2,
+      file_mtime: now - 2 * HOUR
+    });
+    // Equal is the boundary: only a LATER activity is a warning.
+    request.mockResolvedValueOnce(branches([now - 2 * HOUR, now - 3 * HOUR]));
+
+    const done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupWarning')
+    ).toBeNull();
+    pressEnter();
+    await done;
+  });
+
+  it('states its hint in at most twelve words, in both disposal settings', async () => {
+    const now = Date.now();
+    const row = session({ name: 'ledger-tools', extra_sessions: 1 });
+    request.mockResolvedValueOnce(branches([now - 3 * HOUR]));
+
+    let done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+    let hint = document.querySelector(
+      '.jp-AiAssistantsPanel-cleanupHint'
+    )!.textContent!;
+    expect(hint.trim().split(/\s+/).length).toBeLessThanOrEqual(12);
+    expect(hint).toContain('go to the trash');
+    // The hint promises the trash; the caution names the refusal that deletes
+    // permanently.
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupCaution')!
+        .textContent
+    ).toContain('A refused trash move deletes permanently');
+    pressEnter();
+    await done;
+
+    (panel as any)._deleteToTrash = false;
+    request.mockResolvedValueOnce(branches([now - 3 * HOUR]));
+    done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+    hint = document.querySelector(
+      '.jp-AiAssistantsPanel-cleanupHint'
+    )!.textContent!;
+    expect(hint.trim().split(/\s+/).length).toBeLessThanOrEqual(12);
+    expect(hint).toContain('deleted permanently');
+    // The caution is not the hint: it stays visible on its own.
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupCaution')!
+        .textContent
+    ).toContain('cannot be undone');
+    pressEnter();
+    await done;
+  });
+
+  it('shows the question without a warning when the fetch fails', async () => {
+    request.mockRejectedValueOnce(new Error('offline'));
+    const row = session({ name: 'ledger-tools', extra_sessions: 3 });
+
+    const done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupWarning')
+    ).toBeNull();
+    expect(document.querySelector('.jp-Dialog-body')!.textContent).toContain(
+      '3 parallel sessions'
+    );
     pressEnter();
     await done;
   });

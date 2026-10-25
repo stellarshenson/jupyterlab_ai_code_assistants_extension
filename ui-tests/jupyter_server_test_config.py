@@ -366,6 +366,46 @@ for _project in ("trash-fixture", "fallback-fixture"):
         # deletable branch.
         os.utime(_file, (_now - 2400 + _index, _now - 2400 + _index))
 
+# Two Claude projects owned by `cleanup-confirmation.spec.ts` alone. One pins
+# an older conversation as current while a newer transcript sits beside it, so
+# the Clean Up confirmation must warn that a conversation it removes was active
+# after the one it keeps; without the pin the resolver would make the newest
+# conversation current and no branch could be newer. The other holds an older
+# extra only, so the same confirmation must not warn. Their mtimes sit between
+# the two older fixture families, below every row a "first listed" locator
+# reads and above the session-delete projects their comment calls oldest.
+_cleanup_projects = (
+    ("cleanup-newer", "keep-old", {"extra-new": -1900}),
+    ("cleanup-older", "keep-0", {"extra-old": -2100}),
+)
+_cleanup_pins = {}
+for _project, _kept, _extras in _cleanup_projects:
+    _cwd = _root / _project
+    _cwd.mkdir()
+    _directory = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(
+        str(_cwd)
+    )
+    _directory.mkdir()
+    for _stem, _age in ((_kept, -2000), *_extras.items()):
+        _file = _directory / f"{_stem}.jsonl"
+        _file.write_text(
+            "".join(
+                json.dumps(record) + "\n"
+                for record in (
+                    {"cwd": str(_cwd)},
+                    {"type": "user", "message": {"role": "user", "content": "seed"}},
+                )
+            ),
+            encoding="utf-8",
+        )
+        os.utime(_file, (_now + _age, _now + _age))
+    _cleanup_pins[_encode_path(str(_cwd))] = _kept
+_cleanup_state = Path(os.environ["JUPYTERLAB_AI_CODE_ASSISTANTS_STATE_DIR"])
+_cleanup_state.mkdir(parents=True, exist_ok=True)
+(_cleanup_state / "claude.json").write_text(
+    json.dumps({"favourites": [], "pins": _cleanup_pins}), encoding="utf-8"
+)
+
 _codex_root = Path(os.environ["CODEX_HOME"])
 _codex_root.mkdir(parents=True)
 _codex_cwd = _root / "codex-branch"

@@ -37,6 +37,30 @@ const WIDE_NAME =
 const CLAUDE_ROUTES =
   '/jupyterlab-ai-code-assistants-extension/providers/claude';
 
+/** Load the page with the extension's 60 s status interval swallowed, so the
+ * only status probe a wake test can see after the load is its listener's
+ * (DEF-GUARD-120). The swallowed interval is counted, so an interval with
+ * another period fails here instead of running unseen. */
+async function gotoWithoutStatusInterval(page: any): Promise<void> {
+  await page.addInitScript(() => {
+    const arm = window.setInterval.bind(window);
+    (window as any).__statusIntervals = 0;
+    (window as any).setInterval = (
+      handler: TimerHandler,
+      timeout?: number,
+      ...args: any[]
+    ) => {
+      if (timeout === 60_000) {
+        (window as any).__statusIntervals += 1;
+        return 0;
+      }
+      return arm(handler, timeout, ...args);
+    };
+  });
+  await page.goto();
+  expect(await page.evaluate(() => (window as any).__statusIntervals)).toBe(1);
+}
+
 /** Arm a launch mode through the settings registry, the way a user does. */
 async function setLaunchMode(
   page: any,
@@ -343,7 +367,7 @@ test('DEF-45 - both destructive context-menu entries carry a glyph', async ({
   await page.keyboard.press('Escape');
 });
 
-test('ACC-PANE-218 - the history-deleting entries are drawn in the error colour', async ({
+test('ACC-PANE-218 - the history-deleting entries have a red label and icon and an ordinary selection background', async ({
   page
 }) => {
   await page.goto();
@@ -354,55 +378,118 @@ test('ACC-PANE-218 - the history-deleting entries are drawn in the error colour'
     const menu = await openRowMenu(page, 'branchy');
     // The token as the browser paints it, so the theme's hex and the
     // computed rgb() compare equal.
-    const token = (name: string) =>
-      page.evaluate(name => {
-        const probe = document.createElement('span');
-        probe.style.color = `var(${name})`;
-        document.body.appendChild(probe);
-        const value = getComputedStyle(probe).color;
-        probe.remove();
-        return value;
-      }, name);
-    const error = await token('--jp-error-color1');
-    const inverse = await token('--jp-ui-inverse-font-color1');
+    const error = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--jp-error-color1)';
+      document.body.appendChild(probe);
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    });
     const item = (label: string) =>
       menu.locator('.lm-Menu-item', { hasText: label }).first();
     const paint = (label: string) =>
       item(label).evaluate((el: HTMLElement) => ({
+        background: getComputedStyle(el).backgroundColor,
         label: getComputedStyle(el.querySelector('.lm-Menu-itemLabel')!).color,
         icon: getComputedStyle(el.querySelector('.lm-Menu-itemIcon path')!).fill
       }));
-    const danger = { label: error, icon: error };
-    const filled = { label: inverse, icon: inverse };
 
+    // Ordinary entries whose label or icon path carries the error colour;
+    // the two history-deleting entries are excluded by label.
+    const redOrdinary = () =>
+      menu.evaluate(
+        (m: HTMLElement, red: string) =>
+          [...m.querySelectorAll('.lm-Menu-item')]
+            .map(el => {
+              const label = el.querySelector('.lm-Menu-itemLabel');
+              return {
+                label: label?.textContent ?? '',
+                labelColour: label ? getComputedStyle(label).color : '',
+                fills: [...el.querySelectorAll('.lm-Menu-itemIcon path')].map(
+                  p => getComputedStyle(p).fill
+                )
+              };
+            })
+            .filter(
+              e =>
+                !/^(Clean Up Parallel Sessions|Remove from)/.test(e.label) &&
+                (e.labelColour === red || e.fills.includes(red))
+            )
+            .map(e => e.label),
+        error
+      );
+
+    // The reference entry is Show in File Browser: its folder glyph is a
+    // jp-icon3 path like the danger entries' glyphs, so a jp-icon3 rule that
+    // is not limited to the danger class turns it red (Open Terminal's
+    // terminal glyph has no jp-icon3 path and cannot show that).
+    // At rest: the reference keeps the theme's label colour, a non-red icon
+    // and its background; both danger entries carry the error colour on the
+    // label and on the icon, on the same background.
+    const plain = await paint('Show in File Browser');
+    expect(plain.label).not.toBe(error);
+    expect(plain.icon).not.toBe(error);
+    expect(await redOrdinary()).toEqual([]);
+    const danger = { background: plain.background, label: error, icon: error };
     expect(await paint('Clean Up Parallel Sessions')).toEqual(danger);
     expect(await paint('Remove from Claude Code')).toEqual(danger);
-    const neighbour = await paint('Open Terminal');
-    expect(neighbour.label).not.toBe(error);
-    expect(neighbour.icon).not.toBe(error);
 
-    // Active under the keyboard (ArrowUp from no selection takes the last
-    // entry), then under the pointer: a filled error-colour row with inverse
-    // label and glyph, while the other danger entry stays red.
+    // Selected under the keyboard (ArrowUp from no selection takes the last
+    // entry): the label and icon stay red, and the other danger entry stays
+    // at rest.
     await menu.press('ArrowUp');
     await expect(item('Remove from Claude Code')).toHaveClass(/lm-mod-active/);
-    await expect(item('Remove from Claude Code')).toHaveCSS(
-      'background-color',
-      error
-    );
-    expect(await paint('Remove from Claude Code')).toEqual(filled);
+    const removeActive = await paint('Remove from Claude Code');
+    expect(removeActive.label).toBe(error);
+    expect(removeActive.icon).toBe(error);
     expect(await paint('Clean Up Parallel Sessions')).toEqual(danger);
+
+    // The ordinary entry under the pointer is the selected reference: its
+    // background is the one the selected danger entry must carry, and its
+    // label keeps the theme's colour (JupyterLab never turns a selected
+    // label inverse).
+    await item('Show in File Browser').hover();
+    await expect(item('Show in File Browser')).toHaveClass(/lm-mod-active/);
+    const plainActive = await paint('Show in File Browser');
+    expect(plainActive.background).not.toBe(plain.background);
+    expect(plainActive.label).toBe(plain.label);
+    expect(removeActive.background).toBe(plainActive.background);
+
+    // Selected under the pointer: the same claims for the other danger entry.
     await item('Clean Up Parallel Sessions').hover();
     await expect(item('Clean Up Parallel Sessions')).toHaveClass(
       /lm-mod-active/
     );
-    await expect(item('Clean Up Parallel Sessions')).toHaveCSS(
-      'background-color',
-      error
-    );
-    expect(await paint('Clean Up Parallel Sessions')).toEqual(filled);
+    const cleanupActive = await paint('Clean Up Parallel Sessions');
+    expect(cleanupActive.label).toBe(error);
+    expect(cleanupActive.icon).toBe(error);
+    expect(cleanupActive.background).toBe(plainActive.background);
     expect(await paint('Remove from Claude Code')).toEqual(danger);
+    expect(await redOrdinary()).toEqual([]);
 
+    await menu.press('Escape');
+    await expect(menu).toBeHidden();
+  }
+  await page.theme.setTheme('JupyterLab Light');
+});
+
+test('ACC-PANE-219 - the copy entries show the copy icon', async ({ page }) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  for (const theme of ['JupyterLab Light', 'JupyterLab Dark']) {
+    await page.theme.setTheme(theme);
+    const menu = await openRowMenu(page, 'branchy');
+    for (const label of ['Copy Path', 'Copy Session ID']) {
+      const item = menu.locator('.lm-Menu-item', { hasText: label }).first();
+      const glyph = item.locator(
+        '.lm-Menu-itemIcon svg[data-icon="ui-components:copy"]'
+      );
+      await expect(glyph).toHaveCount(1);
+      const box = await glyph.boundingBox();
+      expect(box!.width).toBeGreaterThan(0);
+    }
     await menu.press('Escape');
     await expect(menu).toBeHidden();
   }
@@ -490,7 +577,7 @@ test('DEF-57 - one tab stop per section, not one per row', async ({ page }) => {
 test('DEF-117 - each wake event re-probes status on its own', async ({
   page
 }) => {
-  await page.goto();
+  await gotoWithoutStatusInterval(page);
   await openPanelTab(page, 'claude');
 
   // Counted only from here, after the panel is up, so the probes the page load
@@ -527,15 +614,14 @@ test('DEF-117 - each wake event re-probes status on its own', async ({
   // How this fails: before the fix neither listener existed, so the next probe
   // was the 60s timer's and both polls ran out their five seconds. Polled
   // rather than slept because arriving in seconds instead of a minute IS the
-  // fix. Each poll returns on the first request it sees, so the window in
-  // which the 60s timer could satisfy an assertion by itself is the poll's own
-  // few hundred milliseconds (DEF-120, logged).
+  // fix. The 60s timer is swallowed in this page, so no tick can satisfy a
+  // poll in the listener's place (DEF-GUARD-120).
 });
 
 test('DEF-121 - a stale failed probe cannot discard a newer roster', async ({
   page
 }) => {
-  await page.goto();
+  await gotoWithoutStatusInterval(page);
   await openPanelTab(page, 'claude');
 
   const warnings: string[] = [];
@@ -664,7 +750,7 @@ test('DEF-125 - the PATH warning re-arms once the binary comes back', async ({
     await route.fulfill({ response, json: body });
   });
 
-  await page.goto();
+  await gotoWithoutStatusInterval(page);
 
   // The line fires for every enabled provider whose binary is absent.
   await setProviderEnabled(page, id, true);

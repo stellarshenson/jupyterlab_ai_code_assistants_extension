@@ -14,6 +14,7 @@ import {
   LabIcon,
   MenuSvg,
   closeIcon,
+  copyIcon,
   editIcon,
   folderIcon,
   terminalIcon
@@ -152,8 +153,9 @@ let fileBrowserMoves: Promise<void> = Promise.resolve();
  * later click does not move the file browser, so it ends on the folder of the
  * newest click that opened (DEF-PANE-343). The same counter orders the writes
  * that decide a project's current conversation: a row click, an explicit
- * switch and a fork each take a number, and a row click posts its deferred
- * switch only while it is the newest (DEF-PANE-349). */
+ * switch, a fork and a New Session (+) each take a number, and a row click
+ * posts its deferred switch only while it is the newest (DEF-PANE-349,
+ * DEF-PANE-355). */
 let openClicks = 0;
 let movedClick = 0;
 
@@ -725,7 +727,11 @@ export class AssistantSessionsPanel extends Widget {
       return;
     }
     this._fetchDrawn = request;
-    this._sessions = data.sessions ?? [];
+    // A project removed at or after this listing was sent must not be drawn
+    // back from the answer (DEF-PANE-351-WRITE-ORDER).
+    this._sessions = (data.sessions ?? []).filter(
+      s => (this._removedAt.get(s.encoded_path) ?? 0) < request
+    );
     this._setInlineError(null);
     this._terminals.setSessions(this._sessions);
     this._render();
@@ -750,6 +756,10 @@ export class AssistantSessionsPanel extends Widget {
           })
         }
       );
+      // A listing sent before the write may still be drawn, and a poll may
+      // have replaced the row this wrote; this one is answered after the write
+      // (DEF-PANE-351).
+      void this._fetch().catch(() => undefined);
     } catch (err) {
       session.favourite = !next; // roll back
       this._render();
@@ -812,6 +822,11 @@ export class AssistantSessionsPanel extends Widget {
       this._sessions = (this._sessions ?? []).filter(
         s => s.encoded_path !== session.encoded_path
       );
+      // A listing sent before the delete may still be drawn (DEF-PANE-351),
+      // and it carries the removed project: the number taken here marks the
+      // answer for `_fetch` to drop (DEF-PANE-351-WRITE-ORDER).
+      this._removedAt.set(session.encoded_path, this._fetchSent);
+      void this._fetch().catch(() => undefined);
     } catch (err) {
       this._showActionError(`Could not remove "${name}" - try again.`, err);
     } finally {
@@ -1147,7 +1162,7 @@ export class AssistantSessionsPanel extends Widget {
         // before the server can read the conversation off its process
         // (DEF-PANE-345).
         const found =
-          this._terminals.cached(folder, row.session_id) ??
+          (await this._terminals.cached(folder, row.session_id)) ??
           (await this._terminals.findForSession(row.session_id, folder))
             ?.widget;
         if (found) {
@@ -1230,6 +1245,15 @@ export class AssistantSessionsPanel extends Widget {
     const existing = (this._sessions ?? []).find(
       s => s.project_path === projectPath
     );
+    if (existing) {
+      // The + click is the project's newest decision: a row open still
+      // finishing posts no switch over it (DEF-PANE-355). It has no id to post;
+      // the launch route clears the pin.
+      this._currentTokens.set(existing.encoded_path, {
+        click: ++openClicks,
+        sessionId: ''
+      });
+    }
     // Raised on the click, not by the launch: the launch waits for a tile
     // launch clicked before it (DEF-PANE-345).
     const busy = beginSpinner(
@@ -1527,7 +1551,8 @@ export class AssistantSessionsPanel extends Widget {
     const run = (this._switchChains.get(key) ?? Promise.resolve()).then(
       async () => {
         const newest = this._currentTokens.get(key);
-        if (!newest) {
+        // An empty id is a New Session (+) decision, which posts nothing.
+        if (!newest?.sessionId) {
           return;
         }
         if (!force && this._postedClicks.get(key) === newest.click) {
@@ -2434,6 +2459,7 @@ export class AssistantSessionsPanel extends Widget {
 
     this._commands.addCommand(this._cmd('copy-path'), {
       label: this._trans.__('Copy Path'),
+      icon: copyIcon,
       execute: () => {
         const s = active();
         if (s) {
@@ -2444,6 +2470,7 @@ export class AssistantSessionsPanel extends Widget {
 
     this._commands.addCommand(this._cmd('copy-session-id'), {
       label: this._trans.__('Copy Session ID'),
+      icon: copyIcon,
       execute: () => {
         const id = active()?.session_id;
         if (id) {
@@ -2485,7 +2512,8 @@ export class AssistantSessionsPanel extends Widget {
       // item beside an ordinary one (DEF-45). The sweep variant of the trash
       // glyph, because this one deletes several at once.
       icon: cleanupIcon,
-      // Both history-deleting entries draw in the error colour (base.css).
+      // Both history-deleting entries draw their icon in the error colour
+      // (base.css).
       className: 'jp-AiAssistantsContextMenu-danger',
       isVisible: () => (active()?.extra_sessions ?? 0) > 0,
       execute: () => {
@@ -3048,6 +3076,10 @@ export class AssistantSessionsPanel extends Widget {
    * `_fetch`. */
   private _fetchSent = 0;
   private _fetchDrawn = 0;
+  /** The `_fetchSent` number at each removal's DELETE, by encoded path. A
+   * listing sent before that number may still carry the removed project, so
+   * `_fetch` drops it (DEF-PANE-351-WRITE-ORDER). */
+  private readonly _removedAt = new Map<string, number>();
   /** A button is pressed in the list, and a redraw waits for its release -
    * see `_onRelease`. */
   private _pressed = false;

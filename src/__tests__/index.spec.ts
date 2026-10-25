@@ -168,6 +168,97 @@ describe('DEF-GUARD-139 - reconcile hands a late roster to a docked panel', () =
   });
 });
 
+describe('DEF-GUARD-122 - a wake during activation', () => {
+  it('is remembered, reconciles nothing before the settings load, and is answered by one status check once the listeners are armed', async () => {
+    // Identity of this activation's probes; earlier activations' listeners
+    // reach the same mock (see the activation-contract harness below).
+    const serverSettings = {};
+    let probes = 0;
+    request.mockImplementation((path: string, settings: unknown) => {
+      if (path !== 'status' || settings !== serverSettings) {
+        return Promise.reject(new Error('not this activation'));
+      }
+      probes += 1;
+      return Promise.resolve({
+        root_dir: '/srv/lab',
+        delete_to_trash: true,
+        providers: PROVIDERS.map(m => ({
+          id: m.descriptor.id,
+          available: true
+        }))
+      });
+    });
+    const docked: AssistantSessionsPanel[] = [];
+    const labShell = {
+      add: (w: AssistantSessionsPanel) => {
+        docked.push(w);
+      }
+    } as any;
+    const app = {
+      serviceManager: { serverSettings },
+      commands: new CommandRegistry(),
+      hasPlugin: () => false
+    } as any;
+    // Every assistant off, so a reconcile on the enabled-by-default fallback
+    // would show as a docked panel.
+    const composite: Record<string, unknown> = Object.fromEntries(
+      PROVIDERS.map(m => [`providers.${m.descriptor.id}.enabled`, false])
+    );
+    const settings = {
+      raw: '{}',
+      composite,
+      get: (key: string) => ({
+        composite: composite[key],
+        user: composite[key]
+      }),
+      set: async () => undefined,
+      changed: new Signal<unknown, void>({})
+    };
+    let finishLoad!: () => void;
+    const loading = new Promise<void>(resolve => {
+      finishLoad = resolve;
+    });
+    const settingRegistry = {
+      connector: { fetch: async () => ({ raw: settings.raw }) },
+      load: async () => {
+        await loading;
+        return settings;
+      }
+    } as any;
+
+    const activation = (plugin.activate as any)(
+      app,
+      labShell,
+      null,
+      settingRegistry,
+      null,
+      null,
+      null
+    );
+    await flush();
+    expect(probes).toBe(1); // the activation probe; the settings still load
+
+    window.dispatchEvent(new Event('online'));
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible'
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await flush();
+    expect(probes).toBe(1);
+    expect(docked).toHaveLength(0);
+
+    finishLoad();
+    await activation;
+    await flush();
+    // How this fails: without the remembered wake the count stays 1 until the
+    // 60 s tick; a listener that probes before the settings load docks every
+    // assistant above, and one probe per wake makes it 3.
+    expect(probes).toBe(2);
+    expect(docked).toHaveLength(0);
+  });
+});
+
 describe('ACC-LNCH-143..146 - the Launcher tile has the panel lifecycle', () => {
   /** A roster in which every assistant is present, or every one but `absent`. */
   const roster = (absent?: string): unknown => ({

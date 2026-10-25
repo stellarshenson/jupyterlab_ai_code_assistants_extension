@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 from .state import state_dir
@@ -59,13 +59,18 @@ def _read(provider_id: str) -> tuple[dict[str, str], set[str], dict[str, int]]:
     first shipped version - so the two are indistinguishable there, and the
     two ways of guessing are not symmetrical: calling an inherited tint
     hand-set offers it for release and destroys a branch's colour with no undo,
-    while calling a hand-set one inherited merely withholds the release until
-    the user picks a colour on that tab again.
+    while calling a hand-set one inherited merely withholds the native release
+    until the user picks a colour on that tab again.
 
     A file written before times were recorded has no ``stamps`` key, and an
-    entry with no time counts as older than any colour choice the assistant
-    reports (``judge``) - every such entry predates this field, and the
-    alternative keeps a stale pick over a ``/color`` the user ran after it.
+    entry with no time counts as older than any dated colour choice the
+    assistant reports (``judge``) - every such entry predates this field, and
+    the alternative keeps a stale pick over a ``/color`` the user ran after it.
+    It does not count as older than a readable native colour: a colour file
+    written before origins or times were recorded cannot tell an inherited
+    entry from a hand pick, so an entry with no recorded write time withholds
+    the native release, while a ``/color`` with a readable time still releases
+    it.
     """
     data = load_json(_colours_path(provider_id))
     if not isinstance(data, dict):
@@ -207,6 +212,7 @@ def judge(
     provider_id: str,
     session_ids: Iterable[str | None],
     colour_choice_ms: Callable[[str], int | None],
+    native_colours: Mapping[str, str | None] | None = None,
 ) -> tuple[dict[str, str], dict[str, int | None]]:
     """The colours that still stand, and the entries a newer choice overtook.
 
@@ -219,21 +225,43 @@ def judge(
     is not evidence that none ran - the release is permanent, so it is never
     made on missing evidence.
 
+    ``native_colours`` answers each conversation's own readable colour for a
+    ``native`` source, and is None for every other: a derived default is not
+    the assistant's decision and must leave inherited entries alone. An
+    INHERITED entry with a recorded write time that disagrees with a readable
+    native colour is stale even with no command time (DEF-COLO-357):
+    inheritance is a copy, not a choice, so the colour the assistant now
+    records is the newer of the two. An entry with no recorded write time
+    withholds this release, because a colour file written before origins or
+    times were recorded cannot tell an inherited entry from a hand pick, and
+    dropping the hand pick it may be destroys the user's choice with no undo.
+    The dated path above still releases an undated entry. A HAND-SET entry is
+    never released this way - a tab pick outranks the assistant's colour until
+    a dated command overtakes it.
+
     Only ``session_ids`` are judged, since each costs the store a transcript
     read. The stale map carries the time each entry was judged with, so
     ``release_stale`` drops only an entry that was not rewritten meanwhile. One
     file read for both answers, so they describe the same moment.
     """
-    colours, _overrides, stamps = _read(provider_id)
+    colours, overrides, stamps = _read(provider_id)
     stale: dict[str, int | None] = {}
     for sid in dict.fromkeys(session_ids):
         if not sid or sid not in colours:
             continue
-        chosen = colour_choice_ms(sid)
-        if chosen is None:
-            continue
         stamp = stamps.get(sid)
-        if stamp is None or stamp < chosen:
+        chosen = colour_choice_ms(sid)
+        if chosen is not None:
+            if stamp is None or stamp < chosen:
+                stale[sid] = stamp
+            continue
+        native = native_colours.get(sid) if native_colours is not None else None
+        if (
+            native is not None
+            and stamp is not None
+            and native != colours[sid]
+            and sid not in overrides
+        ):
             stale[sid] = stamp
     live = {sid: colour for sid, colour in colours.items() if sid not in stale}
     return live, stale

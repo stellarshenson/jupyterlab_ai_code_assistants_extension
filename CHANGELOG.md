@@ -4,9 +4,23 @@
 
 ## [Unreleased]
 
+## [1.2.271] - 2026-10-25
+
 ### Changed
 
-- The two entries of a session row's context menu that delete history, Clean Up Parallel Sessions and Remove from followed by the assistant's name, show their label and icon in JupyterLab's error colour (red) in the light and the dark theme; the entry under the pointer or the keyboard is a red row with its label and icon in the theme's inverse text colour; every other entry keeps its colour
+- The two entries of a session row's context menu that delete history, Clean Up Parallel Sessions and Remove from followed by the assistant's name, show their label and their icon in JupyterLab's error colour (red) in the light and the dark theme, also under the pointer or the keyboard; their background while under the pointer or the keyboard stays the one every other entry has
+- Copy Path and Copy Session ID in a session row's context menu show JupyterLab's copy icon
+- The shipped session-operations skill's pin and resume steps rank a project's transcripts the way plain `claude -c` does, including the thirty-day rule for a transcript whose file date sits in the future
+
+### Fixed
+
+- Coming back online, or the JupyterLab tab becoming visible, while JupyterLab is still starting now re-checks which assistants are installed once the extension has started, instead of waiting up to a minute; assistants turned off in the settings are not shown in the meantime
+- A colour file written before origins or write times were recorded keeps its colours when the assistant's own colour disagrees, because the file cannot tell a hand pick from an inherited colour; a colour the assistant records for a /clear replacement still wins over an inherited copy
+- The extension sets the file date of a new Claude Code branch to the moment it is created, so a branch of a conversation made current with Switch no longer takes the parent's thirty-day stamp and is no longer moved back to the moment of the parent's switch, whichever way Claude Code writes the branch's file
+- A row click or a Branch Session click no longer reuses a running terminal that has moved to another conversation: the clicked conversation opens in its own terminal, instead of the one the terminal runs
+- Removing a session no longer brings its row back when a listing requested before the removal answers afterwards
+- A conversation created after a pin now supersedes the pin for Clean Up and for plain `claude -c`, instead of the two following the pinned conversation
+- After Branch Session, pressing + before the branch has finished opening no longer clears the pin that makes plain `claude -c` resume the branch
 
 ## [1.2.236] - 2026-10-21
 

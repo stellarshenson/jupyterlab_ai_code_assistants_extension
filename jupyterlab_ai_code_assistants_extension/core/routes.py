@@ -280,7 +280,9 @@ def _effective_colour(
 
 
 def _live_colours(
-    provider: registry.Provider, session_ids: list[str | None]
+    provider: registry.Provider,
+    session_ids: list[str | None],
+    native_colours: dict[str, str | None] | None = None,
 ) -> tuple[dict[str, str], dict[str, int | None]]:
     """The stored colours that still stand for these conversations, and the
     entries a newer assistant-side colour choice overtook.
@@ -290,9 +292,16 @@ def _live_colours(
     sessions listing and the terminal probe are the two reads that resolve an
     effective colour; both judge here, and both hand the stale entries to
     ``_release_stale`` on the IOLoop.
+
+    ``native_colours`` is the conversations' own readable colours, passed by
+    the caller from the values it is about to resolve against, so no second
+    read. Only a ``native`` source keeps it: a derived default is not the
+    assistant's colour and must never release an inherited entry.
     """
+    if provider.descriptor.capabilities.colour_source != "native":
+        native_colours = None
     return colour_store.judge(
-        provider.id, session_ids, provider.store.colour_choice_ms
+        provider.id, session_ids, provider.store.colour_choice_ms, native_colours
     )
 
 
@@ -444,7 +453,9 @@ class SessionsHandler(_ProviderHandler):
             # Read once for the whole listing, not once per row, and judged
             # beside it in the executor - see `_live_colours`.
             stored, stale = _live_colours(
-                provider, [row.get("session_id") for row in rows]
+                provider,
+                [row.get("session_id") for row in rows],
+                {row.get("session_id"): row.get("colour") for row in rows},
             )
             return rows, stored, stale
 
@@ -576,8 +587,13 @@ class SwitchHandler(_ProviderHandler):
         # conversation the user switched away from drags the row back to it.
         # Written HERE on the loop for every provider - the store's switch only
         # touches mtimes, never the state file, so no pin write can run on the
-        # executor thread above (docs/defects.md DEF-99/DEF-101).
-        state.write_pin(provider.id, encoded_path, session_id)
+        # executor thread above (docs/defects.md DEF-99/DEF-101). It carries
+        # every id the project holds now, read off the loop like the listing: a
+        # conversation created later supersedes the pin (state.pick_current).
+        known = await asyncio.get_running_loop().run_in_executor(
+            None, provider.store.project_session_ids, encoded_path
+        )
+        state.write_pin(provider.id, encoded_path, session_id, known)
         # `current` is answered HERE, after the pin is on disk - the stores no
         # longer compute it at all (docs/defects.md DEF-103). Answering before
         # the pin landed served the OLD pin for a project that already carried
@@ -795,7 +811,10 @@ class BranchHandler(_ProviderHandler):
                 self.bad_request("fork_failed")
                 return
             provider.store.release_switch(encoded_path)
-            state.write_pin(provider.id, encoded_path, new_id)
+            known = await asyncio.get_running_loop().run_in_executor(
+                None, provider.store.project_session_ids, encoded_path
+            )
+            state.write_pin(provider.id, encoded_path, new_id, known)
             # A native fork sets the effective colour in the assistant itself,
             # so a copy here would only record it twice. Written after the
             # fork's own colour choice, the copy would also stand over it until
@@ -1009,16 +1028,20 @@ class _LaunchBase(_ProviderHandler):
         # the conversation the user last switched to.
         if request.session_id is not None:
             return
-        state.clear_pin(provider.id, request.encoded_path)
-        # The pin has stopped naming whatever the user last switched to, so
-        # anything the store left outside its state to steer the assistant's own
-        # CLI has to go with it - or the terminal keeps resuming the abandoned
-        # conversation while this row shows the new one (DEF-PANE-184). On the
-        # executor: it touches the filesystem, and only state writes belong on
-        # the loop (DEF-99/DEF-101).
-        await asyncio.get_running_loop().run_in_executor(
-            None, provider.store.release_switch, request.encoded_path
-        )
+        # The branch lock: a fork running when + is pressed writes its pin
+        # first, so this clear lands after it (DEF-SERV-356).
+        locks = self.settings.setdefault("ai_assistants_branch_locks", {})
+        async with locks.setdefault(provider.id, asyncio.Lock()):
+            state.clear_pin(provider.id, request.encoded_path)
+            # The pin has stopped naming whatever the user last switched to, so
+            # anything the store left outside its state to steer the assistant's
+            # own CLI has to go with it - or the terminal keeps resuming the
+            # abandoned conversation while this row shows the new one
+            # (DEF-PANE-184). On the executor: it touches the filesystem, and
+            # only state writes belong on the loop (DEF-99/DEF-101).
+            await asyncio.get_running_loop().run_in_executor(
+                None, provider.store.release_switch, request.encoded_path
+            )
 
 
 class LaunchHandler(_LaunchBase):
@@ -1160,8 +1183,18 @@ class TerminalHandler(_ProviderHandler):
         def probe() -> tuple[dict, dict[str, int | None]]:
             found, session_id = _tree_assistant(pid)
             running = found is not None and found.id == provider.id
+            # The conversation's own colour, not the row's: a row carries
+            # only the project's current conversation, which flips to any
+            # newer one, so the store is asked for THIS conversation's
+            # default - once per probed terminal, never per row.
+            default = (
+                provider.store.default_colour(session_id)
+                if running and session_id
+                else None
+            )
+            native = {session_id: default} if session_id else None
             stored, stale = (
-                _live_colours(provider, [session_id])
+                _live_colours(provider, [session_id], native)
                 if running and session_id
                 else ({}, {})
             )
@@ -1170,18 +1203,8 @@ class TerminalHandler(_ProviderHandler):
                 "running": running,
                 "cwds": _terminal_cwds(pid),
                 "session_id": session_id if running else None,
-                # The conversation's own colour, not the row's: a row carries
-                # only the project's current conversation, which flips to any
-                # newer one, so the store is asked for THIS conversation's
-                # default - once per probed terminal, never per row.
                 "colour": (
-                    _effective_colour(
-                        session_id,
-                        provider.store.default_colour(session_id)
-                        if session_id
-                        else None,
-                        stored,
-                    )
+                    _effective_colour(session_id, default, stored)
                     if running
                     else None
                 ),

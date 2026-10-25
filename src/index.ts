@@ -524,6 +524,32 @@ const plugin: JupyterFrontEndPlugin<void> = {
       }
     };
 
+    // A suspended network stack - laptop asleep, tab backgrounded - is exactly
+    // when the probe fails, and the slow cadence below would leave the roster
+    // stale for up to a minute after the machine comes back. A wake fires
+    // both events, so it costs two probes; deliberately, because a guard that
+    // let the second join the first answered the wake with a request issued
+    // before it, and starved the interval below of its own tick (DEF-117).
+    // Heard from here, before the first await: a wake before the listeners are
+    // armed below is only remembered, because a reconcile before the settings
+    // load reads the enabled-by-default fallback and docks assistants the user
+    // disabled; one status check answers it once they are armed (DEF-GUARD-122).
+    let armed = false;
+    let wokeDuringActivation = false;
+    const reprobe = (): void => {
+      if (!armed) {
+        wokeDuringActivation = true;
+        return;
+      }
+      void probeStatus().then(reconcile);
+    };
+    window.addEventListener('online', reprobe);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        reprobe();
+      }
+    });
+
     await probeStatus();
 
     if (settingRegistry) {
@@ -617,21 +643,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
       void probeStatus().then(reconcile);
     }, STATUS_INTERVAL_MS);
 
-    // A suspended network stack - laptop asleep, tab backgrounded - is exactly
-    // when the probe fails, and the slow cadence above would leave the roster
-    // stale for up to a minute after the machine comes back. A wake fires
-    // both events, so it costs two probes; deliberately, because a guard that
-    // let the second join the first answered the wake with a request issued
-    // before it, and starved the interval above of its own tick (DEF-117).
-    const reprobe = (): void => {
-      void probeStatus().then(reconcile);
-    };
-    window.addEventListener('online', reprobe);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        reprobe();
-      }
-    });
+    armed = true;
+    if (wokeDuringActivation) {
+      reprobe();
+    }
 
     // Each JupyterLab window keeps its own copy of the settings and never
     // reads them again, and every save writes that whole copy. So a window

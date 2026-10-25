@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 
 from jupyter_core.paths import jupyter_data_dir
@@ -51,9 +52,20 @@ def _state_path(provider_id: str) -> Path:
     return state_dir() / f"{provider_id}.json"
 
 
-def load_state(provider_id: str) -> dict:
-    """``{"favourites": [<project_path>], "pins": {<encoded_path>: <id>}}``.
+class Pin(str):
+    """A pinned conversation id. ``known`` is every conversation id its
+    project held when the pin was written, and ``at`` that time in epoch
+    seconds; both are None on a pin an earlier version wrote."""
 
+    known: frozenset[str] | None = None
+    at: float | None = None
+
+
+def load_state(provider_id: str) -> dict:
+    """``{"favourites": [<project_path>], "pins": {<encoded_path>: Pin}}``.
+
+    On disk a pin stays a plain id under ``pins``, and its ``known`` and ``at``
+    sit under ``pin_snapshots``, so a file an earlier version wrote still loads.
     Unknown or malformed content degrades to empty rather than raising: a
     corrupt sidecar must cost the user their favourites, not their panel.
     """
@@ -67,20 +79,39 @@ def load_state(provider_id: str) -> dict:
                 seen.add(item)
                 favourites.append(item)
         raw_pins = data.get("pins")
+        snapshots = data.get("pin_snapshots")
+        if not isinstance(snapshots, dict):
+            snapshots = {}
         if isinstance(raw_pins, dict):
             for key, value in raw_pins.items():
                 if isinstance(key, str) and _is_pin(value):
-                    pins[key] = value
+                    pin = pins[key] = Pin(value)
+                    snap = snapshots.get(key)
+                    if (
+                        isinstance(snap, dict)
+                        and isinstance(snap.get("ids"), list)
+                        and isinstance(snap.get("at"), (int, float))
+                    ):
+                        pin.known = frozenset(
+                            i for i in snap["ids"] if isinstance(i, str)
+                        )
+                        pin.at = float(snap["at"])
     return {"favourites": favourites, "pins": pins}
 
 
 def save_state(provider_id: str, state: dict) -> None:
-    """Atomically write a provider's state file."""
+    """Atomically write a provider's state file, pin snapshots included."""
+    pins = state.get("pins") or {}
     write_json_atomic(
         _state_path(provider_id),
         {
             "favourites": state.get("favourites") or [],
-            "pins": state.get("pins") or {},
+            "pins": pins,
+            "pin_snapshots": {
+                key: {"ids": sorted(pin.known), "at": pin.at}
+                for key, pin in pins.items()
+                if getattr(pin, "known", None) is not None
+            },
         },
     )
 
@@ -127,12 +158,21 @@ def pick_current(pinned: str | None, activity: dict[str, int]) -> str | None:
     id to ms-epoch of last activity): ``pinned`` when it is still one of
     them, otherwise the most recently active. None for an empty project.
 
-    A dangling pin is ignored and recency resumes. A store whose assistant
-    keeps its own notion of "current" resolves that instead and never calls
-    this.
+    A conversation missing from the pin's ``known`` was created after the pin
+    - a /clear, or one started by hand - and supersedes it (owner ruling
+    2026-10-24): the pin stops deciding and the most recently active of ALL
+    conversations wins, the meaning ``clear_pin`` gives "supersedes", so a
+    return to the clicked conversation takes the row back. A pin without
+    ``known`` is honoured as before. A dangling pin is ignored and recency
+    resumes. A store whose assistant keeps its own notion of "current"
+    resolves that instead and never calls this.
     """
     if not activity:
         return None
+    known = getattr(pinned, "known", None)
+    fresh = [sid for sid in activity if known is not None and sid not in known]
+    if fresh:
+        return max(activity, key=activity.__getitem__)
     if pinned in activity:
         return pinned
     return max(activity, key=activity.__getitem__)
@@ -143,8 +183,16 @@ def read_pin(provider_id: str, encoded_path: str) -> str | None:
     return load_state(provider_id)["pins"].get(encoded_path)
 
 
-def write_pin(provider_id: str, encoded_path: str, session_id: str) -> None:
+def write_pin(
+    provider_id: str,
+    encoded_path: str,
+    session_id: str,
+    known: list[str] | None = None,
+) -> None:
     """Pin ``session_id`` as a project's current conversation.
+
+    ``known`` is every conversation id the project holds now; a conversation
+    created later supersedes the pin (``pick_current``).
 
     Best-effort: pins are written after an irreversible action (a fork, a
     switch), so a failure must leave resolution to fall back to
@@ -153,7 +201,10 @@ def write_pin(provider_id: str, encoded_path: str, session_id: str) -> None:
     if not encoded_path or not _is_pin(session_id):
         return
     state = load_state(provider_id)
-    state["pins"][encoded_path] = session_id
+    pin = state["pins"][encoded_path] = Pin(session_id)
+    if known is not None:
+        pin.known = frozenset(known) | {session_id}
+        pin.at = time.time()
     try:
         save_state(provider_id, state)
     except OSError as err:

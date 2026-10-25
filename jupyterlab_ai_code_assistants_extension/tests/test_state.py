@@ -7,6 +7,8 @@ appears to have worked, and the log is the only place that says it did not.
 """
 from __future__ import annotations
 
+import json
+
 from jupyterlab_ai_code_assistants_extension.core import state
 
 from .conftest import CLAUDE_ENCODED
@@ -40,3 +42,21 @@ def test_a_refused_pin_clear_says_so_in_the_server_log(monkeypatch, caplog):
         state.clear_pin("claude", CLAUDE_ENCODED)
     assert "no space" in caplog.text
     assert "claude" in caplog.text
+
+
+def test_a_pin_snapshot_survives_a_favourite_toggle_and_the_pin_stays_a_plain_id(
+    scratch_stores,
+):
+    """``toggle_favourite`` and migration load and save the whole file, so a
+    save that dropped the snapshot would turn every pin back into one that a
+    new conversation cannot supersede."""
+    other = "66666666-7777-8888-9999-000000000000"
+    state.write_pin("claude", CLAUDE_ENCODED, SESSION_ID, [other])
+    state.toggle_favourite("claude", "/home/lab/projects/demo", True)
+
+    pin = state.read_pin("claude", CLAUDE_ENCODED)
+    assert pin == SESSION_ID
+    assert pin.known == {SESSION_ID, other}
+    # The shipped skill reads `pins["<encoded-cwd>"]` as an id.
+    raw = json.loads((scratch_stores / "state" / "claude.json").read_text())
+    assert raw["pins"] == {CLAUDE_ENCODED: SESSION_ID}

@@ -208,6 +208,26 @@ describe('terminal reuse', () => {
 
     expect(launches).toHaveLength(0);
   });
+
+  it('does not reuse the terminal it launched once its process runs another conversation', async () => {
+    manager = makeManager();
+    manager.setSessions([session()]);
+    await manager.openSession(session(), undefined, CURRENT);
+    expect(launches).toHaveLength(1);
+    // /clear in that terminal: its process now runs a new conversation.
+    probes['launched-1'] = {
+      ...READABLE,
+      terminal_name: 'launched-1',
+      session_id: 'session-22222222-2222-4222-8222-222222222222'
+    };
+    const activated = jest.spyOn((manager as any)._app.shell, 'activateById');
+
+    await manager.openSession(session(), undefined, CURRENT);
+
+    expect(request.mock.calls.map(c => c[1])).toContain('terminal/launched-1');
+    expect(launches).toHaveLength(2);
+    expect(activated).not.toHaveBeenCalledWith('id-0001');
+  });
 });
 
 describe('one spinner dialog (DEF-PANE-327-BUSY-MODAL-1)', () => {

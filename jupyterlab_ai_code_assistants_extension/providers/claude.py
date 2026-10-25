@@ -995,7 +995,9 @@ class ClaudeStore(SessionStore):
         directory but their records still carry the old cwd, so the newest file
         on disk can point at a path that no longer exists. A pin wins over
         recency while it still names a file; a dangling one is ignored and the
-        recency scan resumes.
+        recency scan resumes. Once a conversation created after the pin holds a
+        message, the pin is superseded and the recency scan ranks every
+        transcript, the clicked one included (``state.pick_current``).
 
         A pin whose transcript records a cwd that does not encode to this
         directory is HONOURED. The cwd check below ranks unpinned transcripts,
@@ -1022,6 +1024,22 @@ class ClaudeStore(SessionStore):
             return None
         jsonls.sort(key=_mtime, reverse=True)
         dirname = project_dir.name
+
+        # A conversation created after the pin supersedes it: the pin stops
+        # deciding and the unpinned ranking below runs over every transcript
+        # (state.pick_current), so a return to the clicked one takes the row
+        # back. The pin's stamp goes too, so `claude -c` follows; a stamp a
+        # later switch wrote is kept. The re-sort reads the released mtimes.
+        known = getattr(pinned, "known", None)
+        fresh = [
+            p
+            for p in jsonls
+            if known is not None and p.stem not in known and _has_conversation(p)
+        ]
+        if fresh:
+            self.release_switch(dirname, before=pinned.at)
+            jsonls.sort(key=_mtime, reverse=True)
+            pinned = None
 
         chosen: Path | None = None
         chosen_cwd: str | None = None
@@ -1340,8 +1358,12 @@ class ClaudeStore(SessionStore):
             _log.warning("claude could not stamp %s: %s", jsonl.name, err)
         return {"requested": session_id}
 
-    def release_switch(self, encoded_path: str) -> None:
+    def release_switch(self, encoded_path: str, before: float | None = None) -> None:
         """Give the mtime lead back, and with it the claim on ``claude -c``.
+
+        ``before`` (epoch seconds) gives back only the stamps of switches made
+        at or before it: a pin read from disk before a newer switch landed must
+        not take that switch's stamp.
 
         The stamp ``switch`` writes is only ever justified by the pin: it says
         "the panel chose this one". Once the pin stops naming that conversation
@@ -1388,6 +1410,8 @@ class ClaudeStore(SessionStore):
             if raw <= time.time():
                 continue
             real = raw - SWITCH_MTIME_LEAD_S
+            if before is not None and real > before:
+                continue
             try:
                 os.utime(jsonl, (real, real))
             except OSError as err:
@@ -1478,10 +1502,14 @@ class ClaudeStore(SessionStore):
         # branch, where the ``/color`` below would make it the branch's own
         # colour for good. Read only - this runs pooled, and colour WRITES are
         # loop-serialised (DEF-99); the next listing releases the entry.
+        default = self.default_colour(session_id)
         live, _stale = colour_store.judge(
-            self.provider_id, [session_id], self.colour_choice_ms
+            self.provider_id,
+            [session_id],
+            self.colour_choice_ms,
+            {session_id: default},
         )
-        colour = live.get(session_id) or self.default_colour(session_id)
+        colour = live.get(session_id) or default
         native_colour = next(
             (key for key, value in _TAB_COLOUR_ID.items() if value == colour),
             "default",
@@ -1504,6 +1532,14 @@ class ClaudeStore(SessionStore):
         except (OSError, subprocess.TimeoutExpired) as err:
             _log.warning("claude could not branch %s: %s", session_id, err)
             return None
+        # Dated here, not by the CLI: a --fork-session that copies the parent
+        # with its mtime would hand the child a switched parent's future stamp,
+        # and release_switch would take back a lead the child never received
+        # (DEF-PANE-195).
+        try:
+            os.utime(project_dir / f"{child_id}.jsonl")
+        except OSError as err:
+            _log.warning("claude could not date %s: %s", child_id, err)
         return child_id
 
     def rename(self, encoded_path: str, session_id: str, name: str) -> str | None:

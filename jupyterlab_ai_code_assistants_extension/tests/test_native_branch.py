@@ -1,7 +1,10 @@
 """Native branch metadata is finished before a terminal can resume the child."""
 import json
+import os
+import shutil
 import subprocess
 import contextlib
+import time
 
 import pytest
 
@@ -102,6 +105,52 @@ def test_claude_branch_runs_in_the_project_when_the_last_turn_ran_in_a_subfolder
     monkeypatch.setattr(claude.subprocess, "run", run)
     assert store.fork(encoded, parent, "analysis_1") == child
     assert calls == [str(project), str(project)]
+
+
+@pytest.mark.parametrize("cli_child", ["written fresh", "copied with the parent's mtime"])
+def test_claude_fork_of_a_switched_conversation_is_dated_now(
+    scratch_stores, tmp_path, monkeypatch, cli_child
+):
+    """DEF-PANE-195: the extension dates the child, so whichever way the CLI
+    writes it, it neither keeps the switched parent's future stamp nor is sent
+    into the past by the release that BranchHandler runs next."""
+    store = registry.get("claude").store
+    parent = "44444444-4444-4444-8444-444444444444"
+    child = "55555555-5555-4555-8555-555555555555"
+    sibling = "66666666-6666-4666-8666-666666666666"
+    project = tmp_path / "project"
+    project.mkdir()
+    encoded = claude._encode_path(str(project))
+    folder = scratch_stores / "claude" / "projects" / encoded
+    folder.mkdir(parents=True)
+    record = json.dumps({"type": "user", "cwd": str(project)}) + "\n"
+    for sid in (parent, sibling):
+        (folder / f"{sid}.jsonl").write_text(record)
+    now = time.time()
+    # A sibling written a minute ago; the parent switched two days ago.
+    os.utime(folder / f"{sibling}.jsonl", (now - 60, now - 60))
+    stamp = now - 2 * 86400 + claude.SWITCH_MTIME_LEAD_S
+    os.utime(folder / f"{parent}.jsonl", (stamp, stamp))
+    monkeypatch.setattr(claude.shutil, "which", lambda _: "/bin/claude")
+    monkeypatch.setattr(claude.uuid, "uuid4", lambda: child)
+
+    def run(argv, **kwargs):
+        if "--fork-session" in argv:
+            if cli_child == "written fresh":
+                (folder / f"{child}.jsonl").write_text(record)
+            else:
+                shutil.copy2(folder / f"{parent}.jsonl", folder / f"{child}.jsonl")
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(claude.subprocess, "run", run)
+    before = time.time()
+    assert store.fork(encoded, parent, "analysis_1") == child
+    branch = folder / f"{child}.jsonl"
+    assert before - 1 <= branch.stat().st_mtime <= time.time()
+    store.release_switch(encoded)
+    assert before - 1 <= branch.stat().st_mtime <= time.time()
+    # Newest mtime is what `claude -c` resumes; the pin names the branch.
+    assert max(folder.glob("*.jsonl"), key=lambda p: p.stat().st_mtime) == branch
 
 
 async def test_branch_names_skip_used_suffixes(jp_fetch, present, monkeypatch):

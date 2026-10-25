@@ -51,7 +51,12 @@ jest.mock('../core/request', () => ({
 }));
 
 import { Clipboard, Dialog, Notification } from '@jupyterlab/apputils';
+import { copyIcon } from '@jupyterlab/ui-components';
 import { CommandRegistry } from '@lumino/commands';
+
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import { addIcon, branchIcon, cleanupIcon, shieldIcon } from '../core/icons';
 import {
   AssistantSessionsPanel,
@@ -238,8 +243,10 @@ describe('DEF-51 - the destructive dialogs open with Cancel under the keyboard',
     pressEnter();
     await done;
 
-    expect(request).toHaveBeenCalledTimes(1);
+    // The DELETE, then the listing refetched after it (DEF-PANE-351).
+    expect(request).toHaveBeenCalledTimes(2);
     expect(request.mock.calls[0][3]).toMatchObject({ method: 'DELETE' });
+    expect(request.mock.calls[1][1]).toBe('sessions');
   });
 
   it('Clean Up Parallel Sessions: Enter on the fresh dialog cancels', async () => {
@@ -426,9 +433,37 @@ describe('DEF-45 - both destructive menu entries are marked alike', () => {
 });
 
 describe('ACC-PANE-218 - the history-deleting entries carry the danger class', () => {
+  it('paints the label and the icon with the error colour and leaves the background alone', () => {
+    // jsdom applies no stylesheet, so the rule that makes the class visible is
+    // read as text. The label inherits the item's color; JupyterLab's selected
+    // rule sets only the background, so nothing here may set one, nor the
+    // inverse text colour the superseded filled row used.
+    const css = readFileSync(
+      join(__dirname, '..', '..', 'style', 'base.css'),
+      'utf8'
+    );
+    expect(css).toMatch(
+      /\.jp-AiAssistantsContextMenu-danger\s*\{[^}]*color:\s*var\(--jp-error-color1\)/
+    );
+    expect(css).toMatch(
+      /\.jp-AiAssistantsContextMenu-danger \.jp-icon3\[fill\]\s*\{[^}]*fill:\s*var\(--jp-error-color1\)/
+    );
+    const rules = [
+      ...css.matchAll(
+        /([^{}]*\.jp-AiAssistantsContextMenu-danger[^{}]*)\{([^}]*)\}/g
+      )
+    ];
+    expect(rules.length).toBeGreaterThanOrEqual(2);
+    for (const [, selector, body] of rules) {
+      expect(selector).not.toContain('.lm-mod-active');
+      expect(body).not.toMatch(/\bbackground\b/);
+      expect(body).not.toContain('--jp-ui-inverse-font-color1');
+    }
+  });
+
   it('puts the class on cleanup-parallel and remove, and on no other entry', () => {
-    // base.css draws this class in --jp-error-color1; the menu item takes it
-    // from the command options.
+    // base.css draws the icon of this class in --jp-error-color1; the menu
+    // item takes the class from the command options.
     const commands = (panel as any)._commands as CommandRegistry;
     const marked = commands
       .listCommands()
@@ -442,6 +477,17 @@ describe('ACC-PANE-218 - the history-deleting entries carry the danger class', (
     for (const id of marked) {
       expect(commands.className(id, {})).toBe(
         'jp-AiAssistantsContextMenu-danger'
+      );
+    }
+  });
+});
+
+describe('ACC-PANE-219 - the copy entries carry the copy icon', () => {
+  it('gives Copy Path and Copy Session ID copyIcon', () => {
+    const commands = (panel as any)._commands as CommandRegistry;
+    for (const action of ['copy-path', 'copy-session-id']) {
+      expect(commands.icon(commandId(DESCRIPTOR.id, action), {})).toBe(
+        copyIcon
       );
     }
   });
@@ -1249,6 +1295,113 @@ describe('DEF-PANE-349 - a row click makes the clicked session the project curre
       );
     } finally {
       releaseOpen();
+      await flush();
+    }
+  });
+
+  it('drops a pending row switch after New Session (+) in the same project', async () => {
+    // + starts a new conversation and the launch route clears the pin. A row
+    // click still opening must not pin the old conversation over it
+    // (DEF-PANE-355).
+    const row = session({ name: 'proj' });
+    let releaseOpen!: () => void;
+    const pending = new Promise<void>(resolve => {
+      releaseOpen = resolve;
+    });
+    (panel as any)._terminals.openSession = jest.fn(() => pending);
+    const launch = jest.fn().mockResolvedValue({ id: 'term-new' });
+    (panel as any)._terminals.launch = launch;
+    (panel as any)._currentFolder = () => row.project_path;
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation((_id: string, route: string) =>
+      Promise.resolve(
+        route === 'switch'
+          ? { requested: row.session_id, current: row.session_id }
+          : { sessions: [] }
+      )
+    );
+    try {
+      render(panel, [row]);
+      panel.node
+        .querySelector<HTMLElement>('.jp-AiAssistantsPanel-row')!
+        .click();
+      await flush();
+
+      await (panel as any)._newSession();
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(launch.mock.calls[0][0]).toMatchObject({
+        encoded_path: row.encoded_path
+      });
+
+      releaseOpen();
+      await flush();
+
+      expect(request.mock.calls.map(call => call[1])).not.toContain('switch');
+    } finally {
+      releaseOpen();
+      await flush();
+    }
+  });
+
+  it('posts no queued row switch once New Session (+) is the newest decision', async () => {
+    // A row switch queued behind a post in flight reads the newest decision
+    // when it runs; a + made meanwhile has no id to post (DEF-PANE-355).
+    const first = session({
+      name: 'first',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared'
+    });
+    const second = session({
+      name: 'second',
+      project_path: '/home/user/shared',
+      encoded_path: 'enc-shared',
+      session_id: 'sid-second'
+    });
+    let releasePost!: () => void;
+    const heldPost = new Promise<void>(resolve => {
+      releasePost = resolve;
+    });
+    (panel as any)._terminals.openSession = jest.fn(() => Promise.resolve());
+    (panel as any)._terminals.launch = jest
+      .fn()
+      .mockResolvedValue({ id: 'term-new' });
+    (panel as any)._currentFolder = () => first.project_path;
+    (panel as any)._fetch = jest.fn().mockResolvedValue(undefined);
+    request.mockImplementation(
+      async (_id: string, route: string, _settings: unknown, init: any) => {
+        if (route !== 'switch') {
+          return { sessions: [] };
+        }
+        const body = JSON.parse(init.body);
+        if (body.session_id === first.session_id) {
+          await heldPost;
+        }
+        return { requested: body.session_id, current: body.session_id };
+      }
+    );
+    try {
+      render(panel, [first, second]);
+      const rows = panel.node.querySelectorAll<HTMLElement>(
+        '.jp-AiAssistantsPanel-row'
+      );
+      rows[0].click();
+      await flush();
+      rows[1].click();
+      await flush();
+
+      await (panel as any)._newSession();
+      releasePost();
+      await flush();
+
+      const switches = request.mock.calls.filter(
+        ([, route]) => route === 'switch'
+      );
+      expect(switches).toHaveLength(1);
+      expect(JSON.parse((switches[0][3] as any).body).session_id).toBe(
+        first.session_id
+      );
+    } finally {
+      releasePost();
       await flush();
     }
   });
@@ -2806,6 +2959,118 @@ describe('DEF-PANE-344 - the session list', () => {
     expect((panel as any)._sessions.map((s: ISession) => s.name)).toEqual([
       'newer'
     ]);
+  });
+
+  /** Hold every listing request, in the order sent; other routes answer
+   * `answer`. */
+  const holdListings = (answer: unknown): Array<(v: unknown) => void> => {
+    const held: Array<(v: unknown) => void> = [];
+    request.mockImplementation((_id: string, path: string, _s, init?: any) =>
+      path === 'sessions' && !init?.method
+        ? new Promise(resolve => held.push(resolve))
+        : Promise.resolve(answer)
+    );
+    return held;
+  };
+
+  it('DEF-PANE-351 - a listing sent before Remove gives way to the one after it', async () => {
+    const alpha = session({ name: 'alpha' });
+    const beta = session({ name: 'beta' });
+    render(panel, [alpha, beta]);
+    const held = holdListings({});
+    const poll = (panel as any)._fetch();
+    const removing = (panel as any)._removeProject(alpha);
+    await flush();
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+    )
+      .find(b => b.textContent === 'Remove')!
+      .click();
+    await removing;
+    // The listing sent before the delete answers first, then every one sent
+    // after it answers with what the server holds now.
+    held[0]({ sessions: [alpha, beta] });
+    await poll;
+    held.slice(1).forEach(answer => answer({ sessions: [beta] }));
+    await flush();
+    expect((panel as any)._sessions.map((s: ISession) => s.name)).toEqual([
+      'beta'
+    ]);
+  });
+
+  it('DEF-PANE-351-WRITE-ORDER - a listing sent before Remove never draws the removed project again', async () => {
+    const alpha = session({ name: 'alpha' });
+    const beta = session({ name: 'beta' });
+    render(panel, [alpha, beta]);
+    const held = holdListings({});
+    const poll = (panel as any)._fetch();
+    const removing = (panel as any)._removeProject(alpha);
+    await flush();
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+    )
+      .find(b => b.textContent === 'Remove')!
+      .click();
+    await removing;
+    // The listing sent before the delete answers with the project still in
+    // it, and the refetch after the delete is still held.
+    held[0]({ sessions: [alpha, beta] });
+    await poll;
+    expect((panel as any)._sessions.map((s: ISession) => s.name)).toEqual([
+      'beta'
+    ]);
+    held.slice(1).forEach(answer => answer({ sessions: [beta] }));
+    await flush();
+  });
+
+  it('DEF-PANE-351 - a listing sent before a favourite toggle gives way to the one after it', async () => {
+    const alpha = session({ name: 'alpha' });
+    render(panel, [alpha]);
+    const held = holdListings({ favourite: true });
+    const poll = (panel as any)._fetch();
+    await (panel as any)._toggleFavourite(alpha);
+    held[0]({ sessions: [session({ name: 'alpha', favourite: false })] });
+    await poll;
+    held
+      .slice(1)
+      .forEach(answer =>
+        answer({ sessions: [session({ name: 'alpha', favourite: true })] })
+      );
+    await flush();
+    expect((panel as any)._sessions[0].favourite).toBe(true);
+  });
+
+  it('DEF-PANE-351 - the star a toggle wrote on a row a poll had since replaced is drawn', async () => {
+    // The context menu holds the row it opened on; a poll drawn while it is
+    // open replaces every row object.
+    const opened = session({ name: 'alpha' });
+    render(panel, [opened]);
+    request.mockResolvedValueOnce({ sessions: [session({ name: 'alpha' })] });
+    await (panel as any)._fetch();
+    const held = holdListings({ favourite: true });
+    await (panel as any)._toggleFavourite(opened);
+    held.forEach(answer =>
+      answer({ sessions: [session({ name: 'alpha', favourite: true })] })
+    );
+    await flush();
+    expect((panel as any)._sessions[0].favourite).toBe(true);
+  });
+
+  it('DEF-PANE-351 - a favourite toggle keeps the listing a Launcher tile click asked for', async () => {
+    const alpha = session({ name: 'alpha' });
+    render(panel, [
+      alpha,
+      session({ name: 'beta', session_id: 'sid-beta-old' })
+    ]);
+    const held = holdListings({ favourite: true, argv: ['testbed'] });
+    const tile = (panel as any)._launchIn('/home/user/beta');
+    await (panel as any)._toggleFavourite(alpha);
+    held[0]({
+      sessions: [alpha, session({ name: 'beta', session_id: 'sid-beta-new' })]
+    });
+    await tile;
+    const call = request.mock.calls.find(c => c[1] === 'launch-argv')!;
+    expect(JSON.parse(call[3].body).session_id).toBe('sid-beta-new');
   });
 
   it('DEF-PANE-346 - waits with a redraw while a button is pressed in the list, until the click has been sent', async () => {

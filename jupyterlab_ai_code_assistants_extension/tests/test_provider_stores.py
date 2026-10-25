@@ -2798,3 +2798,140 @@ def test_deepseek_rename_is_not_activity_and_still_shows_the_new_name(deepseek):
     row = store.list_sessions()[0]
     assert row["file_mtime"] == before["file_mtime"]
     assert row["name"] == "New"
+
+
+# ---------------------------- a conversation created after the pin supersedes it
+
+
+def _switch_as_the_route_does(store, encoded, session_id):
+    """The Switch route's sequence: the store's switch, then the pin carrying
+    every id the project holds (core/routes.py SwitchHandler)."""
+    store.switch(encoded, session_id)
+    state.write_pin(
+        store.provider_id, encoded, session_id, store.project_session_ids(encoded)
+    )
+
+
+def _claude_c(project_dir) -> str:
+    """What `claude -c` resumes: the newest transcript by file mtime."""
+    return max(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime).stem
+
+
+@pytest.mark.parametrize("worked_in", [True, False], ids=["clear", "by-hand"])
+def test_claude_a_conversation_created_after_the_pin_supersedes_it(claude, worked_in):
+    """A row click, then /clear or a conversation started by hand (owner ruling
+    2026-10-24): the row, `claude -c` and Clean Up follow the new conversation,
+    so Clean Up deletes the clicked one and keeps the one the user is in."""
+    store, root = claude
+    clicked, other, new = new_uuid(), new_uuid(), new_uuid()
+    project_dir = write_claude_tree(root, [{"id": clicked}, {"id": other}])
+    touch(project_dir / f"{other}.jsonl", -600)
+    _switch_as_the_route_does(store, CLAUDE_ENCODED, clicked)
+    if worked_in:
+        # /clear: the clicked conversation had a turn first, which spends its
+        # stamp.
+        touch(project_dir / f"{clicked}.jsonl", -60)
+    write_claude_tree(root, [{"id": new}])
+
+    assert store.resolve_current(CLAUDE_ENCODED) == new
+    assert store.list_sessions()[0]["session_id"] == new
+    assert _claude_c(project_dir) == new
+    assert store.delete_branches(CLAUDE_ENCODED, [clicked, new]) == [clicked]
+
+
+def test_claude_a_click_on_a_conversation_that_already_exists_still_pins_it(claude):
+    store, root = claude
+    clicked, busier = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(root, [{"id": clicked}, {"id": busier}])
+    touch(project_dir / f"{clicked}.jsonl", -600)
+    _switch_as_the_route_does(store, CLAUDE_ENCODED, clicked)
+    # The other conversation existed at the click and keeps being written.
+    touch(
+        project_dir / f"{busier}.jsonl", claude_provider.SWITCH_MTIME_LEAD_S + 60
+    )
+    assert store.resolve_current(CLAUDE_ENCODED) == clicked
+
+
+def test_claude_a_stub_created_after_the_pin_does_not_supersede_it(claude):
+    """A killed resume leaves a metadata-only stub, which is no conversation
+    (DEF-PANE-320), so it cannot take the row."""
+    store, root = claude
+    clicked = new_uuid()
+    project_dir = write_claude_tree(root, [{"id": clicked}])
+    _switch_as_the_route_does(store, CLAUDE_ENCODED, clicked)
+    (project_dir / f"{new_uuid()}.jsonl").write_text(
+        json.dumps({"type": "last-prompt", "lastPrompt": "hello"}) + "\n",
+        encoding="utf-8",
+    )
+    assert store.resolve_current(CLAUDE_ENCODED) == clicked
+    assert _claude_c(project_dir) == clicked
+
+
+def test_claude_a_pin_from_an_earlier_version_is_honoured(claude, scratch_stores):
+    """A state file with no ``pin_snapshots`` keeps its pin over a newer
+    conversation."""
+    store, root = claude
+    pinned, newer = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(root, [{"id": pinned}, {"id": newer}])
+    touch(project_dir / f"{pinned}.jsonl", -600)
+    state_file = scratch_stores / "state" / "claude.json"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(
+        json.dumps({"favourites": [], "pins": {CLAUDE_ENCODED: pinned}}),
+        encoding="utf-8",
+    )
+    assert store.resolve_current(CLAUDE_ENCODED) == pinned
+
+
+def test_kimi_a_conversation_created_after_the_pin_supersedes_it(kimi):
+    """The same rule through the core's ``pick_current``, which the stores of
+    Codex, Gemini, Kimi and DeepSeek share."""
+    store, root = kimi
+    clicked = f"session_{new_uuid()}"
+    new = f"session_{new_uuid()}"
+    write_kimi_tree(root, KIMI_WD, [{"id": clicked}])
+    _switch_as_the_route_does(store, KIMI_WD, clicked)
+    write_kimi_tree(root, KIMI_WD, [{"id": clicked}, {"id": new}])
+    # The pin alone would keep the clicked conversation; the new one's turn is
+    # the newest.
+    touch(root / "sessions" / KIMI_WD / clicked / "state.json", -600)
+    touch(root / "sessions" / KIMI_WD / new / "state.json", -60)
+
+    assert store.resolve_current(KIMI_WD) == new
+    assert store.list_sessions()[0]["session_id"] == new
+    assert store.delete_branches(KIMI_WD, [clicked, new]) == [clicked]
+
+
+def test_claude_a_return_to_the_clicked_conversation_takes_the_row_back(claude):
+    """Click X, a new conversation N gets a turn, then X gets a newer one: a
+    superseded pin no longer decides, so recency over every conversation keeps
+    X, and Clean Up deletes N, never the conversation in use."""
+    store, root = claude
+    clicked, new = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(root, [{"id": clicked}])
+    _switch_as_the_route_does(store, CLAUDE_ENCODED, clicked)
+    write_claude_tree(root, [{"id": new}])
+    touch(project_dir / f"{new}.jsonl", -60)
+    # X's own append spends its stamp.
+    touch(project_dir / f"{clicked}.jsonl", -10)
+
+    assert store.resolve_current(CLAUDE_ENCODED) == clicked
+    assert store.list_sessions()[0]["session_id"] == clicked
+    assert _claude_c(project_dir) == clicked
+    assert store.delete_branches(CLAUDE_ENCODED, [clicked, new]) == [new]
+
+
+def test_kimi_a_return_to_the_clicked_conversation_takes_the_row_back(kimi):
+    """The same return through the core's ``pick_current``."""
+    store, root = kimi
+    clicked = f"session_{new_uuid()}"
+    new = f"session_{new_uuid()}"
+    write_kimi_tree(root, KIMI_WD, [{"id": clicked}])
+    _switch_as_the_route_does(store, KIMI_WD, clicked)
+    write_kimi_tree(root, KIMI_WD, [{"id": clicked}, {"id": new}])
+    touch(root / "sessions" / KIMI_WD / new / "state.json", -60)
+    touch(root / "sessions" / KIMI_WD / clicked / "state.json", -10)
+
+    assert store.resolve_current(KIMI_WD) == clicked
+    assert store.list_sessions()[0]["session_id"] == clicked
+    assert store.delete_branches(KIMI_WD, [clicked, new]) == [new]

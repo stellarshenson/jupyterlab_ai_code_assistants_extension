@@ -8,16 +8,21 @@ which is the one the user can act on.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+import os
 import json
 from pathlib import Path
 import re
+import threading
 
 import pytest
 import tornado
 
 from jupyterlab_ai_code_assistants_extension.core import registry, routes, state
 from jupyterlab_ai_code_assistants_extension.providers import claude as claude_provider
+
+from .conftest import CLAUDE_ENCODED, new_uuid, write_claude_tree, write_kimi_tree
 
 
 URL = "jupyterlab-ai-code-assistants-extension"
@@ -439,6 +444,9 @@ async def test_switching_to_the_conversation_already_current_is_a_success(
         def switch(self, encoded_path, session_id):
             calls.append((encoded_path, session_id))
             return {"requested": session_id}
+
+        def project_session_ids(self, encoded_path):
+            return ["sid-current"]
 
         def resolve_current(self, encoded_path):
             # The route re-resolves after it writes the pin (DEF-102), and the
@@ -966,6 +974,50 @@ async def test_the_argv_route_answers_the_store_argv_and_clears_the_pin(
     assert state.read_pin("kimi", encoded) is None
 
 
+async def test_a_new_session_during_a_fork_clears_the_fork_pin(
+    jp_fetch, tmp_path, present, monkeypatch, scratch_stores
+):
+    """New Session (+) while a Branch fork runs: the fork's pin is written
+    first and the + launch clears it, so the project ranks by recency
+    (DEF-SERV-356)."""
+    wd = "wd-demo"
+    parent = "session_11111111-2222-3333-4444-555555555555"
+    write_kimi_tree(scratch_stores / "kimi", wd, [{"id": parent}])
+    store = registry.get("kimi").store
+    started, release = threading.Event(), threading.Event()
+    fork = store.fork
+
+    def held_fork(*args):
+        started.set()
+        release.wait(10)
+        return fork(*args)
+
+    monkeypatch.setattr(store, "fork", held_fork)
+    loop = asyncio.get_running_loop()
+    branch = asyncio.ensure_future(
+        _post(
+            jp_fetch,
+            "kimi",
+            "branch",
+            {"encoded_path": wd, "session_id": parent, "name": "analysis_1"},
+        )
+    )
+    await loop.run_in_executor(None, started.wait, 10)
+    plus = asyncio.ensure_future(
+        _post(
+            jp_fetch,
+            "kimi",
+            "launch-argv",
+            {"project_path": str(tmp_path), "encoded_path": wd},
+        )
+    )
+    # Long enough for an unordered + launch to finish while the fork is held.
+    await asyncio.wait({plus}, timeout=1)
+    release.set()
+    await asyncio.gather(branch, plus)
+    assert state.read_pin("kimi", wd) is None
+
+
 async def test_the_argv_route_resumes_without_touching_the_pin(
     jp_fetch, tmp_path, present
 ):
@@ -1138,3 +1190,90 @@ def test_the_shallowest_assistant_in_the_tree_wins(monkeypatch):
     found, session_id = routes._tree_assistant(10)
     assert found is not None and found.id == "claude"
     assert session_id == "outer"
+
+
+# ---------------------------- a conversation created after the pin supersedes it
+
+
+async def _post(jp_fetch, provider_id, verb, body):
+    return await jp_fetch(
+        URL, "providers", provider_id, verb, method="POST", body=json.dumps(body)
+    )
+
+
+def _newest(project_dir) -> str:
+    """What `claude -c` resumes: the newest transcript by file mtime."""
+    return max(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime).stem
+
+
+async def test_a_conversation_started_after_a_late_switch_takes_the_row(
+    jp_fetch, tmp_path, present, scratch_stores
+):
+    """New Session (+), then a row click whose switch lands after it, then the
+    new conversation's first turn: the row and `claude -c` follow the new
+    conversation (owner ruling 2026-10-24)."""
+    old, new = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(scratch_stores / "claude", [{"id": old}])
+    await _post(
+        jp_fetch,
+        "claude",
+        "launch-argv",
+        {"project_path": str(tmp_path), "encoded_path": CLAUDE_ENCODED},
+    )
+    await _post(
+        jp_fetch, "claude", "switch", {"encoded_path": CLAUDE_ENCODED, "session_id": old}
+    )
+    assert state.read_pin("claude", CLAUDE_ENCODED) == old
+    write_claude_tree(scratch_stores / "claude", [{"id": new}])
+
+    response = await jp_fetch(URL, "providers", "claude", "sessions")
+    assert json.loads(response.body)["sessions"][0]["session_id"] == new
+    assert _newest(project_dir) == new
+
+
+async def test_a_click_back_keeps_the_stamp_its_switch_wrote(
+    jp_fetch, present, scratch_stores
+):
+    """Clicking the first conversation again after /clear pins it, and the
+    switch's own read of the project, made under the superseded pin, leaves
+    the new stamp in place for `claude -c`."""
+    clicked, replacement = new_uuid(), new_uuid()
+    root = scratch_stores / "claude"
+    project_dir = write_claude_tree(root, [{"id": clicked}])
+    switch = {"encoded_path": CLAUDE_ENCODED, "session_id": clicked}
+    await _post(jp_fetch, "claude", "switch", switch)
+    write_claude_tree(root, [{"id": replacement}])
+    response = await _post(jp_fetch, "claude", "switch", switch)
+    assert json.loads(response.body)["current"] == clicked
+    # The replacement is still being written to.
+    later = project_dir / f"{replacement}.jsonl"
+    stamp = later.stat().st_mtime + 5
+    os.utime(later, (stamp, stamp))
+    assert _newest(project_dir) == clicked
+
+
+async def test_a_branch_pin_yields_only_to_a_conversation_created_after_it(
+    jp_fetch, present, scratch_stores
+):
+    wd = "wd-branch"
+    root = scratch_stores / "kimi"
+    parent = "session_11111111-2222-3333-4444-555555555555"
+    sibling = "session_66666666-7777-8888-9999-000000000000"
+    write_kimi_tree(root, wd, [{"id": parent}, {"id": sibling}])
+    response = await _post(
+        jp_fetch,
+        "kimi",
+        "branch",
+        {"encoded_path": wd, "session_id": parent, "name": "analysis_1"},
+    )
+    child = json.loads(response.body)["session_id"]
+    store = registry.get("kimi").store
+    # The sibling existed at the branch, so its next turn does not take the row.
+    sibling_state = root / "sessions" / wd / sibling / "state.json"
+    stamp = sibling_state.stat().st_mtime + 60
+    os.utime(sibling_state, (stamp, stamp))
+    assert store.resolve_current(wd) == child
+
+    new = "session_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    write_kimi_tree(root, wd, [{"id": parent}, {"id": sibling}, {"id": new}])
+    assert store.resolve_current(wd) == new

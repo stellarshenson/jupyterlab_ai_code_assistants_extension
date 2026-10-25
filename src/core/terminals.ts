@@ -417,7 +417,7 @@ export class TerminalManager {
   ): Promise<void> {
     // 1. Microcache - the most recent terminal of this project, reused only
     // when it carries the wanted conversation.
-    const cached = this.cached(session.project_path, wanted);
+    const cached = await this.cached(session.project_path, wanted);
     if (cached) {
       this.focus(cached, spinner);
       return;
@@ -530,12 +530,24 @@ export class TerminalManager {
   }
 
   /** The terminal this manager last opened for `projectPath`, when it is
-   * still open and was opened for the conversation `sessionId`; else null. */
-  cached(projectPath: string, sessionId: string): any | null {
+   * still open, was opened for the conversation `sessionId`, and the server
+   * does not read another conversation off its process - which /clear starts
+   * in the same process (DEF-PANE-350); else null. */
+  async cached(projectPath: string, sessionId: string): Promise<any | null> {
     const cached = this._byProject.get(projectPath);
-    return cached && !cached.widget.isDisposed && cached.sessionId === sessionId
-      ? cached.widget
-      : null;
+    if (!cached || cached.widget.isDisposed || cached.sessionId !== sessionId) {
+      return null;
+    }
+    // No id read is the window before the new process is readable, which is
+    // what this cache covers (DEF-PANE-345).
+    const info = await this.probe(cached.widget);
+    if (info?.session_id && info.session_id !== sessionId) {
+      if (this._byProject.get(projectPath) === cached) {
+        this._byProject.delete(projectPath);
+      }
+      return null;
+    }
+    return cached.widget;
   }
 
   /** Remember `widget` as the newest terminal of `projectPath`, opened for

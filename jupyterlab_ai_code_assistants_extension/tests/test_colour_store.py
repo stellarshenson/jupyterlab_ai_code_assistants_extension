@@ -835,6 +835,94 @@ async def test_a_pick_with_no_color_in_the_tail_stands(
     assert colour_store.load_colours("claude") == {PARENT: "sky"}
 
 
+async def test_an_inherited_entry_yields_to_the_colour_the_cli_recorded(
+    jp_fetch, monkeypatch, scratch_stores
+):
+    """DEF-COLO-357: a ``/clear`` inherited peach, then ``/color blue``.
+
+    Claude 2.1.310 writes an accepted ``/color`` as ``agent-color`` records
+    only - no ``local_command`` pair - so no choice time is readable and the
+    inherited entry used to stand for good. The colour those records carry is
+    the newest one the conversation holds, and an inherited entry is a copy,
+    not a pick, so it yields even undated."""
+    write_at(monkeypatch, T0, PARENT, "peach", hand_set=False)
+    claude_transcript(
+        scratch_stores,
+        PARENT,
+        [restamp("blue"), turn(T0 + 60_000), restamp("blue")],
+    )
+    assert registry.get("claude").store.colour_choice_ms(PARENT) is None
+    assert registry.get("claude").store.default_colour(PARENT) == "sky"
+    assert await listed_colour(jp_fetch, monkeypatch) == "sky"
+    assert colour_store.load_colours("claude") == {}
+
+
+async def test_an_inherited_entry_stands_while_the_conversation_has_no_colour(
+    jp_fetch, monkeypatch, scratch_stores
+):
+    """The ``/clear`` inheritance itself (ACC-COLO-213): a new conversation
+    carries no ``agent-color`` of its own yet, so nothing contradicts the
+    inherited entry and it keeps the tab."""
+    write_at(monkeypatch, T0, PARENT, "peach", hand_set=False)
+    claude_transcript(scratch_stores, PARENT, [turn(T0 + 1000)])
+    assert registry.get("claude").store.default_colour(PARENT) is None
+    assert await listed_colour(jp_fetch, monkeypatch) == "peach"
+
+
+def test_a_derived_default_never_releases_an_inherited_entry():
+    """Only a native default is the assistant's own colour. A derived tint is
+    a hash of the id, so treating it as the assistant's answer would drop the
+    born colour of every branch of a derived provider (ACC-COLO-75)."""
+    derived = provider("derived", "lemon")
+    colour_store.set_colour(derived.id, PARENT, "sky", hand_set=False)
+    assert _live_colours(derived, [PARENT], {PARENT: "lemon"}) == (
+        {PARENT: "sky"},
+        {},
+    )
+
+
+def test_a_file_written_before_origins_or_times_withholds_the_native_release(
+    scratch_stores,
+):
+    """An undated entry in a legacy file cannot be classified, so it stands.
+
+    Origins and times both arrived after this shape, so the entry could be a
+    hand pick or an inherited copy. The native rule releases only an inherited
+    entry, and dropping the hand pick it may be destroys the user's colour
+    with no undo."""
+    path = scratch_stores / "state" / "claude-colours.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"colours": {PARENT: "sky"}}), encoding="utf-8")
+    live, stale = colour_store.judge(
+        "claude", [PARENT], lambda sid: None, {PARENT: "peach"}
+    )
+    assert live == {PARENT: "sky"}
+    assert stale == {}
+
+
+def test_a_pre_stamps_file_keeps_an_undated_inherited_entry(scratch_stores):
+    """The real pre-stamps shape keeps its inherited entry.
+
+    Origins were recorded already - the hand-set PARENT is listed in
+    ``overrides`` and the inherited CHILD is not - but no entry carries a
+    time, so the CHILD cannot be shown to predate the native colour the
+    assistant now records for it. The release needs that time; without it the
+    entry stands, and the hand-set PARENT is untouched either way."""
+    path = scratch_stores / "state" / "claude-colours.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {"colours": {PARENT: "peach", CHILD: "peach"}, "overrides": [PARENT]}
+        ),
+        encoding="utf-8",
+    )
+    live, stale = colour_store.judge(
+        "claude", [PARENT, CHILD], lambda sid: None, {CHILD: "sky"}
+    )
+    assert live == {PARENT: "peach", CHILD: "peach"}
+    assert stale == {}
+
+
 async def test_an_inherited_entry_yields_only_to_a_color_run_in_the_branch(
     jp_fetch, monkeypatch, scratch_stores
 ):
@@ -888,4 +976,39 @@ async def test_the_terminal_probe_judges_its_conversation_too(
         ).body
     )
     assert answer["colour"] == "peach"
+    assert colour_store.load_colours("claude") == {}
+
+
+async def test_the_terminal_probe_yields_an_inherited_entry_too(
+    jp_fetch, jp_serverapp, monkeypatch, scratch_stores
+):
+    """The tab is tinted from the probe, and the conversation it names may be
+    one no row represents - so the inherited peach yields to the recorded blue
+    here as well, which is the surface the defect was reported on."""
+    from .test_routes import UNUSED_PID, _FakePty, _FakeTerminalManager
+
+    write_at(monkeypatch, T0, PARENT, "peach", hand_set=False)
+    claude_transcript(scratch_stores, PARENT, [restamp("blue"), turn(T0 + 1000)])
+    manager = _FakeTerminalManager()
+    manager.terminals["term-known"] = _FakePty(pid=UNUSED_PID)
+    monkeypatch.setitem(jp_serverapp.web_app.settings, "terminal_manager", manager)
+    monkeypatch.setattr(registry.Provider, "cli_path", lambda self: "/usr/bin/x")
+    monkeypatch.setattr(
+        claude_provider.ClaudeStore, "owns_pid", lambda self, pid: pid == UNUSED_PID
+    )
+    monkeypatch.setattr(
+        claude_provider.ClaudeStore, "session_id_for_pid", lambda self, pid: PARENT
+    )
+    answer = json.loads(
+        (
+            await jp_fetch(
+                "jupyterlab-ai-code-assistants-extension",
+                "providers",
+                "claude",
+                "terminal",
+                "term-known",
+            )
+        ).body
+    )
+    assert answer["colour"] == "sky"
     assert colour_store.load_colours("claude") == {}

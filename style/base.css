@@ -714,24 +714,16 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
 }
 
 /* The two entries that delete history (Clean Up Parallel Sessions, Remove
-   from ...) carry this class from their command options. The glyph's
-   `jp-icon3` fill is theme-driven, so `color` alone would leave it grey. */
-.jp-AiAssistantsContextMenu-danger,
-.jp-AiAssistantsContextMenu-danger .jp-icon3[fill] {
+   from ...) carry this class from their command options. Label and glyph are
+   red, also while selected: JupyterLab's selected rule sets only the row's
+   background, so the colour holds and the selection background stays every
+   entry's. */
+.jp-AiAssistantsContextMenu-danger {
   color: var(--jp-error-color1);
+}
+
+.jp-AiAssistantsContextMenu-danger .jp-icon3[fill] {
   fill: var(--jp-error-color1);
-}
-
-/* Active (pointer or keyboard): a filled error-colour row with inverse text,
-   because red on JupyterLab's active grey is below 3:1 in the dark theme.
-   `.lm-Menu-item` lifts it above JupyterLab's `.lm-Menu-item.lm-mod-active`. */
-.lm-Menu-item.jp-AiAssistantsContextMenu-danger.lm-mod-active {
-  background: var(--jp-error-color1);
-  color: var(--jp-ui-inverse-font-color1);
-}
-
-.lm-Menu-item.jp-AiAssistantsContextMenu-danger.lm-mod-active .jp-icon3[fill] {
-  fill: var(--jp-ui-inverse-font-color1);
 }
 
 /* ============================================================

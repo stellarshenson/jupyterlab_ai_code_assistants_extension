@@ -270,6 +270,8 @@ done
 
 - `$dir/.pinned-session` holds a plain id; Claude's `*.jsonl` scan ignores it
 - Panel pin: `pins["<encoded-cwd>"]` in `<jupyter-data-dir>/ai-code-assistants/claude.json`
+- `pin_snapshots["<encoded-cwd>"]` in the same file: `ids`, every conversation the project held when the panel pin was written, and `at`, that time in epoch seconds
+- A transcript holding a message whose id is missing from `ids` was created after the panel pin and supersedes it: the panel pin is skipped and the newest transcript of all is current; a panel pin with no `pin_snapshots` entry is honoured
 - `JUPYTERLAB_AI_CODE_ASSISTANTS_STATE_DIR` replaces `<jupyter-data-dir>/ai-code-assistants`
 - Print the data dir: `python3 -c 'from jupyter_core.paths import jupyter_data_dir; print(jupyter_data_dir())'`
 - Neither pin drives `claude -c`
@@ -281,7 +283,12 @@ Resume a project's pinned conversation by id, with a fallback when no pin resolv
 
 1. `cd` to the project and resolve `$dir` from `pwd -P`
 2. Take the id in `$dir/.pinned-session` when `$dir/<id>.jsonl` exists
-3. Otherwise take the panel pin for the encoded dir when its transcript exists
+3. Otherwise take the panel pin for the encoded dir when its transcript exists, unless a transcript holding a message is missing from its `pin_snapshots` ids; such a pin is superseded and skipped. A superseded pin leaves the current conversation to this read-only command, which ranks a future mtime as that mtime less 30 days:
+
+   ```bash
+   now=$(date +%s); for f in "$dir"/*.jsonl; do m=$(stat -c %Y "$f"); [ "$m" -gt "$now" ] && m=$((m - 2592000)); echo "$m $f"; done | sort -rn | head -1
+   ```
+
 4. Otherwise take the newest: `ls -t "$dir"/*.jsonl | head -1`
 5. Run `claude --resume <id>`
 

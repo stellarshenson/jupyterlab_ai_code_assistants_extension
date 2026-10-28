@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.2.288] - 2026-10-28
+
 ### Added
 
 - The `jupyterlab-ai-code-assistants` command lists the sessions of every assistant and renames, moves, deletes, branches and makes current a session through the running JupyterLab server, which it finds with its token when run without arguments; a moved Codex session is forked into the target project and its source archived, so its id changes and the command prints the new one

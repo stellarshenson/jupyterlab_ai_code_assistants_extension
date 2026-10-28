@@ -10,7 +10,7 @@
 
 A full launcher and manager for every AI code assistant in JupyterLab - Claude Code, Codex, Kimi, Gemini and DeepSeek. Start, resume, fork, switch, and clean up CLI sessions from a side panel per assistant - one click lands you in the right terminal with the assistant already running, no duplicate tabs, no UUID hunting. One install replaces the separate `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension` packages and migrates their settings and favourites automatically.
 
-![Claude Code Sessions panel](.resources/screenshot.png)
+![Claude Code panel](.resources/screenshot.png)
 
 ## Why this extension
 

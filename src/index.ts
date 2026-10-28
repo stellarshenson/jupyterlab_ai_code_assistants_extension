@@ -5,6 +5,7 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 import { ICommandPalette, Notification } from '@jupyterlab/apputils';
+import { URLExt } from '@jupyterlab/coreutils';
 import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
 import { ILauncher } from '@jupyterlab/launcher';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
@@ -26,7 +27,7 @@ import {
   panelWidgetId
 } from './core/panel';
 import { LOG_PREFIX, ProviderRegistry } from './core/registry';
-import { requestAPI } from './core/request';
+import { API_NAMESPACE, requestAPI, WINDOW_ID } from './core/request';
 import {
   IMigrateResponse,
   IProviderStatus,
@@ -43,9 +44,10 @@ const PLUGIN_ID = 'jupyterlab_ai_code_assistants_extension:plugin';
 const SHELL_PLUGIN_ID = '@jupyterlab/application-extension:shell';
 /** Sidebar rank, shared by every panel so they dock together. */
 const PANEL_RANK = 600;
-/** How often the server is re-asked which assistants are available, so a CLI
- * installed while JupyterLab runs surfaces without a reload. */
-const STATUS_INTERVAL_MS = 60_000;
+/** The events socket reopens after a drop on a doubling delay, from the base
+ * up to the cap (the house notifications stream's values). */
+const RECONNECT_BASE_MS = 5_000;
+const RECONNECT_MAX_MS = 60_000;
 /** Launcher section every assistant tile lands in. */
 const LAUNCHER_CATEGORY = 'AI Assistants';
 /** Where that section sits. The Launcher ranks Notebook 0, Console 20 and
@@ -173,8 +175,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
           cache: 'no-store'
         });
       } catch (err) {
-        // No cadence named: this also prints from the activation probe, before
-        // the interval and the wake listeners are armed (DEF-122).
+        // No cadence named: there is none, and this also prints from the
+        // activation probe, before the wake listeners are armed (DEF-122).
         console.warn(
           `${LOG_PREFIX} status probe failed; the last known roster stands (every enabled assistant, when there is none yet) until a later probe answers.`,
           err
@@ -265,7 +267,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
         // survives a reload independently of the others.
         restorer?.add(panel, panelWidgetId(id));
         const command = app.commands.addCommand(commandId(id, 'refresh'), {
-          label: `Refresh ${module.descriptor.panelTitle}`,
+          // The panel title is the assistant name alone (ACC-PANE-232); the
+          // command still names what it refreshes.
+          label: `Refresh ${module.descriptor.panelTitle} Sessions`,
           // Takes no arguments, which is what `null` says here.
           describedBy: { args: null },
           execute: () => panel.refresh()
@@ -524,24 +528,48 @@ const plugin: JupyterFrontEndPlugin<void> = {
       }
     };
 
-    // A suspended network stack - laptop asleep, tab backgrounded - is exactly
-    // when the probe fails, and the slow cadence below would leave the roster
-    // stale for up to a minute after the machine comes back. A wake fires
-    // both events, so it costs two probes; deliberately, because a guard that
-    // let the second join the first answered the wake with a request issued
-    // before it, and starved the interval below of its own tick (DEF-117).
+    // No timer checks which assistants are installed (ACC-PROV-230). The check
+    // runs at activation, when the tab becomes visible, when the network comes
+    // back and when the events socket reopens after a drop; a `refresh` push
+    // carries its roster and needs no request. Triggers that arrive before the
+    // request goes out - one macrotask - share it, and one request serves every
+    // panel of the window (ACC-PROV-231). A trigger while a request is in
+    // flight queues exactly one more after it: a wake is never answered by a
+    // request sent before it (DEF-117).
     // Heard from here, before the first await: a wake before the listeners are
     // armed below is only remembered, because a reconcile before the settings
     // load reads the enabled-by-default fallback and docks assistants the user
     // disabled; one status check answers it once they are armed (DEF-GUARD-122).
     let armed = false;
     let wokeDuringActivation = false;
+    /** A status request is queued or in flight. */
+    let probing = false;
+    /** A trigger arrived that the request in flight was sent before. */
+    let wokeAgain = false;
     const reprobe = (): void => {
       if (!armed) {
         wokeDuringActivation = true;
         return;
       }
-      void probeStatus().then(reconcile);
+      wokeAgain = true;
+      if (probing) {
+        return;
+      }
+      probing = true;
+      const send = (): void => {
+        wokeAgain = false;
+        void probeStatus()
+          .then(reconcile)
+          .finally(() => {
+            if (wokeAgain) {
+              send();
+            } else {
+              probing = false;
+            }
+          });
+      };
+      // Runs once per trigger burst, never on a cadence.
+      window.setTimeout(send, 0);
     };
     window.addEventListener('online', reprobe);
     document.addEventListener('visibilitychange', () => {
@@ -637,12 +665,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     reconcile();
 
-    // Re-probe on a slow cadence so a binary installed (or removed) while
-    // JupyterLab runs takes effect on the next refresh, without a reload.
-    window.setInterval(() => {
-      void probeStatus().then(reconcile);
-    }, STATUS_INTERVAL_MS);
-
     armed = true;
     if (wokeDuringActivation) {
       reprobe();
@@ -680,6 +702,79 @@ const plugin: JupyterFrontEndPlugin<void> = {
         channel.postMessage('changed');
       });
     }
+
+    // One events socket per window: the server pushes a message after every
+    // change a route makes, whoever asked for it - the command line included
+    // (ACC-CLI-227, ACC-CLI-228). Opened last, as the house notifications
+    // stream is, so nothing it throws can take the panels down with it.
+    let eventsUrl = URLExt.join(serverSettings.wsUrl, API_NAMESPACE, 'events');
+    // Gated on appendToken, as @jupyterlab/services does for its own sockets:
+    // a same-host session carries the handshake in its cookie.
+    if (serverSettings.appendToken && serverSettings.token) {
+      eventsUrl += `?token=${encodeURIComponent(serverSettings.token)}`;
+    }
+    let socket: WebSocket | null = null;
+    /** Closes since the last open; non-zero means pushes may have been missed. */
+    let drops = 0;
+    let reopenTimer: number | undefined;
+    const openEvents = (): void => {
+      window.clearTimeout(reopenTimer);
+      const ws = new serverSettings.WebSocket(eventsUrl);
+      socket = ws;
+      ws.onopen = () => {
+        if (drops > 0) {
+          // Whatever was pushed while the socket was closed: one status check
+          // and one read per panel (the network-back trigger of ACC-PROV-230).
+          drops = 0;
+          reprobe();
+          live.forEach(entry => entry.panel.sessionsChanged());
+        }
+      };
+      ws.onmessage = (event: MessageEvent) => {
+        const message = JSON.parse(event.data) as {
+          type?: string;
+          provider?: string;
+          window?: string;
+          status?: IStatusResponse;
+        };
+        if (message.type === 'sessions-changed') {
+          // This window's own change: the panel that made it re-reads after
+          // the write, and a second read redraws every row again
+          // (DEF-PANE-370-OWN-PUSH).
+          if (message.window !== WINDOW_ID) {
+            live.get(message.provider ?? '')?.panel.sessionsChanged();
+          }
+        } else if (message.type === 'refresh' && message.status) {
+          // The server probed for this push; its roster needs no request.
+          status = message.status;
+          reconcile();
+          live.forEach(entry => entry.panel.sessionsChanged());
+        }
+      };
+      ws.onclose = () => {
+        socket = null;
+        drops += 1;
+        // This timer only reopens the socket; it checks nothing.
+        reopenTimer = window.setTimeout(
+          openEvents,
+          Math.min(RECONNECT_BASE_MS * 2 ** (drops - 1), RECONNECT_MAX_MS)
+        );
+      };
+      ws.onerror = () => ws.close();
+    };
+    // A closed socket reopens at once when the tab is back or the network is.
+    const reopenEvents = (): void => {
+      if (socket === null) {
+        openEvents();
+      }
+    };
+    window.addEventListener('online', reopenEvents);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        reopenEvents();
+      }
+    });
+    openEvents();
 
     console.log(
       `${LOG_PREFIX} ${live.size} of ${registry.ids.length} assistant panel(s) docked.`

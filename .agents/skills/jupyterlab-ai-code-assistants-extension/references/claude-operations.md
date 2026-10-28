@@ -206,7 +206,7 @@ Moving a conversation, in addition to `session-operations.md`:
 - An absent open file descriptor does not prove the session idle; the bridge opens, appends and closes per write
 - `pgrep -af "resume <id>"` can miss a bridge branch, whose live process may be attached to the parent id
 - Confirm the id from `/status` inside the session or from the user; `lastSessionId` and the `--resume` process can name the pre-compact parent
-- Create the target with `mkdir -p`; a project never opened has no dir
+- `sessions move` creates the target's transcript directory; `--to` must be an existing folder
 - A compacted branch carries its summary and resumes without its parent; move the parent only for the pre-compact history
 - A running session's cwd is fixed; it changes only on the relaunch from the target directory
 - The panel honours a pin whose transcript records a foreign `cwd`; unpinned, it prefers the newest transcript whose `cwd` encodes to the directory
@@ -229,7 +229,7 @@ claude --resume "$new"
 
 1. Branch the conversation to keep when a live process holds it; the child is a new, unheld, newest id
 2. Exit every live process on the other branches
-3. Delete each other branch as a pair: `<id>.jsonl` and `<id>/`
+3. Delete each other branch with `jupyterlab-ai-code-assistants sessions delete <id> -a claude -p <project>`; it removes `<id>.jsonl` and `<id>/` as a pair
 4. Re-pin; a `.pinned-session` or panel pin naming a removed id is stale
 5. `claude -c` now has one candidate
 
@@ -249,12 +249,14 @@ claude --resume "$new"
 
 ## Make a conversation the project default
 
+- `jupyterlab-ai-code-assistants sessions switch <id> -a claude` runs panel Switch from a terminal; never stamp by hand while a server answers
 - With one conversation, the newest accepted unheld transcript is already the default for `-c`
 - Panel Switch repairs a compacted root, gives back the previous switch's stamp, stamps the target's mtime 30 days ahead and pins it in the panel state
 - The stamp holds until the stamped transcript is next appended to, which is the first turn in it; a sibling append can overtake it after that
 - A plain `touch` loses within seconds to any sibling still being written
-- Stamp by hand, as Switch does: `touch -m -d "@$(( $(date +%s) + 2592000 ))" "$dir/<id>.jsonl"`
-- Before stamping another, give the old stamp back:
+- Only when no server answers (the command exits 3), stamp by hand: `touch -m -d "@$(( $(date +%s) + 2592000 ))" "$dir/<id>.jsonl"`
+- A hand stamp leaves a panel pin unchanged: the panel marks the pinned conversation current while `claude -c` resumes the stamped one; run `sessions switch` once a server answers
+- Before a hand stamp, give the old stamp back:
 
 ```bash
 now=$(date +%s)
@@ -303,7 +305,7 @@ Survey both classes before proposing anything. In-session artifacts usually outw
 1. Survey each project: keep the newest, size the rest with their side dirs (script below)
 2. Split by the newest extra's age: 30 days and older is stale, newer may still be active
 3. Ask the user; transcripts exist only here and deletion is permanent unless moved to a trash
-4. Delete each extra as a pair: `<id>.jsonl` and `<id>/`; an orphaned `<id>/` is unreachable
+4. Delete each extra with `jupyterlab-ai-code-assistants sessions delete <id> -a claude -p <project>`, which removes `<id>.jsonl` and `<id>/` as a pair; an orphaned `<id>/` is unreachable
 5. Re-scan: each acted-on project holds one conversation; check `du -sh ~/.claude/projects`
 
 ```python

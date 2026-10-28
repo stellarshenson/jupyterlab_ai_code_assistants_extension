@@ -34,7 +34,7 @@ const claudeSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-0.433 -0
 export const descriptor: IProviderDescriptor = {
   id: 'claude',
   label: 'Claude Code',
-  panelTitle: 'Claude Code Sessions',
+  panelTitle: 'Claude Code',
   iconName: 'jupyterlab_ai_code_assistants_extension:claude',
   iconSvg: claudeSvgStr,
   cliBinary: 'claude',

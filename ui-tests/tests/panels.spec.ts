@@ -67,8 +67,9 @@ test('each panel carries its own provider title', async ({ page }) => {
         .locator('.jp-AiAssistantsPanel-title')
         .textContent()) ?? '';
     // The panel title is the descriptor's own string, not a formula over the
-    // label - Kimi's label is "Kimi" while its panel reads "Kimi Code
-    // Sessions". What must hold is that it names its own assistant.
+    // label - Kimi's label is "Kimi" while its panel reads "Kimi Code". What
+    // must hold here is that it names its own assistant; session-cli.spec.ts
+    // holds the exact names (ACC-PANE-232).
     expect(title).toContain(label);
     titles.push(title);
   }

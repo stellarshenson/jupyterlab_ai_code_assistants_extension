@@ -36,7 +36,7 @@ const YOLO_MODE = 'yoloMode';
 export const descriptor: IProviderDescriptor = {
   id: 'gemini',
   label: 'Gemini',
-  panelTitle: 'Gemini Sessions',
+  panelTitle: 'Gemini',
   iconName: 'jupyterlab_ai_code_assistants_extension:gemini',
   iconSvg: geminiSvgStr,
   cliBinary: 'gemini',

@@ -108,6 +108,18 @@ const BASIC_TERMINAL_LAUNCH = 'basic-terminal:launch';
 
 type SectionKey = 'favourites' | 'recent' | 'all';
 
+/** What a delete says about the conversations the server kept because a live
+ * terminal runs them (ACC-SESS-57); empty when it kept none. */
+function keptCopy(liveIds: string[] | undefined): string {
+  const kept = liveIds?.length ?? 0;
+  if (kept === 0) {
+    return '';
+  }
+  return kept === 1
+    ? 'One conversation was kept, because a live terminal runs it.'
+    : `${kept} conversations were kept, because live terminals run them.`;
+}
+
 export type PresentationMode = 'name' | 'path';
 
 export const DEFAULT_PRESENTATION_MODE: PresentationMode = 'name';
@@ -711,7 +723,8 @@ export class AssistantSessionsPanel extends Widget {
 
   // ------------------------------------------------------------------- data
 
-  private async _fetch(): Promise<void> {
+  /** `keepSame`: an answer equal to what is drawn leaves the rows in place. */
+  private async _fetch(keepSame = false): Promise<void> {
     // This request's place in the order. Requests answer in any order, and an
     // answer older than the one already drawn is dropped (DEF-PANE-344).
     const request = ++this._fetchSent;
@@ -729,12 +742,20 @@ export class AssistantSessionsPanel extends Widget {
     this._fetchDrawn = request;
     // A project removed at or after this listing was sent must not be drawn
     // back from the answer (DEF-PANE-351-WRITE-ORDER).
-    this._sessions = (data.sessions ?? []).filter(
+    const sessions = (data.sessions ?? []).filter(
       s => (this._removedAt.get(s.encoded_path) ?? 0) < request
     );
     this._setInlineError(null);
-    this._terminals.setSessions(this._sessions);
-    this._render();
+    // A redraw replaces every row, and the row a click is on with it
+    // (DEF-PANE-370-OWN-PUSH).
+    if (
+      !keepSame ||
+      JSON.stringify(sessions) !== JSON.stringify(this._sessions)
+    ) {
+      this._sessions = sessions;
+      this._terminals.setSessions(this._sessions);
+      this._render();
+    }
     // Best-effort tinting; never let a colour failure break the fetch.
     void this._colours.load().then(() => this._terminals.reconcileColours());
   }
@@ -758,8 +779,9 @@ export class AssistantSessionsPanel extends Widget {
       );
       // A listing sent before the write may still be drawn, and a poll may
       // have replaced the row this wrote; this one is answered after the write
-      // (DEF-PANE-351).
-      void this._fetch().catch(() => undefined);
+      // (DEF-PANE-351). When it answers what the star above drew, the rows
+      // stay: the star is redrawn once.
+      void this._fetch(true).catch(() => undefined);
     } catch (err) {
       session.favourite = !next; // roll back
       this._render();
@@ -1022,9 +1044,14 @@ export class AssistantSessionsPanel extends Widget {
       // The kept listing names conversations that may have just gone.
       this._branchCache = null;
       bar.value = 1;
-      message.textContent = `Removed ${data.removed_count} parallel session${
-        data.removed_count === 1 ? '' : 's'
-      }.`;
+      message.textContent = [
+        `Removed ${data.removed_count} parallel session${
+          data.removed_count === 1 ? '' : 's'
+        }.`,
+        keptCopy(data.live_ids)
+      ]
+        .filter(part => part)
+        .join(' ');
       // Refresh so the row's conversation count and menu label update.
       await this._fetch();
     } catch (err) {
@@ -1734,6 +1761,10 @@ export class AssistantSessionsPanel extends Widget {
       await this._colours.forget(result.removed_ids ?? sessionIds);
       // The kept listing names conversations that may have just gone.
       this._branchCache = null;
+      const kept = keptCopy(result.live_ids);
+      if (kept) {
+        Notification.info(kept, { autoClose: 4000 });
+      }
       return result.removed_count;
     } catch (err) {
       Notification.error(`Delete failed: ${String(err)}`, { autoClose: 4000 });
@@ -2788,6 +2819,11 @@ export class AssistantSessionsPanel extends Widget {
       // callback still needs to read it. The field is overwritten on the next
       // contextmenu open.
       this._setActiveRow(null);
+      // A change pushed while the menu was open reads now. A microtask later,
+      // because the menu is still attached while this signal fires.
+      if (this._changeWaits) {
+        queueMicrotask(() => this.sessionsChanged());
+      }
     });
   }
 
@@ -3092,12 +3128,37 @@ export class AssistantSessionsPanel extends Widget {
       if (this._polling !== null) {
         return;
       }
-      this._polling = this._fetch()
-        .catch(err => this._showError(err))
-        .finally(() => {
-          this._polling = null;
-        });
+      this._poll();
     }, POLL_INTERVAL_MS);
+  }
+
+  /** The server says this assistant's sessions changed (ACC-CLI-227): read
+   * them through the poll's single-flight fetch. Unlike a poll tick it is
+   * never dropped. It waits for an open row context menu to close, and one
+   * that lands while a read is in flight reads once more after it, because
+   * that read may have been answered before the change. */
+  sessionsChanged(): void {
+    if (this.isDisposed) {
+      return;
+    }
+    if (this._contextMenu.isAttached || this._polling !== null) {
+      this._changeWaits = true;
+      return;
+    }
+    this._poll();
+  }
+
+  private _poll(): void {
+    // A read sent now answers every change pushed before it.
+    this._changeWaits = false;
+    this._polling = this._fetch()
+      .catch(err => this._showError(err))
+      .finally(() => {
+        this._polling = null;
+        if (this._changeWaits) {
+          this.sessionsChanged();
+        }
+      });
   }
 
   private _stopPolling(): void {
@@ -3168,9 +3229,13 @@ export class AssistantSessionsPanel extends Widget {
   private _activeSession: ISession | null = null;
   private _activeRowEl: HTMLElement | null = null;
   private _pollHandle: number | null = null;
-  /** The poll's own in-flight tick. Only the poll reads it - an explicit
-   * Refresh must always issue, however long the last poll is taking. */
+  /** The poll's own in-flight tick. Only the poll and a pushed change read it
+   * - an explicit Refresh must always issue, however long the last poll is
+   * taking. */
   private _polling: Promise<void> | null = null;
+  /** A pushed change waits for the context menu to close or for the read in
+   * flight to answer - see `sessionsChanged`. */
+  private _changeWaits = false;
   /** Listing requests sent, and the number of the newest one drawn - see
    * `_fetch`. */
   private _fetchSent = 0;

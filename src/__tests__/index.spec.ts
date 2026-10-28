@@ -7,9 +7,9 @@
  * usable once one arrives: `reconcile` pushes the late `root_dir` and trash
  * flag into the already-live panel (DEF-GUARD-139).
  *
- * Nothing here waits on a timer. The activation probe fails, the roster is
- * delivered by dispatching `online`, and the promise chain is drained through
- * the microtask queue.
+ * Nothing here waits on a timer longer than one macrotask. The activation
+ * probe fails, the roster is delivered by dispatching `online`, and `flush`
+ * lets the wake's status check go out and drains its promise chain.
  */
 
 // `@jupyterlab/apputils`' barrel reaches two ESM-only packages the repo jest
@@ -30,6 +30,8 @@ jest.mock('@jupyterlab/terminal', () => ({ ITerminalTracker: {} }));
 jest.mock('jupyterlab_colourful_tab_extension', () => ({ IColourfulTabs: {} }));
 // No route in this spec reaches the server.
 jest.mock('../core/request', () => ({
+  API_NAMESPACE: 'jupyterlab-ai-code-assistants-extension',
+  WINDOW_ID: 'this-window',
   requestAPI: jest.fn(),
   requestProvider: jest.fn(() => Promise.resolve({})),
   isRequestTimeout: () => false,
@@ -50,15 +52,18 @@ import {
   commandId,
   panelWidgetId
 } from '../core/panel';
-import { requestAPI } from '../core/request';
+import { requestAPI, requestProvider } from '../core/request';
 import plugin from '../index';
 import { PROVIDERS } from '../providers';
 
 const request = requestAPI as jest.Mock;
+const provider = requestProvider as jest.Mock;
 
-/** Drain the microtask queue - `probeStatus().then(reconcile)` and nothing
- * longer-lived, so no timer is involved. */
+/** Let a wake's status check run: the one macrotask in which coinciding
+ * triggers share a request, then `probeStatus().then(reconcile)` through the
+ * microtask queue. No longer timer is involved. */
 async function flush(turns = 8): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 0));
   for (let i = 0; i < turns; i += 1) {
     await Promise.resolve();
   }
@@ -92,6 +97,33 @@ class TestBroadcastChannel {
 }
 (globalThis as any).BroadcastChannel = TestBroadcastChannel;
 
+/** The events socket a window opens at the end of activation. jsdom's own
+ * WebSocket would dial a server; this one is recorded, so a test opens it,
+ * pushes a message through it and drops it by hand. */
+class FakeSocket {
+  static sockets: FakeSocket[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor(readonly url: string) {
+    FakeSocket.sockets.push(this);
+  }
+
+  close(): void {
+    this.onclose?.();
+  }
+
+  push(message: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(message) });
+  }
+}
+
+/** Server settings an activation can open its events socket with. Each call
+ * is a new object, because a probe tells its activation by this identity. */
+const socketSettings = (): any => ({ WebSocket: FakeSocket });
+
 describe('DEF-GUARD-139 - reconcile hands a late roster to a docked panel', () => {
   it('a panel docked before the first roster gains the root and the trash flag', async () => {
     let roster: unknown = null;
@@ -108,7 +140,7 @@ describe('DEF-GUARD-139 - reconcile hands a late roster to a docked panel', () =
       }
     } as any;
     const app = {
-      serviceManager: { serverSettings: {} },
+      serviceManager: { serverSettings: socketSettings() },
       commands: new CommandRegistry(),
       hasPlugin: () => false
     } as any;
@@ -172,7 +204,7 @@ describe('DEF-GUARD-122 - a wake during activation', () => {
   it('is remembered, reconciles nothing before the settings load, and is answered by one status check once the listeners are armed', async () => {
     // Identity of this activation's probes; earlier activations' listeners
     // reach the same mock (see the activation-contract harness below).
-    const serverSettings = {};
+    const serverSettings = socketSettings();
     let probes = 0;
     request.mockImplementation((path: string, settings: unknown) => {
       if (path !== 'status' || settings !== serverSettings) {
@@ -252,8 +284,9 @@ describe('DEF-GUARD-122 - a wake during activation', () => {
     await activation;
     await flush();
     // How this fails: without the remembered wake the count stays 1 until the
-    // 60 s tick; a listener that probes before the settings load docks every
-    // assistant above, and one probe per wake makes it 3.
+    // next trigger, for no timer checks again; a listener that probes before
+    // the settings load docks every assistant above, and one probe per wake
+    // makes it 3.
     expect(probes).toBe(2);
     expect(docked).toHaveLength(0);
   });
@@ -302,7 +335,7 @@ describe('ACC-LNCH-143..146 - the Launcher tile has the panel lifecycle', () => 
         } as any)
       : null;
     const app = {
-      serviceManager: { serverSettings: {} },
+      serviceManager: { serverSettings: socketSettings() },
       commands: new CommandRegistry(),
       hasPlugin: () => false
     } as any;
@@ -377,7 +410,7 @@ describe('ACC-LNCH-143..146 - the Launcher tile has the panel lifecycle', () => 
     const docked: AssistantSessionsPanel[] = [];
     await (plugin.activate as any)(
       {
-        serviceManager: { serverSettings: {} },
+        serviceManager: { serverSettings: socketSettings() },
         commands: new CommandRegistry(),
         hasPlugin: () => false
       } as any,
@@ -476,7 +509,7 @@ describe('ACC-PROV - the activation contract', () => {
     // `answers` queue would be drained by them. `serverSettings` is passed
     // through by identity, so it is the one thing that tells this activation's
     // probes from theirs.
-    const serverSettings = {};
+    const serverSettings = socketSettings();
     request.mockImplementation((path: string, settings: unknown) => {
       if (path !== 'status' || settings !== serverSettings) {
         return Promise.reject(new Error('not this activation'));
@@ -792,8 +825,8 @@ describe('ACC-PROV - the activation contract', () => {
       .find(text => text.includes('status probe failed'));
     expect(line).toBeDefined();
     expect(line).toContain('until a later probe answers');
-    // No cadence it cannot honour at that moment (DEF-122): the same line
-    // prints from the activation probe, before any interval is armed.
+    // No cadence (DEF-122): there is none to name (ACC-PROV-230), and the same
+    // line prints from the activation probe.
     expect(line).not.toMatch(/\b(60|minute|second|sec\b)/i);
 
     warned.mockRestore();
@@ -828,7 +861,7 @@ describe('ACC-PROV - the activation contract', () => {
     live.docked.forEach(widget => widget.dispose());
   });
 
-  it('ACC-PROV-19 - the roster is whichever probe answers last, and a failure writes nothing', async () => {
+  it('ACC-PROV-19 - a trigger during a probe is answered by one probe after it, and a failure writes nothing', async () => {
     // The starting roster is missing one binary, and that absence is what the
     // failure must not undo. Asserting only that the panels survive cannot
     // tell "the failure wrote nothing" from "the failure wrote null", because
@@ -844,31 +877,35 @@ describe('ACC-PROV - the activation contract', () => {
     const live = await activate({
       answers: [
         () => Promise.resolve(roster(absent)),
-        // Issued first, answers last.
+        // The wake's probe, held in flight.
         () =>
           new Promise(resolve => {
             settle = resolve;
           }),
-        // Issued second, fails immediately.
+        // The probe queued behind it, which fails.
         () => Promise.reject(new Error('server down'))
       ]
     });
     expect(dockedIds(live)).not.toContain(absent);
+    const before = live.probes();
 
-    window.dispatchEvent(new Event('online')); // slow probe, still in flight
-    window.dispatchEvent(new Event('online')); // fails while it is in flight
+    window.dispatchEvent(new Event('online')); // probe, held in flight
     await flush();
+    window.dispatchEvent(new Event('online')); // lands while it is in flight
+    window.dispatchEvent(new Event('online'));
+    await flush();
+    // Queued, not sent: two probes in flight could answer out of order.
+    expect(live.probes()).toBe(before + 1);
 
-    // The failure wrote nothing, so the roster it overtook still stands and
-    // the missing binary is still missing.
+    settle!(roster(absent));
+    await flush();
+    // Exactly one probe after the answer, for the wakes it was sent before
+    // (DEF-117) - not one per wake.
+    expect(live.probes()).toBe(before + 2);
+    // That probe failed and wrote nothing, so the roster still stands and the
+    // missing binary is still missing.
     expect(dockedIds(live)).not.toContain(absent);
     expect(dockedIds(live)).toHaveLength(PROVIDERS.length - 1);
-
-    settle!(roster());
-    await flush();
-
-    // The answer that landed last is the roster, whatever order it was issued in.
-    expect(dockedIds(live)).toContain(absent);
 
     live.docked.forEach(widget => widget.dispose());
   });
@@ -889,6 +926,215 @@ describe('ACC-PROV - the activation contract', () => {
 
     logged.mockRestore();
     live.docked.forEach(widget => widget.dispose());
+  });
+
+  describe('the status triggers and the events socket', () => {
+    const latestSocket = (): FakeSocket =>
+      FakeSocket.sockets[FakeSocket.sockets.length - 1];
+
+    /** Sessions reads sent by each assistant's panel in one activation. */
+    const reads = (live: IHarness): Record<string, number> => {
+      const counts: Record<string, number> = {};
+      for (const [id, path, settings] of provider.mock.calls) {
+        if (
+          path === 'sessions' &&
+          settings === live.app.serviceManager.serverSettings
+        ) {
+          counts[id] = (counts[id] ?? 0) + 1;
+        }
+      }
+      return counts;
+    };
+
+    const dockedIds = (live: IHarness): string[] =>
+      live.docked
+        .filter(widget => !widget.isDisposed)
+        .map(widget => widget.descriptor.id);
+
+    const setVisibility = (state: string): void => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => state
+      });
+    };
+
+    it('ACC-PROV-230 - activation arms no interval for the status check', async () => {
+      const intervals = jest.spyOn(window, 'setInterval');
+      const live = await activate();
+
+      // How this fails: arm the old 60 s re-probe again.
+      expect(intervals).not.toHaveBeenCalled();
+
+      intervals.mockRestore();
+      live.docked.forEach(widget => widget.dispose());
+    });
+
+    it('ACC-PROV-231 - triggers that coincide issue one status request for every panel', async () => {
+      const live = await activate();
+      const before = live.probes();
+
+      window.dispatchEvent(new Event('online'));
+      setVisibility('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await flush();
+
+      // One request for the network and the tab together, and one roster
+      // serves every docked panel.
+      expect(live.probes()).toBe(before + 1);
+      expect(dockedIds(live)).toHaveLength(PROVIDERS.length);
+
+      live.docked.forEach(widget => widget.dispose());
+    });
+
+    it('ACC-CLI-227 - a sessions-changed push re-reads only its own panel, with no status request', async () => {
+      const live = await activate();
+      const [target, ...others] = dockedIds(live);
+      const before = reads(live);
+      const probes = live.probes();
+
+      latestSocket().push({ type: 'sessions-changed', provider: target });
+      await flush();
+
+      const after = reads(live);
+      expect((after[target] ?? 0) - (before[target] ?? 0)).toBe(1);
+      for (const id of others) {
+        expect((after[id] ?? 0) - (before[id] ?? 0)).toBe(0);
+      }
+      expect(live.probes()).toBe(probes);
+
+      live.docked.forEach(widget => widget.dispose());
+    });
+
+    it('DEF-PANE-370 - a sessions-changed push naming this window re-reads no panel, and one naming another window re-reads its panel', async () => {
+      const live = await activate();
+      const [target] = dockedIds(live);
+      const before = reads(live);
+
+      // This window's own change: its panel re-read after the write already.
+      latestSocket().push({
+        type: 'sessions-changed',
+        provider: target,
+        window: 'this-window'
+      });
+      await flush();
+      expect(reads(live)[target] ?? 0).toBe(before[target] ?? 0);
+
+      // Another window's change still reaches this one (ACC-CLI-227).
+      latestSocket().push({
+        type: 'sessions-changed',
+        provider: target,
+        window: 'other-window'
+      });
+      await flush();
+      expect((reads(live)[target] ?? 0) - (before[target] ?? 0)).toBe(1);
+
+      live.docked.forEach(widget => widget.dispose());
+    });
+
+    it('ACC-CLI-228 - a refresh push docks a newly available assistant and re-reads every panel, with no status request', async () => {
+      const late = PROVIDERS[2].descriptor.id;
+      const live = await activate({
+        answers: [() => Promise.resolve(roster(late))]
+      });
+      expect(dockedIds(live)).not.toContain(late);
+      const before = reads(live);
+      const probes = live.probes();
+
+      latestSocket().push({ type: 'refresh', status: roster() });
+      await flush();
+
+      // Docked from the roster the push carried, with no reload and no
+      // request of its own.
+      expect(dockedIds(live)).toContain(late);
+      expect(live.probes()).toBe(probes);
+      const after = reads(live);
+      for (const id of dockedIds(live)) {
+        expect((after[id] ?? 0) - (before[id] ?? 0)).toBe(1);
+      }
+
+      live.docked.forEach(widget => widget.dispose());
+    });
+
+    it('ACC-PROV-230 - after a drop the reopen timer checks nothing, and the open runs one status check and one read per panel', async () => {
+      const live = await activate();
+      const first = latestSocket();
+      first.onopen!();
+      await flush();
+      const probes = live.probes();
+      const before = reads(live);
+
+      const timers = jest.spyOn(window, 'setTimeout');
+      first.close();
+      const reopen = timers.mock.calls.find(
+        ([, delay]) => delay === 5000
+      )?.[0] as () => void;
+      timers.mockRestore();
+      expect(reopen).toBeDefined();
+
+      // The backoff timer fires: it only opens a socket.
+      reopen();
+      await flush();
+      const second = latestSocket();
+      expect(second).not.toBe(first);
+      expect(live.probes()).toBe(probes);
+
+      // The open after the drop answers what may have been pushed meanwhile.
+      second.onopen!();
+      await flush();
+      expect(live.probes()).toBe(probes + 1);
+      const after = reads(live);
+      for (const id of dockedIds(live)) {
+        expect((after[id] ?? 0) - (before[id] ?? 0)).toBe(1);
+      }
+
+      live.docked.forEach(widget => widget.dispose());
+    });
+
+    it('ACC-PROV-230 - a closed socket reopens at once when the network or the tab comes back', async () => {
+      const live = await activate();
+      latestSocket().onopen!();
+      const opened = FakeSocket.sockets.length;
+
+      latestSocket().close();
+      window.dispatchEvent(new Event('online'));
+      expect(FakeSocket.sockets.length).toBe(opened + 1);
+      // A socket that is not closed is left alone.
+      window.dispatchEvent(new Event('online'));
+      expect(FakeSocket.sockets.length).toBe(opened + 1);
+
+      latestSocket().close();
+      setVisibility('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(FakeSocket.sockets.length).toBe(opened + 2);
+
+      await flush();
+      live.docked.forEach(widget => widget.dispose());
+    });
+
+    it('ACC-PANE-232 - each panel is titled by its assistant name alone, and its Refresh command keeps Sessions', async () => {
+      const names: Record<string, string> = {
+        claude: 'Claude Code',
+        codex: 'Codex',
+        deepseek: 'DeepSeek',
+        gemini: 'Gemini',
+        kimi: 'Kimi Code'
+      };
+      const live = await activate();
+      expect(dockedIds(live).sort()).toEqual(Object.keys(names).sort());
+
+      for (const panel of live.docked) {
+        const name = names[panel.descriptor.id];
+        expect(panel.title.caption).toBe(name);
+        expect(
+          panel.node.querySelector('.jp-AiAssistantsPanel-title')!.textContent
+        ).toBe(name);
+        expect(
+          live.app.commands.label(commandId(panel.descriptor.id, 'refresh'))
+        ).toBe(`Refresh ${name} Sessions`);
+      }
+
+      live.docked.forEach(widget => widget.dispose());
+    });
   });
 });
 
@@ -947,7 +1193,7 @@ describe('ACC-SETT - settings drive the panels', () => {
       migrated?: unknown[];
     } = {}
   ): Promise<ISettingsHarness> {
-    const serverSettings = {};
+    const serverSettings = socketSettings();
     request.mockImplementation((path: string, settings: unknown) => {
       if (settings === serverSettings && path === 'status') {
         return Promise.resolve(roster());
@@ -1839,7 +2085,7 @@ describe('ACC-RETI-82..84 - a retired standalone extension still installed', () 
     app: any;
     probe: () => void;
   }> {
-    const serverSettings = {};
+    const serverSettings = socketSettings();
     request.mockImplementation((path: string, settings: unknown) =>
       path === 'status' && settings === serverSettings
         ? Promise.resolve(roster())

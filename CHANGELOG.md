@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- The `jupyterlab-ai-code-assistants` command lists the sessions of every assistant and renames, moves, deletes, branches and makes current a session through the running JupyterLab server, which it finds with its token when run without arguments; a moved Codex session is forked into the target project and its source archived, so its id changes and the command prints the new one
+- `jupyterlab-ai-code-assistants refresh` re-checks which assistant CLIs are installed and updates every open JupyterLab window without a browser reload: the panel of a newly installed assistant appears and the panel of a removed one goes away
+- A session change, made with the command or in a panel, shows at once in that assistant's panel in every open window on the server, instead of after the panel's next 30-second list refresh
+
+### Changed
+
+- Each panel's header and sidebar tab name the assistant alone (Claude Code, Codex, Kimi Code, Gemini, DeepSeek) without the word Sessions, and the settings describe the panels the same way; the Refresh command keeps its label, such as Refresh Claude Code Sessions
+- The check of which assistant CLIs are installed no longer repeats every 60 seconds: it runs when the page loads, when the browser tab becomes visible, when the network comes back and when the server pushes the result of `refresh`, and checks that coincide share one probe on the server
+- Deleting sessions keeps a conversation that a running terminal is on for every assistant and for the command alike, and the panel says how many it kept; before, only Claude Code kept it
+
+### Fixed
+
+- In a Claude Code project whose folder name holds a space, an @ or another character that is not a letter or a digit, the panel reads the directory Claude Code itself keeps for that folder, so the conversation a running terminal is on is recognised there as in any other project, and a session moved into such a folder lands where Claude Code resumes it
+- The same holds for a Claude Code project folder whose name holds an emoji or whose path is longer than 200 characters: a moved session lands in the directory Claude Code itself names for that folder, and the project is listed under its own folder when the last turn ran in a subfolder
+- After a Codex terminal closes, the project row no longer shows the dot 'A Codex session is active in this project': the background Codex app-server, which keeps running in that folder, no longer counts as a Codex session
+- Adding or removing a favorite star draws the panel's rows once, so the row a following click is aimed at is no longer replaced under it; the window that made a session change reads the sessions once, and every other open window still shows the change at once
+
 ## [1.2.282] - 2026-10-25
 
 ### Changed

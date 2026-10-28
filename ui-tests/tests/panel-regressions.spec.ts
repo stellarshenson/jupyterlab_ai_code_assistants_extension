@@ -37,30 +37,6 @@ const WIDE_NAME =
 const CLAUDE_ROUTES =
   '/jupyterlab-ai-code-assistants-extension/providers/claude';
 
-/** Load the page with the extension's 60 s status interval swallowed, so the
- * only status probe a wake test can see after the load is its listener's
- * (DEF-GUARD-120). The swallowed interval is counted, so an interval with
- * another period fails here instead of running unseen. */
-async function gotoWithoutStatusInterval(page: any): Promise<void> {
-  await page.addInitScript(() => {
-    const arm = window.setInterval.bind(window);
-    (window as any).__statusIntervals = 0;
-    (window as any).setInterval = (
-      handler: TimerHandler,
-      timeout?: number,
-      ...args: any[]
-    ) => {
-      if (timeout === 60_000) {
-        (window as any).__statusIntervals += 1;
-        return 0;
-      }
-      return arm(handler, timeout, ...args);
-    };
-  });
-  await page.goto();
-  expect(await page.evaluate(() => (window as any).__statusIntervals)).toBe(1);
-}
-
 /** Arm a launch mode through the settings registry, the way a user does. */
 async function setLaunchMode(
   page: any,
@@ -577,7 +553,9 @@ test('DEF-57 - one tab stop per section, not one per row', async ({ page }) => {
 test('DEF-117 - each wake event re-probes status on its own', async ({
   page
 }) => {
-  await gotoWithoutStatusInterval(page);
+  // No timer re-probes status (ACC-PROV-230), so the only status probe a wake
+  // test can see after the load is its listener's (DEF-GUARD-120).
+  await page.goto();
   await openPanelTab(page, 'claude');
 
   // Counted only from here, after the panel is up, so the probes the page load
@@ -611,17 +589,14 @@ test('DEF-117 - each wake event re-probes status on its own', async ({
     .poll(() => probes, { timeout: 5000 })
     .toBeGreaterThan(beforeOnline);
 
-  // How this fails: before the fix neither listener existed, so the next probe
-  // was the 60s timer's and both polls ran out their five seconds. Polled
-  // rather than slept because arriving in seconds instead of a minute IS the
-  // fix. The 60s timer is swallowed in this page, so no tick can satisfy a
-  // poll in the listener's place (DEF-GUARD-120).
+  // How this fails: delete either listener and its poll runs out its five
+  // seconds, for no timer probes in its place (ACC-PROV-230).
 });
 
-test('DEF-121 - a stale failed probe cannot discard a newer roster', async ({
+test('DEF-121 - a failed probe writes nothing, and the wake queued behind it answers after it', async ({
   page
 }) => {
-  await gotoWithoutStatusInterval(page);
+  await page.goto();
   await openPanelTab(page, 'claude');
 
   const warnings: string[] = [];
@@ -648,23 +623,27 @@ test('DEF-121 - a stale failed probe cannot discard a newer roster', async ({
   await page.evaluate(() => {
     window.dispatchEvent(new Event('online'));
   });
-  await expect.poll(() => seen, { timeout: 5000 }).toBeGreaterThan(0);
+  await expect.poll(() => seen, { timeout: 5000 }).toBe(1);
 
-  // A second probe, issued later, answers normally with the real roster.
+  // A wake while that probe is held is queued behind it, not sent beside it:
+  // two probes in flight could answer out of order (DEF-117).
   await page.evaluate(() => {
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await expect.poll(() => seen, { timeout: 5000 }).toBeGreaterThan(1);
+  await page.waitForTimeout(1000);
+  expect(seen).toBe(1);
 
   const tab = page.locator(`.lm-TabBar-tab[data-id="${panelId('claude')}"]`);
   await expect(tab).toBeVisible();
 
   // Now the wedged probe fails - the shape a client timeout takes. A failure
-  // writes nothing, so there is no verdict to discard.
+  // writes nothing, and the queued wake's probe follows it with the real
+  // roster.
   await held.abort('failed');
   await expect
     .poll(() => warnings.length, { timeout: 10000 })
     .toBeGreaterThan(0);
+  await expect.poll(() => seen, { timeout: 5000 }).toBe(2);
   // The catch always warns before `reconcile` runs, which is what makes it
   // usable as a settle signal here.
   await page.waitForTimeout(1000);
@@ -674,9 +653,9 @@ test('DEF-121 - a stale failed probe cannot discard a newer roster', async ({
 
   // How this fails: let a failed probe write `status = null` again and
   // `reconcile` reads that as every provider unavailable - both assertions
-  // above find nothing, panels undocked while the server is healthy and
-  // answered fifteen seconds ago. A failure writes nothing (DEF-132), so
-  // there is no verdict to order against the roster.
+  // above find nothing, panels undocked while the server is healthy. Send the
+  // queued wake beside the held probe and `seen` is 2 before the abort; drop
+  // it and `seen` never reaches 2.
 });
 
 test('DEF-132 - a failed activation probe does not cost the sidebar its panel', async ({
@@ -750,7 +729,7 @@ test('DEF-125 - the PATH warning re-arms once the binary comes back', async ({
     await route.fulfill({ response, json: body });
   });
 
-  await gotoWithoutStatusInterval(page);
+  await page.goto();
 
   // The line fires for every enabled provider whose binary is absent.
   await setProviderEnabled(page, id, true);

@@ -33,7 +33,7 @@ const kimiSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.395 -1.8
 export const descriptor: IProviderDescriptor = {
   id: 'kimi',
   label: 'Kimi',
-  panelTitle: 'Kimi Code Sessions',
+  panelTitle: 'Kimi Code',
   iconName: 'jupyterlab_ai_code_assistants_extension:kimi',
   iconSvg: kimiSvgStr,
   cliBinary: 'kimi',

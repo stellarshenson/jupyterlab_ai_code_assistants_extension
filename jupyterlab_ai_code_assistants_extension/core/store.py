@@ -358,6 +358,16 @@ class LaunchRefused(Exception):
     """
 
 
+class MoveRefused(Exception):
+    """A move the store refuses in words meant for the user.
+
+    Raised out of ``move`` when the target cannot take the conversation - it
+    already holds one under the same id, or its folder name cannot be written
+    in the assistant's own key. The route answers it as ``LaunchRefused`` is
+    answered: 409 with the sentence in ``message``.
+    """
+
+
 class SessionStore(ABC):
     """Per-provider access to one assistant's conversation history."""
 
@@ -518,6 +528,28 @@ class SessionStore(ABC):
         The answer is the STORED name rather than the requested one, because a
         store may normalise what it writes. None means the write failed,
         which the core turns into 400 ``rename_failed``.
+        """
+        return None
+
+    def move(
+        self,
+        encoded_path: str,
+        session_id: str,
+        target_path: str,
+        to_trash: bool = False,
+    ) -> tuple[str, str] | None:
+        """Move ``session_id`` into the project at ``target_path``.
+
+        Answers ``(id after the move, target project's encoded_path)``. The id
+        changes only for a store that can move a conversation solely by
+        copying it through its assistant; ``to_trash`` is how that store
+        retires the source. ``target_path`` is a real, existing directory
+        (the route resolved it). All or nothing: a step that fails puts the
+        source back and answers None, which the core turns into 400
+        ``move_failed``. :class:`MoveRefused` carries a refusal for the user.
+
+        Unsupported by default, which the ``can_move`` capability declares and
+        the route enforces before the store is asked.
         """
         return None
 

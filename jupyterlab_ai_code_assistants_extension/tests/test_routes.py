@@ -190,6 +190,7 @@ PROVIDER_ROUTES = [
     ("POST", ("favourite",), {"project_path": "/tmp", "favourite": True}),
     ("POST", ("branch",), {"encoded_path": "x", "session_id": "y"}),
     ("POST", ("rename",), {"session_id": "y", "name": "n"}),
+    ("POST", ("move",), {"encoded_path": "x", "session_id": "y", "target_path": "/tmp"}),
     ("POST", ("launch",), {"project_path": "/tmp"}),
     ("POST", ("launch-argv",), {"project_path": "/tmp"}),
     ("GET", ("terminal", "some-terminal"), None),

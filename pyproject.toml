@@ -50,6 +50,9 @@ dependencies = [
 ]
 dynamic = ["version", "description", "authors", "urls", "keywords"]
 
+[project.scripts]
+jupyterlab-ai-code-assistants = "jupyterlab_ai_code_assistants_extension.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "jupyterlab>=4",

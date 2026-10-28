@@ -50,6 +50,7 @@ from ..core.store import (
     NODE_COMMS,
     FileMemo,
     LaunchRefused,
+    MoveRefused,
     SessionNotFound,
     SessionStore,
     cmdline_args,
@@ -617,6 +618,90 @@ class DeepSeekStore(SessionStore):
             return None
         return name
 
+    def _project_key_for(self, project_path: str) -> str:
+        """The ``--<key>--`` directory the harness keeps ``project_path`` in.
+
+        An existing directory whose conversations record it as their ``cwd``,
+        else the path with its leading ``/`` dropped and every ``/`` written
+        as ``-``, the shape of every real key. A path holding any other
+        character than ``[A-Za-z0-9._/-]`` would need the harness's ``~XXXX``
+        escape, which cannot be confirmed without the harness, so it is
+        refused rather than guessed.
+        """
+        for project_dir in self._project_dirs():
+            if any(
+                os.path.realpath(meta["cwd"]) == project_path
+                for _log_path, meta in self._sessions(project_dir).values()
+            ):
+                return project_dir.name
+        key = "--" + project_path.lstrip("/").replace("/", "-") + "--"
+        if not re.fullmatch(r"[A-Za-z0-9._/-]+", project_path) or not (
+            PROJECT_KEY_RE.fullmatch(key)
+        ):
+            raise MoveRefused(
+                "the harness's project key for this folder cannot be written "
+                "here; open DeepSeek in it once first"
+            )
+        return key
+
+    def move(
+        self,
+        encoded_path: str,
+        session_id: str,
+        target_path: str,
+        to_trash: bool = False,
+    ) -> tuple[str, str] | None:
+        """Rename the conversation's directory under the target's project key
+        and rewrite the log's header ``cwd``.
+
+        The log is re-encoded in the harness's own frame layout and keeps its
+        mtime - a move is not activity. The TUI's own caches are not touched;
+        this store reads neither. A failed rewrite puts the directory back.
+        Same id, so ``to_trash`` is unused.
+        """
+        if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
+            return None
+        project_dir = self._project_dir(encoded_path)
+        found = self._sessions(project_dir).get(session_id) if project_dir else None
+        if found is None:
+            return None
+        log, _meta = found
+        text = read_log(log)
+        if text is None:
+            return None
+        key = self._project_key_for(target_path)
+        dst_dir = self.root / key / session_id
+        if dst_dir.exists():
+            raise MoveRefused("the target project already holds this conversation")
+        lines = text.split("\n")
+        header = json.loads(lines[0])
+        header["cwd"] = target_path
+        lines[0] = json.dumps(header, separators=(",", ":"), ensure_ascii=False)
+        moved = False
+        try:
+            before = log.stat()
+            dst_dir.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(log.parent, dst_dir)
+            moved = True
+            dst = dst_dir / log.name
+            tmp = dst.with_name(f"{dst.name}.move")
+            tmp.write_bytes(
+                encode_log("\n".join(lines), compressed=log.suffix == ".zstd")
+            )
+            os.utime(tmp, (before.st_atime, before.st_mtime))
+            os.replace(tmp, dst)
+        except OSError as err:
+            _log.warning("deepseek could not move %s: %s", session_id, err)
+            if moved:
+                try:
+                    (dst_dir / f"{log.name}.move").unlink(missing_ok=True)
+                    os.rename(dst_dir, log.parent)
+                except OSError as undo:
+                    _log.warning("deepseek could not put back %s: %s", session_id, undo)
+            return None
+        _meta_memo.drop(log)
+        return session_id, key
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -716,6 +801,8 @@ DESCRIPTOR = ProviderDescriptor(
         # A name is the newest ``session/title`` event of the log, which is
         # where the harness's web UI reads it.
         can_rename=True,
+        # The conversation directory moves under the target's project key.
+        can_move=True,
     ),
     # No standalone extension preceded this provider, so there is no state to
     # carry over.

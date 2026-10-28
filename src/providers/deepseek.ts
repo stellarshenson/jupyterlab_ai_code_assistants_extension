@@ -31,7 +31,7 @@ const deepseekSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.5 -4
 export const descriptor: IProviderDescriptor = {
   id: 'deepseek',
   label: 'DeepSeek',
-  panelTitle: 'DeepSeek Sessions',
+  panelTitle: 'DeepSeek',
   iconName: 'jupyterlab_ai_code_assistants_extension:deepseek',
   iconSvg: deepseekSvgStr,
   cliBinary: 'dsh',

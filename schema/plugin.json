@@ -42,7 +42,7 @@
     "providers.claude.enabled": {
       "type": "boolean",
       "title": "Claude Code: enabled",
-      "description": "Show the Claude Code Sessions panel. A panel appears only when this is on AND the `claude` binary is on PATH.",
+      "description": "Show the Claude Code panel. A panel appears only when this is on AND the `claude` binary is on PATH.",
       "default": true
     },
     "providers.claude.dangerouslySkipPermissions": {
@@ -54,7 +54,7 @@
     "providers.codex.enabled": {
       "type": "boolean",
       "title": "Codex: enabled",
-      "description": "Show the Codex Sessions panel. A panel appears only when this is on AND the `codex` binary is on PATH.",
+      "description": "Show the Codex panel. A panel appears only when this is on AND the `codex` binary is on PATH.",
       "default": true
     },
     "providers.codex.dangerouslyBypassApprovalsAndSandbox": {
@@ -66,13 +66,13 @@
     "providers.deepseek.enabled": {
       "type": "boolean",
       "title": "DeepSeek: enabled",
-      "description": "Show the DeepSeek Sessions panel. A panel appears only when this is on AND the `dsh` binary is on PATH.",
+      "description": "Show the DeepSeek panel. A panel appears only when this is on AND the `dsh` binary is on PATH.",
       "default": true
     },
     "providers.gemini.enabled": {
       "type": "boolean",
       "title": "Gemini: enabled",
-      "description": "Show the Gemini Sessions panel. A panel appears only when this is on AND the `gemini` binary is on PATH.",
+      "description": "Show the Gemini panel. A panel appears only when this is on AND the `gemini` binary is on PATH.",
       "default": true
     },
     "providers.gemini.yoloMode": {
@@ -84,7 +84,7 @@
     "providers.kimi.enabled": {
       "type": "boolean",
       "title": "Kimi: enabled",
-      "description": "Show the Kimi Code Sessions panel. A panel appears only when this is on AND the `kimi` binary is on PATH.",
+      "description": "Show the Kimi Code panel. A panel appears only when this is on AND the `kimi` binary is on PATH.",
       "default": true
     },
     "providers.kimi.yoloMode": {

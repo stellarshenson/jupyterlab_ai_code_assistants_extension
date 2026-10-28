@@ -36,6 +36,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 - **Conversation switcher** - a right-click "Switch and Manage Sessions" submenu lists a project's other conversations by name and short id. "Manage Sessions..." opens a searchable list with multi-select delete and copy-id
 - **Branch session** - fork the current conversation into a new named session from the right-click menu
 - **Rename session** - name a conversation from the right-click menu, and the panel shows the name the assistant itself kept
+- **Command line** - `jupyterlab-ai-code-assistants` lists, renames, moves, deletes, branches and switches the sessions of every assistant and refreshes the panels, from a terminal or an agent; every open panel shows the change at once
 - **Launch modes under each assistant's own name** - Claude's skip-permissions, Codex's approval bypass, Kimi's `--yolo` and Gemini's YOLO; unsafe variants carry a shield glyph
 - **Coloured terminal tabs** - each session's colour tints its terminal tab, and a branched session inherits its parent's colour. Claude's `/color` supplies a default and Kimi derives a stable one; Codex, Gemini and DeepSeek have no colour until you set one
 - **Your newest colour choice wins** - a colour set on a terminal tab is remembered for that conversation; a Kimi or DeepSeek conversation that has never been resumed, including one started with `+`, is the exception, because its id cannot be read yet. In Claude Code whichever of the tab colour and `/color` you used last wins, and Reset Tab Colour in the right-click menu hands back the colours you set by hand
@@ -75,6 +76,27 @@ pip install jupyterlab_ai_code_assistants_extension
 
 > [!WARNING]
 > `package.json` pins `webpack: 5.106.0` and `chalk: 4.1.2` in both `resolutions` and `overrides`. Do not remove these. webpack `>= 5.106.1` changed its module-federation share identifier format and crashes the unmaintained `license-webpack-plugin` (`split('=')[1].trim()`) that `@jupyterlab/builder` injects into every production build; the duplicate `chalk@2.4.2` pulled by `duplicate-package-checker-webpack-plugin` crashes on Node 24+ in the build-isolation install. Without the pins, `make publish` and CI fail on `python -m build`.
+
+## Command line
+
+The wheel installs `jupyterlab-ai-code-assistants`. It finds the running Jupyter server and its token, and changes sessions only through that server, so every open panel shows the change at once.
+
+```bash
+jupyterlab-ai-code-assistants                                   # the server and every assistant (status)
+jupyterlab-ai-code-assistants sessions list -a claude -p ~/project
+jupyterlab-ai-code-assistants sessions rename <id> "New name" -a kimi
+jupyterlab-ai-code-assistants sessions move <id> --to ~/other-project -a gemini
+jupyterlab-ai-code-assistants sessions delete <id> -a claude
+jupyterlab-ai-code-assistants sessions branch <id> -a claude --name "Experiment"
+jupyterlab-ai-code-assistants sessions switch <id> -a codex
+jupyterlab-ai-code-assistants refresh                           # after installing or removing an assistant CLI
+```
+
+- `--url` and `--json` go before the subcommand; `--url` chooses the server when several run
+- There is no token option: the token comes from `JUPYTERLAB_AI_CODE_ASSISTANTS_TOKEN`, else the server's runtime record, else `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN` or `JUPYTER_TOKEN` for a loopback address
+- A session a running terminal holds is never moved or deleted, and a project's current session is never deleted
+- A Codex move forks the session into the target under a new id, which the command prints, and archives the source
+- `jupyterlab-ai-code-assistants --help` lists the exit codes; `--help` after a subcommand lists its options
 
 ## Agent skill
 

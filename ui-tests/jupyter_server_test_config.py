@@ -366,6 +366,28 @@ for _project in ("trash-fixture", "fallback-fixture"):
         # deletable branch.
         os.utime(_file, (_now - 2400 + _index, _now - 2400 + _index))
 
+# A Claude project owned by `session-cli.spec.ts` alone: the command line
+# renames its one conversation while the panel is open. Its mtime sits between
+# the Clean Up projects and the session-delete projects, below every row a
+# "first listed" locator reads; a Claude rename puts the mtime back, so the row
+# does not move.
+_cli_cwd = _root / "cli-sync"
+_cli_cwd.mkdir()
+_cli_dir = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / _encode_path(str(_cli_cwd))
+_cli_dir.mkdir()
+_cli_file = _cli_dir / "cli-sync-0.jsonl"
+_cli_file.write_text(
+    "".join(
+        json.dumps(record) + "\n"
+        for record in (
+            {"cwd": str(_cli_cwd)},
+            {"type": "user", "message": {"role": "user", "content": "seed"}},
+        )
+    ),
+    encoding="utf-8",
+)
+os.utime(_cli_file, (_now - 2300, _now - 2300))
+
 # Two Claude projects owned by `cleanup-confirmation.spec.ts` alone. One pins
 # an older conversation as current while a newer transcript sits beside it, so
 # the Clean Up confirmation must warn that a conversation it removes was active

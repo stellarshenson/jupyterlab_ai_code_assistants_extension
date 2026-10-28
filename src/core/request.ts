@@ -2,10 +2,18 @@ import { URLExt } from '@jupyterlab/coreutils';
 
 import { ServerConnection } from '@jupyterlab/services';
 
+import { UUID } from '@lumino/coreutils';
+
 import { LOG_PREFIX } from './registry';
 
 /** The server extension's API namespace. Every route lives under it. */
 export const API_NAMESPACE = 'jupyterlab-ai-code-assistants-extension';
+
+/** This window's name, sent with every request in {@link WINDOW_HEADER}. The
+ * server names it in the push a change causes, and this window skips that
+ * push: its panel re-reads after every write it makes (DEF-PANE-370-OWN-PUSH). */
+export const WINDOW_ID = UUID.uuid4();
+export const WINDOW_HEADER = 'X-AI-Assistants-Window';
 
 /**
  * DEF-72: how long a single server call may run before the client gives up.
@@ -83,6 +91,15 @@ export async function requestAPI<T>(
     API_NAMESPACE,
     endPoint
   );
+  // shortcut: a `Headers` instance in `init.headers` would be dropped here; no
+  // caller passes one.
+  init = {
+    ...init,
+    headers: {
+      ...(init.headers as Record<string, string>),
+      [WINDOW_HEADER]: WINDOW_ID
+    }
+  };
 
   // DEF-72: `ServerConnection.makeRequest` sets no deadline of its own, so
   // without this a wedged server holds the call for as long as the browser

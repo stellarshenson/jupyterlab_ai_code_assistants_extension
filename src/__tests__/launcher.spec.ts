@@ -30,6 +30,7 @@ jest.mock('@jupyterlab/terminal', () => ({ ITerminalTracker: {} }));
 jest.mock('jupyterlab_colourful_tab_extension', () => ({ IColourfulTabs: {} }));
 // No route in this spec reaches the server.
 jest.mock('../core/request', () => ({
+  API_NAMESPACE: 'jupyterlab-ai-code-assistants-extension',
   requestAPI: jest.fn(),
   requestProvider: jest.fn(() => Promise.resolve({})),
   // Shape-based rather than `instanceof`, so a test can hand the panel the
@@ -666,7 +667,8 @@ describe('the tiles the plugin adds to the Launcher', () => {
       }
     } as any;
     const app = {
-      serviceManager: { serverSettings: {} },
+      // Activation ends by opening the events socket; this one dials nothing.
+      serviceManager: { serverSettings: { WebSocket: class {} } },
       commands: new CommandRegistry(),
       hasPlugin: () => false
     } as any;

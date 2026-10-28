@@ -12,6 +12,8 @@
 
 ## Find
 
+With JupyterLab running, `jupyterlab-ai-code-assistants sessions list -a claude -p <root>` prints the project's sessions, the current one marked `*`. Without a server, by hand:
+
 1. Resolve root: `git rev-parse --show-toplevel` or `pwd`
 2. Match encoded dir; when absent, scan `~/.claude/projects/*/*.jsonl` and keep first `cwd` equal to root or under it
 3. Sort by last activity, newest first; current conversation is `lastSessionId`, pin names deliberate one
@@ -20,9 +22,12 @@
 
 ## Move to another project
 
+- Run `jupyterlab-ai-code-assistants sessions move <id> --to <target> -a <assistant>`; add `-p <source>` when the id is in several projects
+- The session leaves the source, lists under the target and becomes the target's current session; every open panel shows it
+- Resume it in the target folder: `claude --resume <id>`; other assistants' resume commands are in `cross-assistant-sessions.md`
+- A Codex move forks into the target under a new id and archives the source; the command prints the new id after `as`, `--json` as `session_id`
+- A session a running terminal holds is refused with exit 4; close it first
 - One id under two encoded dirs comes from a project folder rename; the re-homed records keep the old `cwd` (`claude-operations.md`)
-- To move: copy `<id>.jsonl` and `<id>/` into the target encoded dir, append `{"cwd": "<target>"}`, then run `claude --resume <id>` there
-- Delete the source copy only when the move must be one-way
 - Two live processes on two copies of one id fork silently
 
 ## Copy to another project, fresh id
@@ -41,13 +46,13 @@ Run `scripts/copy-session.py <src.jsonl> <target-dir> --with-side-files`. It par
 
 ## Split and branch
 
-- Branch at current point: panel Branch Session forks transcript into new id, keeps history to fork
+- Branch at current point: `jupyterlab-ai-code-assistants sessions branch <id> -a <assistant> [--name <name>]` or panel Branch Session forks transcript into new id, keeps history to fork; the branch becomes current
 - Split into two independent continuations: copy with fresh id
-- Collapse to one transcript: branch wanted conversation, stop or delete the held branch; re-pinning does not free a held branch
+- Collapse to one transcript: branch wanted conversation, stop the process holding the other branch, then `sessions delete <id> -a <assistant>` it; re-pinning does not free a held branch
 
 ## Rename
 
-- Panel Rename Session calls provider rename route; Claude provider appends `{"type": "custom-title", "customTitle": ...}` record, same as CLI `/rename`
+- `jupyterlab-ai-code-assistants sessions rename <id> <name> -a <assistant>` and panel Rename Session call the provider rename route; Claude provider appends `{"type": "custom-title", "customTitle": ...}` record, same as CLI `/rename`
 - Rename only while no live process holds transcript; live process rewrites file
 - Leave `custom-title.json` alone when stripping agent markings; it carries human title
 

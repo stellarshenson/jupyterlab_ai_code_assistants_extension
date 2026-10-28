@@ -23,6 +23,7 @@ from jupyterlab_ai_code_assistants_extension.core import state
 from jupyterlab_ai_code_assistants_extension.core import store as store_module
 from jupyterlab_ai_code_assistants_extension.core.store import (
     LaunchRefused,
+    MoveRefused,
     SessionNotFound,
 )
 from jupyterlab_ai_code_assistants_extension.providers import codex as codex_provider
@@ -1662,12 +1663,12 @@ def test_claude_claims_its_native_binary_by_comm_alone(claude, monkeypatch):
 
 
 def test_a_native_binary_store_claims_a_pid_by_comm_alone(codex, monkeypatch):
-    """The base rule is the comm, exact for a native binary; Codex inherits it."""
+    """The base rule is the comm, exact for a native binary."""
     store, _root = codex
     monkeypatch.setattr(store_module, "process_comm", lambda pid: "codex")
-    assert store.owns_pid(1) is True
+    assert store_module.SessionStore.owns_pid(store, 1) is True
     monkeypatch.setattr(store_module, "process_comm", lambda pid: "bash")
-    assert store.owns_pid(1) is False
+    assert store_module.SessionStore.owns_pid(store, 1) is False
 
 
 @pytest.mark.parametrize("node_comm", ["MainThread", "node-MainThread", "node"])
@@ -3191,3 +3192,27 @@ def test_claude_off_linux_a_live_pid_alone_names_the_row(claude, monkeypatch):
     assert listing["current"] == live
     assert [b["session_id"] for b in listing["branches"]] == [newer]
     assert store.delete_branches(CLAUDE_ENCODED, [live, newer]) == [newer]
+
+
+def test_claude_off_linux_a_live_terminal_s_conversation_is_not_moved(
+    claude, monkeypatch, tmp_path
+):
+    """The move route's live check reads ``/proc`` and finds no process off
+    Linux. The store refuses on the live set ``delete_branches`` keeps, so a
+    move cannot take the transcript from under its terminal there either."""
+    store, root = claude
+    live, idle = new_uuid(), new_uuid()
+    project_dir = write_claude_tree(
+        root, [{"id": live, "turns": 1}, {"id": idle, "turns": 1}]
+    )
+    _live_terminal_record(root, live)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    target = tmp_path / "target"
+    target.mkdir()
+
+    with pytest.raises(MoveRefused):
+        store.move(CLAUDE_ENCODED, live, str(target))
+    assert (project_dir / f"{live}.jsonl").is_file()
+    assert store.move(CLAUDE_ENCODED, idle, str(target)) == (
+        idle, claude_provider._encode_path(str(target))
+    )

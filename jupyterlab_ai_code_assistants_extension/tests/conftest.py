@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 import zstandard
 
-from jupyterlab_ai_code_assistants_extension.core import registry, state
+from jupyterlab_ai_code_assistants_extension.core import registry, routes, state
 from jupyterlab_ai_code_assistants_extension.providers import (
     claude as claude_provider,
 )
@@ -68,6 +68,22 @@ def scratch_stores(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def server_isolation(monkeypatch):
+    """A fresh status pool, no open push sockets and an empty process table
+    for every test.
+
+    The pool keeps the last roster for a second, and each test runs its own
+    event loop, so a roster or a probe left by the previous test would answer
+    this one; a socket a failed test left open would count as a window of
+    this one. The live-session check walks ``/proc``, where the developer's
+    own assistants run; a test that needs a running process supplies one.
+    """
+    monkeypatch.setattr(routes, "_roster_pool", routes._RosterPool())
+    monkeypatch.setattr(routes, "_listeners", set())
+    monkeypatch.setattr(routes, "_proc_pids", lambda: [])
+
+
+@pytest.fixture(autouse=True)
 def fresh_registry():
     """Drop the discovery cache around every test.
 
@@ -76,6 +92,16 @@ def fresh_registry():
     whatever ran next.
     """
     registry.reload()
+    # monkeypatch undoes a method patched on a store instance by setting the
+    # bound original back ON the instance. The stores are module singletons,
+    # so that copy would outlive its test and hide a later patch of the class.
+    for provider in registry.providers().values():
+        store = provider.store
+        for name, value in list(vars(store).items()):
+            if getattr(value, "__self__", None) is store and getattr(
+                value, "__func__", None
+            ) is getattr(type(store), name, None):
+                delattr(store, name)
     yield
     registry.reload()
 

@@ -66,12 +66,16 @@ class Capabilities:
       close: an assistant whose names live in a store this extension only
       reads has no honest rename, and the core hides the action rather than
       offering one that fails
+    * ``can_move`` - the store can move a conversation into another project
+      folder (``SessionStore.move``); False answers 400 ``move_unsupported``
+      before the store is asked. Server-only: no panel action reads it
     """
 
     fork_strategy: str = "none"
     colour_source: str = "none"
     launch_modes: tuple[str, ...] = ()
     can_rename: bool = False
+    can_move: bool = False
 
 
 @dataclass(frozen=True)

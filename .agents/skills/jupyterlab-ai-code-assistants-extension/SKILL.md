@@ -1,11 +1,32 @@
 ---
 name: jupyterlab-ai-code-assistants-extension
-description: Session operations for the assistant panels of this extension. Claude Code - find, move, split, rename, copy a session into another project under a fresh id, promote a background job so `claude -c` resumes it, repair a compacted conversation, pin a default, clean up transcripts, enable the task list, run Claude Code against Kimi K3 or DeepSeek. Codex, Kimi, Gemini and DeepSeek - read, inventory, take over and resume a project's sessions. Use when a session is missing, `claude -c` reports "No conversation found to continue", a session lists as an agent session, work must continue in another project, tasks do not appear, Claude Code must use another provider, or the user says "take over", "read the other session", "where did the last agent stop", "list sessions across assistants", "resume the Gemini session" or "continue what Codex was doing".
+description: Session operations for the assistant panels. Any assistant - list, rename, move, delete, branch or make current a session, and refresh the panels, with the `jupyterlab-ai-code-assistants` command; read, inventory, take over and resume sessions. Claude Code - find, split, copy a session to another project under a fresh id, promote a background job so `claude -c` resumes it, repair a compacted conversation, pin a default, clean up transcripts, enable the task list, run Claude Code against Kimi K3 or DeepSeek. Use when a session is missing, `claude -c` reports "No conversation found to continue", a session lists as an agent session, work must continue in another project, tasks do not appear, an assistant CLI was installed or removed, Claude Code must use another provider, or the user names `jupyterlab-ai-code-assistants` or says "take over", "read the other session", "where did the last agent stop", "list sessions across assistants", "resume the Gemini session" or "continue what Codex was doing".
 ---
 
 # Session operations
 
-Runbook for sessions the assistant panels list. Claude Code mechanics: `references/claude-operations.md`. Other assistants and takeover: `references/cross-assistant-sessions.md`.
+Runbook for sessions the assistant panels list. List, rename, move, delete, branch and make current a session with the `jupyterlab-ai-code-assistants` command, never by editing an assistant's store. Claude Code mechanics: `references/claude-operations.md`. Other assistants and takeover: `references/cross-assistant-sessions.md`.
+
+## Command
+
+- Changes go through the running JupyterLab server; every open panel shows them at once
+- Not on `PATH`: `python -m jupyterlab_ai_code_assistants_extension.cli`, with the Python that runs the lab
+- `--url URL` (base URL without `/lab`) and `--json` go before the subcommand; default server is the running one
+- `status`, also with no subcommand - server, then per assistant id, label, enabled and CLI path; `-a` takes that id
+- `sessions list [-a ID] [-p PATH]` - one row per project, its current session; with `-p`, that project's other sessions too
+- `sessions rename SESSION NAME -a ID`
+- `sessions move SESSION --to PATH -a ID` - `--to` is an existing folder; the session becomes current there
+- `sessions delete SESSION -a ID` - follows JupyterLab's move-to-trash setting; never the project's current session
+- `sessions branch SESSION -a ID [--name NAME]` - the branch becomes current; unnamed, it is numbered after SESSION's title
+- `sessions switch SESSION -a ID` - makes SESSION its project's current session
+- SESSION is the full id `sessions list` prints; `-p PATH` names the project holding it, else every project is searched
+- `refresh` after installing or removing an assistant CLI: panels dock or leave in every open window
+- A Codex move forks into the target under a new id and archives the source; resume the id the command prints after `as`
+- Exit 2: usage error, or several servers run - pass `--url`
+- Exit 3: no server answers - start JupyterLab or pass `--url`
+- Exit 4: refused - session open in a running terminal (close it), delete of the current session (`sessions switch` first), already in the `--to` project, `--to` not a folder, name refused, or the assistant does not offer it
+- Exit 5: not found - assistant unknown, turned off or not installed (`status`), or no such session or project (`sessions list`)
+- Exit 1: the server failed; the stderr line says why
 
 ## Stores
 
@@ -17,12 +38,12 @@ Runbook for sessions the assistant panels list. Claude Code mechanics: `referenc
 
 ## Operations
 
-- Find: resolve root, match encoded dir or first `cwd`; `find ~/.claude/projects -name "<id>.jsonl"` lists copies
-- Move: copy `<id>.jsonl` and `<id>/` into target encoded dir, append `{"cwd": "<target>"}`, resume with `claude --resume <id>`; a project folder rename leaves one id under two encoded dirs
+- Find: `sessions list -a claude -p <root>`; without a server, match encoded dir or first `cwd`; `find ~/.claude/projects -name "<id>.jsonl"` lists copies
+- Move: `sessions move <id> --to <target> -a <assistant>`, then resume in the target folder, `claude --resume <id>`; a project folder rename leaves one id under two encoded dirs
 - Copy, fresh id: `python3 scripts/copy-session.py <src.jsonl> <target-dir> --with-side-files` rewrites every `sessionId` and `session_id` (nested and side files), copies the side directory and pins; no shared tasks or background work
-- Split: Branch Session forks at current point; copy with fresh id gives two independent continuations
-- Collapse: branch wanted conversation, stop or delete the held branch - `-c` ignores pins, so re-pinning does not free it
-- Rename: panel Rename Session or CLI `/rename`; both append `custom-title` record; no live process may hold file
+- Split: `sessions branch` forks at current point; copy with fresh id gives two independent continuations
+- Collapse: `sessions branch` the wanted conversation, stop the process holding the other, then `sessions delete` it - `-c` ignores pins, so re-pinning does not free it
+- Rename: `sessions rename`, panel Rename Session or CLI `/rename`; each appends a `custom-title` record; no live process may hold the file
 - Promote background job: stop the live job, confirm no pid holds transcript; resume with `claude --resume <id>`; `agent-name` stripping is optional cleanup
 - Handoff: outbound document to OS temp dir, suggested skills and artifact paths, secrets redacted; inbound reads newest transcript fully and checks stop point against live state
 
@@ -31,6 +52,7 @@ Details: `references/session-operations.md`. Compaction repair, background jobs,
 ## Other assistants
 
 - Codex, Kimi, Gemini and DeepSeek (`dsh`): stores, transcript formats, read commands and resume commands in `references/cross-assistant-sessions.md`
+- Change their sessions with the command, as for Claude Code
 - Inventory: one project's sessions across all five assistants, newest first
 - Take over: live state first, read the newest session in full, verify the stop point, report, stop
 

@@ -47,7 +47,7 @@ from typing import Any
 
 from ..core import state
 from ..core.registry import Capabilities, LegacySource, ProviderDescriptor
-from ..core.store import SessionStore, process_comm
+from ..core.store import SessionStore, cmdline_args, process_cmdline, process_comm
 
 
 # Degradations here are otherwise invisible: a swallowed sqlite error looks
@@ -99,6 +99,7 @@ _THREAD_COLUMNS = (
     "source",
     "archived",
     "has_user_event",
+    "rollout_path",
 )
 _ROLLOUT_META_SCAN_LINES = 10
 
@@ -293,8 +294,29 @@ def _threads_from_db(codex_root: Path) -> list[dict] | None:
             "source": rec.get("source"),
             "archived": bool(rec.get("archived")),
             "has_user_event": bool(rec.get("has_user_event")),
+            "rollout_path": rec.get("rollout_path"),
         })
     return threads
+
+
+def _fork_parent(rollout_path: Any) -> str | None:
+    """The thread a ``thread/fork`` copy was forked from, or None.
+
+    Read off the rollout's first line, the ``session_meta`` record - Codex's
+    index has no column for it. A sub-agent spawn also records a parent there,
+    but its ``source`` is an object, never a string, so it answers None.
+    """
+    if not isinstance(rollout_path, str) or not rollout_path:
+        return None
+    try:
+        with open(rollout_path, encoding="utf-8", errors="replace") as fh:
+            payload = json.loads(fh.readline()).get("payload")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("source"), str):
+        return None
+    parent = payload.get("forked_from_id")
+    return parent if is_thread_id(parent) else None
 
 
 def _rollout_meta(path: Path) -> tuple[str, str] | None:
@@ -385,6 +407,15 @@ def list_threads(codex_root: Path) -> list[dict]:
     # fresh install the rollout scan is empty too, so this costs one rglob.
     if not threads:
         threads = _threads_from_rollouts(codex_root)
+    # A move forks through Codex and archives the source, and 0.163.0 leaves
+    # the fork's preview empty: a fork whose parent is no longer a live thread
+    # holds the conversation's only live copy, so it is no husk. A branch of a
+    # live parent stays one until its first turn.
+    live = {t["id"] for t in threads if not t["archived"]}
+    for t in threads:
+        if not t["archived"] and not _is_visible(t):
+            parent = _fork_parent(t.get("rollout_path"))
+            t["sole_copy"] = parent is not None and parent not in live
     threads.sort(key=lambda t: t["recency_ms"], reverse=True)
     return threads
 
@@ -396,17 +427,29 @@ def _is_visible(thread: dict) -> bool:
     (started and abandoned before the first turn) - hidden from the project
     rows, but still enumerable as a branch, because a `+` launch creates its
     thread through ``thread/start`` and that thread is a husk until its first
-    turn.
+    turn. A fork that is its conversation's only live copy (``list_threads``)
+    is listed although Codex gave it no preview.
     """
     return bool(
         thread["has_user_event"]
         or thread["preview"]
         or thread["first_user_message"]
+        or thread.get("sole_copy")
     )
 
 
+def _is_codex_cli(pid: int) -> bool:
+    """Whether ``pid`` is an interactive Codex CLI: comm ``codex``, then an argv
+    that is not Codex's app-server (the daemon a terminal starts, which outlives
+    it in that terminal's cwd, or this store's --stdio helpers), which runs no
+    conversation."""
+    return process_comm(pid) == CODEX_COMM and "app-server" not in cmdline_args(
+        process_cmdline(pid) or b""
+    )[1:]
+
+
 def live_cwds() -> set[str]:
-    """The working directories of every live ``codex`` process.
+    """The working directories of every live interactive Codex CLI.
 
     A row whose project path appears here gets the activity dot. Codex keeps no
     per-pid session record, so "a Codex process is running in this project" is
@@ -421,7 +464,7 @@ def live_cwds() -> set[str]:
     except OSError:
         return cwds
     for pid in pids:
-        if process_comm(pid) != CODEX_COMM:
+        if not _is_codex_cli(pid):
             continue
         try:
             cwd = os.readlink(f"/proc/{pid}/cwd")
@@ -439,6 +482,9 @@ class CodexStore(SessionStore):
     """Codex's thread index, behind the shared session-store contract."""
 
     comm_name = CODEX_COMM
+
+    def owns_pid(self, pid: int) -> bool:
+        return _is_codex_cli(pid)
 
     # -- thread population ----------------------------------------------
 
@@ -762,6 +808,57 @@ class CodexStore(SessionStore):
             return None
         return name
 
+    def move(
+        self,
+        encoded_path: str,
+        session_id: str,
+        target_path: str,
+        to_trash: bool = False,
+    ) -> tuple[str, str] | None:
+        """Fork the thread into the target through the app-server, then retire
+        the source as a delete does (owner ruling 2026-10-27).
+
+        The app-server has no method that sets a thread's ``cwd``, and this
+        store writes Codex data only through Codex, so the conversation
+        arrives in the target as a fork under a new id - ``thread/fork`` with
+        ``cwd``, measured on 0.163.0 to record the target and to carry the
+        name. The source is then archived whatever ``to_trash`` says: Codex
+        reads a fork's history through its parent and refuses to delete a
+        parent that has a fork. A refused retirement deletes the fork, so the
+        move is all or nothing.
+        """
+        if not is_thread_id(session_id):
+            return None
+        source = next(
+            (t for t in self._project_threads(encoded_path) if t["id"] == session_id),
+            None,
+        )
+        cli = shutil.which(CLI_BINARY)
+        if source is None or not cli:
+            return None
+        new_id = None
+        try:
+            with _app_server(cli) as request:
+                thread = request("thread/fork", {
+                    "threadId": session_id, "cwd": target_path,
+                    "excludeTurns": True, "deferGoalContinuation": True,
+                })["thread"]
+                if not is_thread_id(thread["id"]):
+                    return None
+                new_id = thread["id"]
+                name = source["name"]
+                if isinstance(name, str) and name.strip() and thread.get("name") != name:
+                    request("thread/name/set", {"threadId": new_id, "name": name})
+        except (OSError, ValueError, RuntimeError, KeyError) as err:
+            _log.warning("codex could not move %s: %s", session_id, err)
+            if new_id:
+                self._dispose_thread(cli, new_id, False)
+            return None
+        if not self._dispose_thread(cli, session_id, True):
+            self._dispose_thread(cli, new_id, False)
+            return None
+        return new_id, target_path
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -843,6 +940,8 @@ DESCRIPTOR = ProviderDescriptor(
         # name. The store opens the db READ-ONLY, which is why the CLI verb
         # route (``archive``, ``delete``) has no rename sibling to use here.
         can_rename=True,
+        # A move forks into the target and retires the source: a new id.
+        can_move=True,
     ),
     legacy=LegacySource(
         plugin_id="jupyterlab_codex_extension",

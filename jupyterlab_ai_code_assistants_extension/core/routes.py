@@ -14,17 +14,27 @@ import ipaddress
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 import tornado
 import tornado.httpclient
 from jupyter_core.paths import jupyter_config_dir
-from jupyter_server.base.handlers import APIHandler
+from jupyter_server.auth.decorator import ws_authenticated
+from jupyter_server.base.handlers import APIHandler, JupyterHandler
+from jupyter_server.base.websocket import WebSocketMixin
 from jupyter_server.utils import url_path_join
+from tornado.websocket import WebSocketClosedError, WebSocketHandler
 
 from . import colour_store, migrate, registry, state
-from .store import LaunchRefused, SessionNotFound, git_branch, load_jsonc
+from .store import (
+    LaunchRefused,
+    MoveRefused,
+    SessionNotFound,
+    git_branch,
+    load_jsonc,
+)
 
 
 URL_PREFIX = "jupyterlab-ai-code-assistants-extension"
@@ -183,6 +193,91 @@ def _tree_assistant(root_pid: int) -> tuple[registry.Provider | None, str | None
     return None, None
 
 
+def _proc_pids() -> list[int]:
+    """Every pid in ``/proc``; empty off Linux."""
+    if sys.platform != "linux":
+        return []
+    try:
+        return [int(name) for name in os.listdir("/proc") if name.isdigit()]
+    except OSError:
+        return []
+
+
+def _live_processes(provider: registry.Provider) -> list[tuple[str | None, str | None]]:
+    """``(conversation id, real cwd)`` of every running process the provider's
+    store claims (``owns_pid``), whoever started it - a panel terminal, a
+    shell outside JupyterLab or a background agent.
+
+    Executor-side: one ``/proc`` walk. The id is None for a process whose
+    store cannot say which conversation it runs.
+    """
+    found = []
+    for pid in _proc_pids():
+        if not provider.store.owns_pid(pid):
+            continue
+        cwd = _process_cwd_link(pid)
+        found.append(
+            (provider.store.session_id_for_pid(pid), os.path.realpath(cwd) if cwd else None)
+        )
+    return found
+
+
+def _live_session_ids(provider: registry.Provider) -> set[str]:
+    """The conversations a running process of this provider is on."""
+    return {sid for sid, _cwd in _live_processes(provider) if sid}
+
+
+# Open push sockets, one per JupyterLab window (the house
+# NotificationStreamHandler mechanism).
+_listeners: set["EventsHandler"] = set()
+
+#: The request header a JupyterLab window names itself in; ``src/core/request.ts``
+#: sends it. The command line sends none.
+WINDOW_HEADER = "X-AI-Assistants-Window"
+
+
+def broadcast(message: dict) -> int:
+    """Write ``message`` to every open window; answer how many it reached.
+
+    On the IOLoop. A closed socket is dropped; any other write error is
+    logged and the socket kept, since it may recover.
+    """
+    text = json.dumps(message)
+    reached = 0
+    for listener in list(_listeners):
+        try:
+            listener.write_message(text)
+            reached += 1
+        except WebSocketClosedError:
+            _listeners.discard(listener)
+        except Exception:
+            listener.log.warning("push to an open window failed", exc_info=True)
+    return reached
+
+
+class EventsHandler(WebSocketMixin, WebSocketHandler, JupyterHandler):
+    """Push-only socket: a change to sessions or to the roster reaches every
+    open window at once (ACC-CLI-227, ACC-CLI-228). ``WebSocketMixin`` keeps
+    the ping/pong that survives proxy idle timeouts."""
+
+    def set_default_headers(self) -> None:
+        """Undo JupyterHandler default headers (meaningless for websockets)."""
+
+    def open(self, *args, **kwargs) -> None:
+        super().open(*args, **kwargs)
+        _listeners.add(self)
+
+    def on_message(self, message) -> None:
+        """No inbound messages: the socket is push-only."""
+
+    def on_close(self) -> None:
+        _listeners.discard(self)
+
+    @ws_authenticated
+    async def get(self, *args, **kwargs) -> None:
+        await super().get(*args, **kwargs)
+
+
 def _user_settings_dir() -> Path:
     """The folder JupyterLab saves user settings into on THIS server.
 
@@ -321,6 +416,69 @@ def _release_stale(provider: registry.Provider, stale: dict[str, int | None]) ->
 class _ProviderHandler(APIHandler):
     """Shared gating and body parsing for the ``providers/<id>/...`` routes."""
 
+    #: Set on a handler whose POST or DELETE changes a provider's sessions: a
+    #: success then pushes ``sessions-changed`` to every open window, naming the
+    #: window that made the change, if any. The colour route stays unset - every
+    #: window writes tab colours back, and a push per write would make every
+    #: other window re-read its sessions on each one.
+    _pushes = False
+    #: The provider ``resolve`` let through, None while no gate has passed.
+    _resolved: str | None = None
+
+    def on_finish(self) -> None:
+        if (
+            self._pushes
+            and self._resolved
+            and self.request.method in ("POST", "DELETE")
+            and self.get_status() < 300
+        ):
+            message = {"type": "sessions-changed", "provider": self._resolved}
+            # The window that made the change skips its own push: its panel
+            # re-reads after every write it makes (DEF-PANE-370-OWN-PUSH).
+            window = self.request.headers.get(WINDOW_HEADER)
+            if window:
+                message["window"] = window
+            broadcast(message)
+
+    async def make_current(
+        self, provider: registry.Provider, encoded_path: str, session_id: str
+    ) -> dict | None:
+        """Make ``session_id`` the project's current conversation: the store's
+        switch, then the pin, then ``current`` read back. The store's answer -
+        None or ``{"error": ...}`` - comes back unchanged when it refuses.
+        """
+        loop = asyncio.get_running_loop()
+        # Off the IOLoop for the same reason as the listing: a store whose
+        # index is unreadable falls back to walking every conversation file of
+        # every project to find the one asked for.
+        result = await loop.run_in_executor(
+            None, provider.store.switch, encoded_path, session_id
+        )
+        if result is None or result.get("error"):
+            return result
+        # The pin outlives recency: without it, continuing to work in the
+        # conversation the user switched away from drags the row back to it.
+        # Written HERE on the loop for every provider - the store's switch only
+        # touches mtimes, never the state file, so no pin write can run on the
+        # executor thread above (docs/defects.md DEF-99/DEF-101). It carries
+        # every id the project holds now, read off the loop like the listing: a
+        # conversation created later supersedes the pin (state.pick_current).
+        known = await loop.run_in_executor(
+            None, provider.store.project_session_ids, encoded_path
+        )
+        state.write_pin(provider.id, encoded_path, session_id, known)
+        # `current` is answered HERE, after the pin is on disk - the stores no
+        # longer compute it at all (docs/defects.md DEF-103). Answering before
+        # the pin landed served the OLD pin for a project that already carried
+        # one - deterministically, on every switch after the first - and the
+        # panel reads `current != requested` as a failed switch (DEF-102).
+        # This is a READ, so it is pooled, and it applies the store's own pin
+        # validation rather than assuming the answer.
+        result["current"] = await loop.run_in_executor(
+            None, provider.store.resolve_current, encoded_path
+        )
+        return result
+
     def resolve(self, provider_id: str) -> registry.Provider | None:
         """The provider for ``provider_id``, or None with the response sent."""
         provider = registry.get(provider_id)
@@ -338,6 +496,7 @@ class _ProviderHandler(APIHandler):
             self.finish(json.dumps({"error": "cli_not_found"}))
             return None
         self.cli_path = cli_path
+        self._resolved = provider.id
         return provider
 
     def parse_body(self) -> dict | None:
@@ -361,6 +520,95 @@ class _ProviderHandler(APIHandler):
         return bool(getattr(self.contents_manager, "delete_to_trash", True))
 
 
+def _roster() -> list[dict]:
+    """Every provider with its setting and its binary, probed now."""
+    # The saved settings read ONCE for the whole roster rather than once per
+    # provider (docs/defects.md DEF-91).
+    settings = _user_settings()
+    rows = []
+    for pid, provider in registry.providers().items():
+        cli_path = provider.cli_path()
+        rows.append({
+            "id": pid,
+            "label": provider.descriptor.label,
+            "enabled": _provider_enabled(pid, settings),
+            "cli_path": cli_path,
+            "available": cli_path is not None,
+        })
+    return rows
+
+
+#: How long a finished probe answers later status requests, in seconds.
+#: Windows that wake together reach the server within it, and one probe takes
+#: milliseconds, so joining an in-flight probe alone would rarely share one
+#: (ACC-PROV-231).
+POOL_WINDOW_S = 1.0
+
+
+class _RosterPool:
+    """The in-flight probe, the last roster and when it finished."""
+
+    future: asyncio.Future | None = None
+    roster: list[dict] | None = None
+    at: float = 0.0
+
+
+_roster_pool = _RosterPool()
+
+
+async def _probe(pool: _RosterPool) -> list[dict]:
+    try:
+        # Off the IOLoop: the roster globs and parses the settings file and
+        # stats PATH for every provider's binary.
+        rows = await asyncio.get_running_loop().run_in_executor(None, _roster)
+        pool.roster, pool.at = rows, time.monotonic()
+        return rows
+    finally:
+        pool.future = None
+
+
+async def pooled_roster(force: bool = False) -> list[dict]:
+    """The roster, from one probe shared by every request that coincides.
+
+    Not forced: join the probe in flight, else reuse a roster finished less
+    than ``POOL_WINDOW_S`` ago, else start one. Forced (the refresh route):
+    wait out the probe in flight without taking its answer - it began before
+    this request, so it may predate a binary just installed - then start one
+    that later requests may join.
+    """
+    pool = _roster_pool
+    if force and pool.future is not None:
+        await asyncio.wait([pool.future])
+    if pool.future is None:
+        if (
+            not force
+            and pool.roster is not None
+            and time.monotonic() - pool.at < POOL_WINDOW_S
+        ):
+            return pool.roster
+        pool.future = asyncio.ensure_future(_probe(pool))
+    # Shielded: a caller that goes away must not cancel the probe others share.
+    return await asyncio.shield(pool.future)
+
+
+async def _status_payload(handler: APIHandler, force: bool = False) -> dict:
+    """The status answer: the roster plus what is read per request.
+
+    ``server_root_dir`` is the root path Jupyter serves from; home when unset.
+    A leading ``~`` is expanded - some deployments leave the setting as
+    ``~/workspace``, and the frontend compares it against absolute session
+    paths, so an unexpanded ``~`` never matches.
+    """
+    root_dir = os.path.expanduser(handler.settings.get("server_root_dir") or "~")
+    return {
+        "root_dir": str(root_dir),
+        "providers": await pooled_roster(force),
+        "delete_to_trash": bool(
+            getattr(handler.contents_manager, "delete_to_trash", True)
+        ),
+    }
+
+
 class StatusHandler(APIHandler):
     """The provider roster and the directory Jupyter serves.
 
@@ -375,38 +623,22 @@ class StatusHandler(APIHandler):
 
     @tornado.web.authenticated
     async def get(self) -> None:
-        # ``server_root_dir`` is the root path Jupyter serves from; fall back to
-        # home when unset. Expand a leading ``~`` - some deployments leave the
-        # setting as ``~/workspace``, and the frontend compares it against
-        # absolute session paths, so an unexpanded ``~`` never matches.
-        root_dir = os.path.expanduser(self.settings.get("server_root_dir") or "~")
+        self.finish(json.dumps(await _status_payload(self)))
 
-        def roster() -> list[dict]:
-            # The saved settings read ONCE for the whole roster rather than once
-            # per provider (docs/defects.md DEF-91).
-            settings = _user_settings()
-            rows = []
-            for pid, provider in registry.providers().items():
-                cli_path = provider.cli_path()
-                rows.append({
-                    "id": pid,
-                    "label": provider.descriptor.label,
-                    "enabled": _provider_enabled(pid, settings),
-                    "cli_path": cli_path,
-                    "available": cli_path is not None,
-                })
-            return rows
 
-        # Off the IOLoop: the roster globs and parses the settings file and
-        # stats PATH for every provider's binary.
-        providers = await asyncio.get_running_loop().run_in_executor(None, roster)
-        self.finish(json.dumps({
-            "root_dir": str(root_dir),
-            "providers": providers,
-            "delete_to_trash": bool(
-                getattr(self.contents_manager, "delete_to_trash", True)
-            ),
-        }))
+class RefreshHandler(APIHandler):
+    """Re-check the installed assistants now and tell every open window.
+
+    The command's ``refresh`` (ACC-CLI-228): a fresh probe, pushed to every
+    window as ``refresh`` with the status payload, and answered with the same
+    payload plus ``windows``, how many open windows the push reached.
+    """
+
+    @tornado.web.authenticated
+    async def post(self) -> None:
+        status = await _status_payload(self, force=True)
+        windows = broadcast({"type": "refresh", "status": status})
+        self.finish(json.dumps({**status, "windows": windows}))
 
 
 def _list_with_git_branches(store, root_dir: str) -> list[dict]:
@@ -440,6 +672,8 @@ class SessionsHandler(_ProviderHandler):
     went lose their stored colour too - no orphan keys are left behind, and a
     conversation whose deletion was refused keeps its tint.
     """
+
+    _pushes = True
 
     @tornado.web.authenticated
     async def get(self, provider_id: str) -> None:
@@ -496,17 +730,34 @@ class SessionsHandler(_ProviderHandler):
             self.bad_request()
             return
 
+        live_ids: list = []
         if session_ids is not None:
             if not isinstance(session_ids, list):
                 self.bad_request()
                 return
+            # A conversation a running process is on is kept, for every
+            # provider and every caller (ACC-SESS-57): deleting it loses the
+            # work that terminal holds. Named in the answer, so a caller can
+            # say why it stayed.
+            running = await asyncio.get_running_loop().run_in_executor(
+                None, _live_session_ids, provider
+            )
+            live_ids = [
+                sid for sid in session_ids if isinstance(sid, str) and sid in running
+            ]
+            wanted = [sid for sid in session_ids if sid not in live_ids]
             # The store answers with the ids that actually went, so a refused
-            # deletion never costs the surviving conversation its colour.
-            removed = await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: provider.store.delete_branches(
-                    encoded_path, session_ids, to_trash=self.to_trash
-                ),
+            # deletion never costs the surviving conversation its colour. Not
+            # asked when every id is live: a store refuses an empty list.
+            removed = (
+                []
+                if live_ids and not wanted
+                else await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: provider.store.delete_branches(
+                        encoded_path, wanted, to_trash=self.to_trash
+                    ),
+                )
             )
             count = len(removed) if removed is not None else 0
         else:
@@ -528,7 +779,9 @@ class SessionsHandler(_ProviderHandler):
             self.bad_request("remove_failed")
             return
         colour_store.drop_colours(provider.id, removed)
-        self.finish(json.dumps({"removed_count": count, "removed_ids": removed}))
+        self.finish(json.dumps({
+            "removed_count": count, "removed_ids": removed, "live_ids": live_ids,
+        }))
 
 
 class BranchesHandler(_ProviderHandler):
@@ -557,6 +810,8 @@ class BranchesHandler(_ProviderHandler):
 class SwitchHandler(_ProviderHandler):
     """Make another conversation the project's current one."""
 
+    _pushes = True
+
     @tornado.web.authenticated
     async def post(self, provider_id: str) -> None:
         provider = self.resolve(provider_id)
@@ -570,12 +825,7 @@ class SwitchHandler(_ProviderHandler):
         if not isinstance(encoded_path, str) or not isinstance(session_id, str):
             self.bad_request()
             return
-        # Off the IOLoop for the same reason as the listing: a store whose
-        # index is unreadable falls back to walking every conversation file of
-        # every project to find the one asked for.
-        result = await asyncio.get_running_loop().run_in_executor(
-            None, provider.store.switch, encoded_path, session_id
-        )
+        result = await self.make_current(provider, encoded_path, session_id)
         if result is None:
             self.bad_request()
             return
@@ -583,32 +833,13 @@ class SwitchHandler(_ProviderHandler):
             self.set_status(404)
             self.finish(json.dumps(result))
             return
-        # The pin outlives recency: without it, continuing to work in the
-        # conversation the user switched away from drags the row back to it.
-        # Written HERE on the loop for every provider - the store's switch only
-        # touches mtimes, never the state file, so no pin write can run on the
-        # executor thread above (docs/defects.md DEF-99/DEF-101). It carries
-        # every id the project holds now, read off the loop like the listing: a
-        # conversation created later supersedes the pin (state.pick_current).
-        known = await asyncio.get_running_loop().run_in_executor(
-            None, provider.store.project_session_ids, encoded_path
-        )
-        state.write_pin(provider.id, encoded_path, session_id, known)
-        # `current` is answered HERE, after the pin is on disk - the stores no
-        # longer compute it at all (docs/defects.md DEF-103). Answering before
-        # the pin landed served the OLD pin for a project that already carried
-        # one - deterministically, on every switch after the first - and the
-        # panel reads `current != requested` as a failed switch (DEF-102).
-        # This is a READ, so it is pooled, and it applies the store's own pin
-        # validation rather than assuming the answer.
-        result["current"] = await asyncio.get_running_loop().run_in_executor(
-            None, provider.store.resolve_current, encoded_path
-        )
         self.finish(json.dumps(result))
 
 
 class FavouriteHandler(_ProviderHandler):
     """Star or unstar a project, per provider."""
+
+    _pushes = True
 
     @tornado.web.authenticated
     async def post(self, provider_id: str) -> None:
@@ -756,6 +987,8 @@ class BranchHandler(_ProviderHandler):
     branch of a branch takes what its parent actually shows.
     """
 
+    _pushes = True
+
     @tornado.web.authenticated
     async def post(self, provider_id: str) -> None:
         provider = self.resolve(provider_id)
@@ -839,6 +1072,8 @@ class RenameHandler(_ProviderHandler):
     surfaces disagree about the moment the user opens the CLI.
     """
 
+    _pushes = True
+
     #: Longest name accepted, in characters. This writes into another
     #: program's data file, so the length of what lands there is bounded here
     #: rather than left to whatever was pasted into the dialog. Display is a
@@ -889,6 +1124,137 @@ class RenameHandler(_ProviderHandler):
         self.finish(json.dumps({"session_id": session_id, "name": stored}))
 
 
+def _move_source(
+    provider: registry.Provider, encoded_path: str, session_id: str
+) -> tuple[dict | None, list[str], str | None]:
+    """The source project's row, every id it holds and the conversation's own
+    colour - read before the move, while the conversation is still there."""
+    row = next(
+        (r for r in provider.store.list_sessions() if r.get("encoded_path") == encoded_path),
+        None,
+    )
+    known = provider.store.project_session_ids(encoded_path) if row else []
+    return row, known, provider.store.default_colour(session_id)
+
+
+def _move_is_live(
+    provider: registry.Provider, session_id: str, current: str | None, project: str
+) -> bool:
+    """Whether a running process is on ``session_id``.
+
+    A process that names no conversation and runs in the project is on the
+    project's newest conversation, which is its current one.
+    """
+    inside = project.rstrip("/") + "/"
+    for sid, cwd in _live_processes(provider):
+        if sid == session_id:
+            return True
+        if (
+            sid is None
+            and session_id == current
+            and cwd is not None
+            and (cwd == project or cwd.startswith(inside))
+        ):
+            return True
+    return False
+
+
+class MoveHandler(_ProviderHandler):
+    """Move a conversation into another project folder (ACC-CLI-226).
+
+    Body ``{encoded_path, session_id, target_path}``; answers ``{session_id,
+    encoded_path, project_path}`` - the id after the move (a store that can
+    move only by copying through its assistant mints a new one), the target
+    project's key and its real path. Refused before the store is asked: a
+    target that is not a directory, a provider whose descriptor has no
+    ``can_move``, a conversation the source does not hold, the source itself
+    as the target, and a conversation a running process is on - the move
+    would take the transcript from under it.
+
+    The moved conversation becomes the target project's current one, as a
+    fork becomes its project's, and a pin on the source that named it goes.
+    """
+
+    _pushes = True
+
+    @tornado.web.authenticated
+    async def post(self, provider_id: str) -> None:
+        provider = self.resolve(provider_id)
+        if provider is None:
+            return
+        body = self.parse_body()
+        if body is None:
+            return
+        encoded_path = body.get("encoded_path")
+        session_id = body.get("session_id")
+        target_path = body.get("target_path")
+        if not all(
+            isinstance(value, str) and value
+            for value in (encoded_path, session_id, target_path)
+        ):
+            self.bad_request()
+            return
+        target = os.path.realpath(target_path)
+        if not os.path.isdir(target):
+            self.bad_request("invalid_target_path")
+            return
+        if not provider.descriptor.capabilities.can_move:
+            self.bad_request("move_unsupported")
+            return
+        loop = asyncio.get_running_loop()
+        row, known, default = await loop.run_in_executor(
+            None, _move_source, provider, encoded_path, session_id
+        )
+        if row is None or session_id not in known:
+            self.set_status(404)
+            self.finish(json.dumps({"error": "session_not_found"}))
+            return
+        project = os.path.realpath(row["project_path"])
+        if project == target:
+            self.bad_request("move_same_project")
+            return
+        if await loop.run_in_executor(
+            None, _move_is_live, provider, session_id, row.get("session_id"), project
+        ):
+            self.set_status(409)
+            self.finish(json.dumps({"error": "session_live"}))
+            return
+        # The branch lock: a fork or a new conversation of this provider lands
+        # its pin before or after the move, never in the middle of it.
+        locks = self.settings.setdefault("ai_assistants_branch_locks", {})
+        async with locks.setdefault(provider.id, asyncio.Lock()):
+            try:
+                moved = await loop.run_in_executor(
+                    None,
+                    lambda: provider.store.move(
+                        encoded_path, session_id, target, to_trash=self.to_trash
+                    ),
+                )
+            except MoveRefused as err:
+                # The LaunchRefused shape: the sentence is for the user.
+                self.set_status(409)
+                self.finish(json.dumps({"message": str(err)}))
+                return
+            if not moved:
+                self.bad_request("move_failed")
+                return
+            new_id, target_encoded = moved
+            if state.read_pin(provider.id, encoded_path) == session_id:
+                state.clear_pin(provider.id, encoded_path)
+                await loop.run_in_executor(
+                    None, provider.store.release_switch, encoded_path
+                )
+            await self.make_current(provider, target_encoded, new_id)
+            if new_id != session_id:
+                colour_store.inherit_colour(provider.id, session_id, new_id, default)
+                colour_store.drop_colours(provider.id, [session_id])
+        self.finish(json.dumps({
+            "session_id": new_id,
+            "encoded_path": target_encoded,
+            "project_path": target,
+        }))
+
+
 @dataclasses.dataclass(frozen=True)
 class _LaunchRequest:
     """A validated launch body together with the argv it resolves to."""
@@ -908,6 +1274,8 @@ class _LaunchBase(_ProviderHandler):
     sibling terminal extension (ACC-LNCH-154). One implementation is what keeps
     a tile launch identical to the panel's, per-provider verbs included.
     """
+
+    _pushes = True
 
     async def validated_argv(
         self, provider: registry.Provider, body: dict
@@ -1331,6 +1699,8 @@ def setup_route_handlers(web_app) -> None:
 
     handlers = [
         (url_path_join(base_url, URL_PREFIX, "status"), StatusHandler),
+        (url_path_join(base_url, URL_PREFIX, "refresh"), RefreshHandler),
+        (url_path_join(base_url, URL_PREFIX, "events"), EventsHandler),
         (url_path_join(base_url, URL_PREFIX, "migrate"), MigrateHandler),
         (url_path_join(base_url, URL_PREFIX, "callback"), CallbackHandler),
         (
@@ -1360,6 +1730,10 @@ def setup_route_handlers(web_app) -> None:
         (
             url_path_join(base_url, URL_PREFIX, "providers", provider, "rename"),
             RenameHandler,
+        ),
+        (
+            url_path_join(base_url, URL_PREFIX, "providers", provider, "move"),
+            MoveHandler,
         ),
         (
             url_path_join(base_url, URL_PREFIX, "providers", provider, "launch"),

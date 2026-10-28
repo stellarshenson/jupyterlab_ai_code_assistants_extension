@@ -39,6 +39,7 @@ from ..core.registry import Capabilities, LegacySource, ProviderDescriptor
 from ..core.store import (
     NODE_COMMS,
     FileMemo,
+    MoveRefused,
     SessionStore,
     cmdline_args,
     dispose_path,
@@ -385,36 +386,59 @@ def _has_conversation(path: Path) -> bool:
         return False
 
 
+def _append_record(jsonl: Path, record: dict) -> None:
+    """Append one record as a line, after a newline when the last write was
+    cut short - appending straight onto a torn line would fuse the two and
+    lose both. Raises ``OSError``."""
+    line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+    with jsonl.open("r+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell():
+            handle.seek(-1, os.SEEK_END)
+            needs_newline = handle.read(1) != b"\n"
+            handle.seek(0, os.SEEK_END)
+            if needs_newline:
+                handle.write(b"\n")
+        handle.write(line.encode("utf-8") + b"\n")
+
+
 # ------------------------------------------------------------ path encoding
 
 
 def _encode_path(path: str) -> str:
-    """Mirror Claude's encoding: replace ``/``, ``_`` and ``.`` with ``-``."""
-    return "".join("-" if ch in ("/", "_", ".") else ch for ch in path)
+    """Claude Code's own project directory name for ``path`` (``SL`` in 2.1.312).
 
-
-def _encode_segment(name: str) -> str:
-    """Per-segment variant of ``_encode_path`` (no ``/`` to replace)."""
-    return "".join("-" if ch in ("_", ".") else ch for ch in name)
+    Each UTF-16 code unit outside ``[a-zA-Z0-9]`` becomes ``-``, so an emoji
+    gives two. A name over 200 characters is cut to 200 and suffixed with ``-``
+    and ``path``'s 31-multiplier int32 hash, absolute, in base 36.
+    """
+    name = re.sub(r"[^a-zA-Z0-9]", lambda m: "-" * (1 + (ord(m[0]) > 0xFFFF)), path)
+    if len(name) <= 200:
+        return name
+    units = path.encode("utf-16-le", "surrogatepass")
+    h = 0
+    for i in range(0, len(units), 2):
+        h = (h * 31 + int.from_bytes(units[i : i + 2], "little")) & 0xFFFFFFFF
+    h = h if h < 1 << 31 else (1 << 32) - h
+    digits = ""
+    while h or not digits:
+        h, rem = divmod(h, 36)
+        digits = "0123456789abcdefghijklmnopqrstuvwxyz"[rem] + digits
+    return f"{name[:200]}-{digits}"
 
 
 def _project_path_for_cwd(cwd: str, dirname: str) -> str | None:
     """The project path when ``cwd`` is the project dir or inside it.
 
-    ``_encode_path`` is char-by-char and length-preserving, so when the encoded
-    cwd extends ``dirname`` the first ``len(dirname)`` characters of ``cwd``
-    ARE the project path - no lossy decode needed. The boundary character must
-    be a real ``/`` so a sibling like ``/x/foo-bar`` does not match project
-    ``/x/foo``. Subdirectory cwds are legitimate: Claude records a cwd per
-    message, so working in a subfolder moves the tail cwd while the
-    conversation still belongs to the project. None when the cwd is foreign.
+    The project path is ``cwd`` or a prefix of it that ends before a ``/``, so
+    a sibling like ``/x/foo-bar`` does not match project ``/x/foo``; the one
+    whose encoding is ``dirname`` is the answer - no lossy decode needed.
+    Subdirectory cwds are legitimate: Claude records a cwd per message, so
+    working in a subfolder moves the tail cwd while the conversation still
+    belongs to the project. None when the cwd is foreign.
     """
-    enc = _encode_path(cwd)
-    if enc == dirname:
-        return cwd
-    if enc.startswith(dirname) and len(cwd) > len(dirname) and cwd[len(dirname)] == "/":
-        return cwd[: len(dirname)]
-    return None
+    ends = [len(cwd)] + [i for i, ch in enumerate(cwd) if ch == "/" and i]
+    return next((cwd[:end] for end in ends if _encode_path(cwd[:end]) == dirname), None)
 
 
 def _newest_matching(
@@ -464,7 +488,7 @@ def _walk_decode(current: Path, remaining: list[str], depth: int) -> str | None:
         target = "-".join(remaining[:k])
         for child in children:
             try:
-                if not child.is_dir() or _encode_segment(child.name) != target:
+                if not child.is_dir() or _encode_path(child.name) != target:
                     continue
             except OSError:
                 continue
@@ -1755,17 +1779,8 @@ class ClaudeStore(SessionStore):
             "customTitle": name,
             "sessionId": session_id,
         }
-        line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
         try:
-            with jsonl.open("r+b") as handle:
-                handle.seek(0, os.SEEK_END)
-                if handle.tell():
-                    handle.seek(-1, os.SEEK_END)
-                    needs_newline = handle.read(1) != b"\n"
-                    handle.seek(0, os.SEEK_END)
-                    if needs_newline:
-                        handle.write(b"\n")
-                handle.write(line.encode("utf-8") + b"\n")
+            _append_record(jsonl, record)
         except OSError as err:
             _log.warning("claude could not rename %s: %s", jsonl.name, err)
             return None
@@ -1777,6 +1792,68 @@ class ClaudeStore(SessionStore):
             # name that WAS written is a worse answer than a spent stamp.
             _log.warning("claude could not restore %s mtime: %s", jsonl.name, err)
         return name
+
+    def move(
+        self,
+        encoded_path: str,
+        session_id: str,
+        target_path: str,
+        to_trash: bool = False,
+    ) -> tuple[str, str] | None:
+        """Rename the transcript and its side directory into the target's
+        encoded directory, then append ``{"cwd": <target>}``.
+
+        The appended record is the move the shipped skill documents: the tail
+        ``cwd`` is what ``_resolve_latest`` reads first, so the target row
+        takes the target path directly - without it a target whose path holds
+        a ``.``, ``_`` or ``-`` beside a separator falls back to the recorded
+        source path, and the row deduplication hides it under the source row.
+        ``~/.claude.json``, ``sessions-index.json``, ``tasks/<id>`` and
+        ``file-history/<id>`` are left alone: this store trusts the
+        transcripts, and the id-keyed directories stay valid. The mtime is
+        put back - a move is not activity. Same id, so ``to_trash`` is unused.
+        """
+        if not is_safe_segment(session_id):
+            return None
+        src_dir = self._project_dir(encoded_path)
+        if src_dir is None:
+            return None
+        src = src_dir / f"{session_id}.jsonl"
+        if not src.is_file():
+            return None
+        # The route's live check reads /proc; this is the live set delete_branches keeps everywhere.
+        if session_id in _live_conversations(_live_terminal_by_cwd(claude_dir()), src_dir)[1]:
+            raise MoveRefused("a running terminal is on this conversation; close it first")
+        target_encoded = _encode_path(target_path)
+        dst_dir = self._projects_root() / target_encoded
+        dst = dst_dir / src.name
+        if dst.exists() or (dst_dir / session_id).exists():
+            raise MoveRefused("the target project already holds this conversation")
+        renames = [(src, dst)]
+        if (src_dir / session_id).is_dir():
+            renames.append((src_dir / session_id, dst_dir / session_id))
+        done: list[tuple[Path, Path]] = []
+        try:
+            before = src.stat()
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            for old, new in renames:
+                os.rename(old, new)
+                done.append((old, new))
+            _append_record(dst, {"cwd": target_path})
+        except OSError as err:
+            _log.warning("claude could not move %s: %s", session_id, err)
+            for old, new in reversed(done):
+                try:
+                    os.rename(new, old)
+                except OSError as undo:
+                    _log.warning("claude could not put back %s: %s", old, undo)
+            return None
+        try:
+            os.utime(dst, (before.st_atime, before.st_mtime))
+        except OSError as err:
+            # Best-effort, as ``rename`` treats its own: the move is done.
+            _log.warning("claude could not restore %s mtime: %s", dst.name, err)
+        return session_id, target_encoded
 
     # -- launch ----------------------------------------------------------
 
@@ -1960,6 +2037,8 @@ DESCRIPTOR = ProviderDescriptor(
         # A name is a ``custom-title`` record appended to the transcript,
         # which is what the CLI's own ``/rename`` writes.
         can_rename=True,
+        # The transcript moves between encoded directories under its own id.
+        can_move=True,
     ),
     legacy=LegacySource(
         plugin_id="jupyterlab_claude_code_extension",

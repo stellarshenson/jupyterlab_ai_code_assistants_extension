@@ -180,9 +180,13 @@ export interface IDisposalReport {
 
 export type IRemoveResponse = IDisposalReport;
 
-export type ICleanupResponse = IDisposalReport;
+/** A delete of chosen conversations also names the ones it kept because a
+ * live terminal runs them (ACC-SESS-57). */
+export interface IDeleteSessionsResponse extends IDisposalReport {
+  live_ids: string[];
+}
 
-export type IDeleteSessionsResponse = IDisposalReport;
+export type ICleanupResponse = IDeleteSessionsResponse;
 
 export interface IBranch {
   session_id: string;

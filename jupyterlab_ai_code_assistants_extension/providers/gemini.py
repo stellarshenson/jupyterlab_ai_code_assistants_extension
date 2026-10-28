@@ -43,6 +43,7 @@ deletes.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -58,6 +59,7 @@ from ..core.registry import Capabilities, ProviderDescriptor
 from ..core.store import (
     NODE_COMMS,
     FileMemo,
+    MoveRefused,
     SessionNotFound,
     SessionStore,
     cmdline_args,
@@ -80,6 +82,8 @@ _log = logging.getLogger(__name__)
 GEMINI_DIRNAME = ".gemini"
 PROJECTS_FILENAME = "projects.json"
 TMP_DIRNAME = "tmp"
+# The CLI's second slug directory; a claimed slug is marked in both.
+HISTORY_DIRNAME = "history"
 CHATS_DIRNAME = "chats"
 # Written by the CLI inside ``tmp/<short id>/``, naming the project root that
 # owns the slug. It is how a slug is mapped back to a project when the registry
@@ -429,6 +433,31 @@ def stamp_fork(text: str, new_id: str, name: str) -> str | None:
         return carries_id
 
     return _restamp(text, stamp)
+
+
+def stamp_project(text: str, project_hash: str) -> str | None:
+    """Rewrite a chat file's content under another project's ``projectHash``,
+    changing nothing else.
+
+    The CLI keeps a resumed chat's own ``projectHash``, so a chat moved to
+    another project and left with the old one would name the source project
+    on every later turn.
+    """
+
+    def stamp(record: dict) -> bool:
+        update = record.get("$set")
+        payload = update if isinstance(update, dict) else record
+        carries_id = "sessionId" in payload
+        if carries_id or "projectHash" in payload:
+            payload["projectHash"] = project_hash
+        return carries_id
+
+    return _restamp(text, stamp)
+
+
+def slugify(text: str) -> str:
+    """The CLI's ``ProjectRegistry.slugify`` (0.64.0)."""
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]", "-", text.lower())).strip("-") or "project"
 
 
 def stamp_summary(text: str, name: str) -> str | None:
@@ -890,6 +919,121 @@ class GeminiStore(SessionStore):
             return None
         return name
 
+    def _foreign_marker(self, slug: str, project_path: str) -> bool:
+        """Whether a ``.project_root`` of ``slug`` names another project, or
+        cannot be read - either way the CLI would not claim the slug."""
+        for base in (TMP_DIRNAME, HISTORY_DIRNAME):
+            marker = self.root / base / slug / PROJECT_ROOT_FILE
+            if not marker.exists():
+                continue
+            try:
+                owner = marker.read_text(encoding="utf-8").strip()
+            except (OSError, ValueError):
+                return True
+            if owner != project_path:
+                return True
+        return False
+
+    def _short_id_for(self, project_path: str) -> str:
+        """The slug the CLI uses for ``project_path``, claimed when it has none.
+
+        Its registry entry, else a ``.project_root`` marker naming it, else a
+        new slug as ``claimNewSlug`` makes one: the basename slugified, then
+        ``-1``, ``-2``... past the registry's slugs and the slugs another
+        project's marker owns. A new slug gets its markers and no registry
+        entry: the CLI adopts a marked slug and registers it on its next run
+        (``findExistingSlugForPath``), and this store lists marked slugs, so
+        the registry's lock is never needed. Raises ``OSError``.
+        """
+        registry = load_projects(self.root)
+        found = registry.get(project_path) or load_marker_projects(self.root).get(
+            project_path
+        )
+        if found:
+            return found
+        taken = set(registry.values())
+        base = slugify(os.path.basename(project_path) or "project")
+        counter = 0
+        while True:
+            slug = base if counter == 0 else f"{base}-{counter}"
+            counter += 1
+            if slug in taken or self._foreign_marker(slug, project_path):
+                continue
+            for parent in (TMP_DIRNAME, HISTORY_DIRNAME):
+                marker = self.root / parent / slug / PROJECT_ROOT_FILE
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                if not marker.exists():
+                    marker.write_text(project_path, encoding="utf-8")
+            return slug
+
+    def move(
+        self,
+        encoded_path: str,
+        session_id: str,
+        target_path: str,
+        to_trash: bool = False,
+    ) -> tuple[str, str] | None:
+        """Move the chat file into the target's ``chats/`` under its own name.
+
+        Every metadata record is re-stamped with the target's ``projectHash``
+        and the mtime is kept - a move is not activity. The conversation's
+        subagent transcripts (``chats/<id>/``) and artifacts (``<id>/``) go
+        with it. ``logs.json``, the typed prompt history, stays. ``gemini
+        --resume <id>`` in the target folder then finds it among that folder's
+        chats. Same id, so ``to_trash`` is unused.
+        """
+        if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
+            return None
+        chats_dir = self._chats_dir(encoded_path)
+        src = self._find_chat(chats_dir, session_id) if chats_dir else None
+        if src is None:
+            return None
+        try:
+            before = src.stat()
+            content = stamp_project(
+                src.read_text(encoding="utf-8", errors="replace"),
+                hashlib.sha256(target_path.encode("utf-8")).hexdigest(),
+            )
+            short_id = self._short_id_for(target_path) if content else None
+        except OSError as err:
+            _log.warning("gemini could not move %s: %s", session_id, err)
+            return None
+        if short_id is None:
+            return None
+        dst_chats = self.root / TMP_DIRNAME / short_id / CHATS_DIRNAME
+        dst = dst_chats / src.name
+        sides = [
+            (chats_dir / session_id, dst_chats / session_id),
+            (chats_dir.parent / session_id, dst_chats.parent / session_id),
+        ]
+        sides = [(old, new) for old, new in sides if old.is_dir()]
+        if dst.exists() or any(new.exists() for _old, new in sides):
+            raise MoveRefused("the target project already holds this conversation")
+        written = False
+        done: list[tuple[Path, Path]] = []
+        try:
+            dst_chats.mkdir(parents=True, exist_ok=True)
+            with dst.open("x", encoding="utf-8") as fh:
+                written = True
+                fh.write(content)
+            os.utime(dst, (before.st_atime, before.st_mtime))
+            for old, new in sides:
+                os.rename(old, new)
+                done.append((old, new))
+            src.unlink()
+        except (OSError, UnicodeEncodeError) as err:
+            _log.warning("gemini could not move %s: %s", session_id, err)
+            try:
+                for old, new in reversed(done):
+                    os.rename(new, old)
+                if written:
+                    dst.unlink()
+            except OSError as undo:
+                _log.warning("gemini could not put back %s: %s", session_id, undo)
+            return None
+        _meta_memo.drop(src)
+        return session_id, short_id
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -989,6 +1133,8 @@ DESCRIPTOR = ProviderDescriptor(
         # A name is ``summary`` in the chat file, the CLI's own display name
         # for a conversation.
         can_rename=True,
+        # The chat file moves into the target's slug under its own id.
+        can_move=True,
     ),
     # No standalone extension preceded this provider, so there is no state to
     # carry over.

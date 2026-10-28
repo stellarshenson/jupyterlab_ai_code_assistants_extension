@@ -33,7 +33,7 @@ const BYPASS_MODE = 'dangerouslyBypassApprovalsAndSandbox';
 export const descriptor: IProviderDescriptor = {
   id: 'codex',
   label: 'Codex',
-  panelTitle: 'Codex Sessions',
+  panelTitle: 'Codex',
   iconName: 'jupyterlab_ai_code_assistants_extension:codex',
   iconSvg: codexSvgStr,
   cliBinary: 'codex',

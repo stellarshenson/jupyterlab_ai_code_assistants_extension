@@ -22,6 +22,7 @@ explicitly forks or deletes.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -34,6 +35,7 @@ from ..core.state import load_state, pick_current, read_pin
 from ..core.registry import Capabilities, LegacySource, ProviderDescriptor
 from ..core.store import (
     FileMemo,
+    MoveRefused,
     SessionStore,
     cmdline_args,
     dispose_path,
@@ -44,6 +46,7 @@ from ..core.store import (
     mtime_ms,
     now_iso_z,
     process_comm,
+    write_json_atomic,
 )
 
 
@@ -132,6 +135,50 @@ def load_workspaces(root: Path) -> dict[str, str]:
             continue
         result[wd_id] = project_root
     return result
+
+
+def work_dir_key(path: str) -> str:
+    """Kimi's own workspace key for a folder - ``encodeWorkDirKey``, read
+    from the 0.34.0 bundle: ``wd_``, a slug of the basename, ``_``, then the
+    first 12 hex digits of the path's sha256. Kimi keeps a folder's
+    conversations under this key, so a moved one goes where Kimi looks."""
+    slug = re.sub(r"[^a-z0-9._-]+", "-", os.path.basename(path).lower())
+    slug = slug.strip("-")[:40].strip("-")
+    if slug in ("", ".", ".."):
+        slug = "workspace"
+    return f"wd_{slug}_{hashlib.sha256(path.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _reroot(value, old: str, new: str):
+    """``value`` with every string at or under the path ``old`` re-rooted at
+    ``new``, recursively through dicts and lists."""
+    if isinstance(value, str):
+        if value == old or value.startswith(old + "/"):
+            return new + value[len(old):]
+        return value
+    if isinstance(value, dict):
+        return {key: _reroot(item, old, new) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_reroot(item, old, new) for item in value]
+    return value
+
+
+def _moved_index_line(line: str, session_id: str, session_dir: str, work_dir: str) -> str:
+    """One ``session_index.jsonl`` line, re-pointed when it records
+    ``session_id``'s directory; every other line is kept as it was."""
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return line
+    if not (
+        isinstance(record, dict)
+        and record.get("sessionId") == session_id
+        and "sessionDir" in record
+    ):
+        return line
+    record["sessionDir"] = session_dir
+    record["workDir"] = work_dir
+    return json.dumps(record, separators=(",", ":")) + "\n"
 
 
 def parse_resume_id(cmdline: bytes) -> str | None:
@@ -704,6 +751,119 @@ class KimiStore(SessionStore):
             return None
         return name
 
+    def move(
+        self,
+        encoded_path: str,
+        session_id: str,
+        target_path: str,
+        to_trash: bool = False,
+    ) -> tuple[str, str] | None:
+        """Rename the conversation's directory under the target's workspace key.
+
+        Then the three records Kimi reads it back from: ``state.json``'s
+        ``workDir`` and every path under the old directory (the agents'
+        ``homedir``), the index line's ``sessionDir`` and ``workDir``, and the
+        target workspace in ``workspaces.json`` - added when absent and taken
+        off ``deleted_workspace_ids`` - since this store lists registered
+        workspaces only. The agents' ``wire.jsonl`` is conversation content
+        and is not touched. ``state.json`` keeps its mtime: a move is not
+        activity. A failed step puts the directory, ``state.json`` and the
+        index back. Same id, so ``to_trash`` is unused.
+        """
+        if not isinstance(session_id, str) or not SESSION_ID_RE.fullmatch(session_id):
+            return None
+        if self._wd_dir(encoded_path) is None:
+            return None
+        # Unresolved, as Kimi writes the paths this rewrites.
+        src = self.root / SESSIONS_DIRNAME / encoded_path / session_id
+        state = _load_state(src)
+        if state is None:
+            return None
+        target_key = work_dir_key(target_path)
+        dst = self.root / SESSIONS_DIRNAME / target_key / session_id
+        if dst.exists():
+            raise MoveRefused("the target project already holds this conversation")
+        state_file = src / STATE_FILENAME
+        index_path = self.root / INDEX_FILENAME
+        try:
+            before = state_file.stat()
+            original = state_file.read_bytes()
+            with index_path.open("r", encoding="utf-8") as fh:
+                index_lines = fh.readlines()
+        except FileNotFoundError:
+            index_lines = None
+        except OSError:
+            return None
+        new_state = _reroot(state, str(src), str(dst))
+        new_state["workDir"] = target_path
+        moved = indexed = False
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(src, dst)
+            moved = True
+            tmp = dst / f"{STATE_FILENAME}.move"
+            with tmp.open("w", encoding="utf-8") as fh:
+                json.dump(new_state, fh, indent=2)
+                fh.write("\n")
+            os.utime(tmp, (before.st_atime, before.st_mtime))
+            os.replace(tmp, dst / STATE_FILENAME)
+            if index_lines is not None:
+                self._write_index(
+                    [
+                        _moved_index_line(line, session_id, str(dst), target_path)
+                        for line in index_lines
+                    ]
+                )
+                indexed = True
+            self._register_workspace(target_key, target_path)
+        except (OSError, ValueError) as err:
+            _log.warning("kimi could not move %s: %s", session_id, err)
+            try:
+                if indexed:
+                    self._write_index(index_lines)
+                if moved:
+                    (dst / STATE_FILENAME).write_bytes(original)
+                    os.utime(dst / STATE_FILENAME, (before.st_atime, before.st_mtime))
+                    os.rename(dst, src)
+            except OSError as undo:
+                _log.warning("kimi could not put back %s: %s", session_id, undo)
+            return None
+        return session_id, target_key
+
+    def _write_index(self, lines: list[str]) -> None:
+        """Replace ``session_index.jsonl`` through a neighbouring temporary file."""
+        index_path = self.root / INDEX_FILENAME
+        tmp = index_path.with_suffix(index_path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+        os.replace(tmp, index_path)
+
+    def _register_workspace(self, key: str, root_path: str) -> None:
+        """Make ``key`` a live workspace of ``root_path`` in ``workspaces.json``,
+        in Kimi's own entry shape. Raises ``ValueError`` on a registry this
+        store cannot read as one."""
+        path = self.root / WORKSPACES_FILENAME
+        data = load_json(path) if path.exists() else {
+            "version": 1, "workspaces": {}, "deleted_workspace_ids": [],
+        }
+        workspaces = data.get("workspaces") if isinstance(data, dict) else None
+        if not isinstance(workspaces, dict):
+            raise ValueError("workspaces.json holds no workspace map")
+        deleted = data.get("deleted_workspace_ids")
+        if key in workspaces and not (isinstance(deleted, list) and key in deleted):
+            return
+        if key not in workspaces:
+            now = now_iso_z()
+            workspaces[key] = {
+                "root": root_path,
+                "name": (os.path.basename(root_path) or root_path)[:100],
+                "created_at": now,
+                "last_opened_at": now,
+            }
+        if isinstance(deleted, list):
+            data["deleted_workspace_ids"] = [item for item in deleted if item != key]
+        write_json_atomic(path, data)
+
     # -- launch ----------------------------------------------------------
 
     def launch_argv(
@@ -759,6 +919,8 @@ DESCRIPTOR = ProviderDescriptor(
         # A name is ``title`` in the conversation's ``state.json``, flagged
         # ``isCustomTitle`` so the CLI does not reword it away.
         can_rename=True,
+        # The session directory moves under the target's workspace key.
+        can_move=True,
     ),
     legacy=LegacySource(
         plugin_id="jupyterlab_kimi_code_extension",

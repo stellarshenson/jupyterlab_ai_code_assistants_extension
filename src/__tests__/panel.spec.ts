@@ -3346,6 +3346,34 @@ describe('DEF-PANE-344 - the session list', () => {
     expect((panel as any)._sessions[0].favourite).toBe(true);
   });
 
+  it('DEF-PANE-370 - the read after a star keeps the rows the star drew when it answers the same, and draws an answer that differs', async () => {
+    const rows = (): Element[] =>
+      Array.from(panel.node.querySelectorAll('.jp-AiAssistantsPanel-row'));
+    const alpha = session({ name: 'alpha' });
+    render(panel, [alpha]);
+    const held = holdListings({ favourite: true });
+    await (panel as any)._toggleFavourite(alpha);
+    const starred = rows();
+    expect(panel.node.querySelector('.jp-AiAssistantsPanel-favStar')).not.toBe(
+      null
+    );
+
+    // The server holds what the star drew: no second redraw, so the row a
+    // click is on stays in the list.
+    held[0]({ sessions: [{ ...alpha }] });
+    await flush();
+    expect(rows()).toHaveLength(starred.length);
+    rows().forEach((row, i) => expect(row).toBe(starred[i]));
+
+    // Unstarred, and the answer differs from what that drew: it is drawn.
+    await (panel as any)._toggleFavourite((panel as any)._sessions[0]);
+    const unstarred = rows();
+    held[1]({ sessions: [{ ...alpha, favourite: false, message_count: 4 }] });
+    await flush();
+    expect(rows()[0]).not.toBe(unstarred[0]);
+    expect((panel as any)._sessions[0].message_count).toBe(4);
+  });
+
   it('DEF-PANE-351 - a favourite toggle keeps the listing a Launcher tile click asked for', async () => {
     const alpha = session({ name: 'alpha' });
     render(panel, [
@@ -3522,5 +3550,146 @@ describe('ACC-PANE-193 - the panel header has a context menu of its own', () => 
     ]);
     // The row whose menu stood down is no longer highlighted.
     expect(p.node.querySelectorAll('.jp-mod-active')).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------------------------ ACC-CLI-227
+
+describe('ACC-CLI-227 - a change the server pushes', () => {
+  /** Sessions reads the panel has sent since the last `mockClear`. */
+  const sessionsReads = (): number =>
+    request.mock.calls.filter(
+      ([, path, , init]) => path === 'sessions' && !init?.method
+    ).length;
+
+  it('waits for the row context menu to close, then reads once', async () => {
+    request.mockImplementation(() => Promise.resolve({ sessions: [] }));
+    const menu = (panel as any)._contextMenu;
+    menu.open(0, 0);
+    expect(menu.isAttached).toBe(true);
+    request.mockClear();
+
+    panel.sessionsChanged();
+    await flush();
+    // Rows are not reshuffled under an open menu.
+    expect(sessionsReads()).toBe(0);
+
+    menu.close();
+    await flush();
+    // Deferred, not dropped: without this read the change waits for the
+    // 30 s poll.
+    expect(sessionsReads()).toBe(1);
+  });
+
+  it('pushed during a read in flight, reads exactly once more after it', async () => {
+    const held: Array<(answer: unknown) => void> = [];
+    request.mockImplementation(
+      (_id: string, path: string, _s: unknown, init?: any) =>
+        path === 'sessions' && !init?.method
+          ? new Promise(resolve => held.push(resolve))
+          : Promise.resolve({})
+    );
+
+    panel.sessionsChanged();
+    await flush();
+    expect(sessionsReads()).toBe(1);
+    // Two more changes land while the first read is unanswered: that read may
+    // have been answered before them, so one more read follows it.
+    panel.sessionsChanged();
+    panel.sessionsChanged();
+    await flush();
+    expect(sessionsReads()).toBe(1);
+
+    held[0]({ sessions: [] });
+    await flush();
+    expect(sessionsReads()).toBe(2);
+    held[1]({ sessions: [] });
+    await flush();
+    expect(sessionsReads()).toBe(2);
+  });
+});
+
+// -------------------------------------------------------------- ACC-SESS-57
+
+describe('ACC-SESS-57 - a conversation a live terminal runs is kept', () => {
+  it('the delete says so only when the server kept one', async () => {
+    const info = jest.spyOn(Notification, 'info').mockImplementation(() => '');
+    jest.spyOn(panel as any, '_fetch').mockResolvedValue(undefined);
+    const rows = [session({ name: 'proj' })];
+    render(panel, rows);
+    const remove = async (answer: unknown): Promise<void> => {
+      request.mockResolvedValueOnce(answer);
+      await (panel as any)._deleteBranches(rows[0], ['sid-a', 'sid-b']);
+    };
+
+    await remove({
+      removed_count: 2,
+      removed_ids: ['sid-a', 'sid-b'],
+      live_ids: []
+    });
+    expect(info).not.toHaveBeenCalled();
+
+    await remove({
+      removed_count: 1,
+      removed_ids: ['sid-a'],
+      live_ids: ['sid-b']
+    });
+    expect(info.mock.calls.map(call => call[0])).toEqual([
+      'One conversation was kept, because a live terminal runs it.'
+    ]);
+
+    info.mockClear();
+    await remove({
+      removed_count: 0,
+      removed_ids: [],
+      live_ids: ['sid-a', 'sid-b']
+    });
+    expect(info.mock.calls.map(call => call[0])).toEqual([
+      '2 conversations were kept, because live terminals run them.'
+    ]);
+  });
+
+  it('Clean Up says so in its outcome', async () => {
+    jest.spyOn(panel as any, '_fetch').mockResolvedValue(undefined);
+    request.mockImplementation(
+      (_id: string, path: string, _s: unknown, init?: any) =>
+        Promise.resolve(
+          init?.method === 'DELETE'
+            ? {
+                removed_count: 1,
+                removed_ids: ['sid-branch-0'],
+                live_ids: ['sid-branch-1']
+              }
+            : path === 'branches'
+              ? {
+                  current: 'sid-kept',
+                  total: 3,
+                  branches: [0, 1].map(index => ({
+                    session_id: `sid-branch-${index}`,
+                    file_mtime: 0,
+                    label: `Branch ${index}`
+                  }))
+                }
+              : {}
+        )
+    );
+
+    const done = (panel as any)._cleanupParallel(
+      session({ name: 'proj', extra_sessions: 2 })
+    ) as Promise<void>;
+    await flush();
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+    )
+      .find(button => button.textContent === 'Remove')!
+      .click();
+    await done;
+
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupMessage')!
+        .textContent
+    ).toBe(
+      'Removed 1 parallel session. One conversation was kept, because a live terminal runs it.'
+    );
   });
 });

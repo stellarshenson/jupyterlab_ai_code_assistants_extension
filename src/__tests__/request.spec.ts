@@ -25,7 +25,9 @@ import {
   REQUEST_TIMEOUT_MS,
   RequestTimeoutError,
   isRequestTimeout,
-  requestAPI
+  requestAPI,
+  WINDOW_HEADER,
+  WINDOW_ID
 } from '../core/request';
 
 const SETTINGS = {
@@ -240,5 +242,27 @@ describe('requestAPI on a body it cannot parse', () => {
 
     expect(error).toBeInstanceOf(ServerConnection.ResponseError);
     expect((error as Error).message).toContain('bad gateway');
+  });
+});
+
+describe('requestAPI names its window', () => {
+  it('DEF-PANE-370 - sends this window in its header on every request, beside the caller init', async () => {
+    // The server names this window in the push its change causes, and the
+    // window skips that push (index.spec.ts). A request without the header
+    // makes the window re-read its own change twice.
+    makeRequest.mockResolvedValue(jsonResponse({ ok: true }));
+
+    await requestAPI('providers/claude/favourite', SETTINGS, {
+      method: 'POST',
+      body: '{}'
+    });
+
+    const init = makeRequest.mock.calls[0][1] as RequestInit;
+    expect(WINDOW_ID).toMatch(/^[0-9a-f-]{36}$/);
+    expect((init.headers as Record<string, string>)[WINDOW_HEADER]).toBe(
+      WINDOW_ID
+    );
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe('{}');
   });
 });

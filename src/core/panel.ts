@@ -3,8 +3,7 @@ import {
   Clipboard,
   Dialog,
   InputDialog,
-  Notification,
-  showDialog
+  Notification
 } from '@jupyterlab/apputils';
 import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
 import { ServerConnection } from '@jupyterlab/services';
@@ -789,29 +788,32 @@ export class AssistantSessionsPanel extends Widget {
     }
   }
 
-  /** The warning a deletion earns: with the trash setting on, a refused move
-   * may remove the conversations permanently or leave them in place, so
-   * neither the verb nor the note may promise one outcome. */
-  private get _irreversibleNote(): string {
-    return this._deleteToTrash
-      ? ' A permanent removal cannot be undone.'
-      : ' This cannot be undone.';
-  }
-
-  private get _disposalVerb(): string {
-    return this._deleteToTrash
-      ? 'moved to the trash when the system accepts them; a refused move may remove them permanently or leave them in place'
-      : 'deleted permanently';
-  }
-
   private async _removeProject(session: ISession): Promise<void> {
     const name = this._lookupName(session);
-    const confirm = await showDialog({
-      title: `Remove from ${this._descriptor.label}`,
-      body:
-        `Remove "${name}" from ${this._descriptor.label}? This drops the ` +
-        `entire project history and every conversation it holds - ` +
-        `${this._disposalVerb}.${this._irreversibleNote}`,
+    const title = `Remove from ${this._descriptor.label}`;
+    // The consequence only, in two lines: the question and the outcome, then
+    // the permanent-deletion refusal on its own caution line
+    // (DEF-PANE-371-DIALOG-TEXT).
+    const outcome = this._deleteToTrash
+      ? `Remove "${name}"? Every conversation in it goes to the trash.`
+      : `Remove "${name}"? Every conversation in it is deleted permanently.`;
+    const caution = this._deleteToTrash
+      ? 'A refused move deletes permanently.'
+      : '';
+    const body = new Widget();
+    body.node.className = 'jp-AiAssistantsPanel-removeConfirm';
+    const question = document.createElement('p');
+    question.textContent = outcome;
+    body.node.appendChild(question);
+    if (caution) {
+      const line = document.createElement('p');
+      line.className = 'jp-AiAssistantsPanel-removeCaution';
+      line.textContent = caution;
+      body.node.appendChild(line);
+    }
+    const dialog = new Dialog<unknown>({
+      title,
+      body,
       buttons: [
         Dialog.cancelButton(),
         Dialog.warnButton({ label: this._trans.__('Remove') })
@@ -824,6 +826,12 @@ export class AssistantSessionsPanel extends Widget {
       defaultButton: 0,
       renderer: dialogRenderer
     });
+    // A Widget body leaves the Dialog no string to name itself from.
+    dialog.node.setAttribute(
+      'aria-label',
+      [title, outcome, caution].filter(part => part).join(' ')
+    );
+    const confirm = await dialog.launch();
     if (!confirm.button.accept) {
       return;
     }
@@ -888,7 +896,7 @@ export class AssistantSessionsPanel extends Widget {
     caution.className = 'jp-AiAssistantsPanel-cleanupCaution';
     caution.textContent = this._deleteToTrash
       ? 'A refused trash move deletes permanently and cannot be undone.'
-      : this._irreversibleNote.trim();
+      : 'This cannot be undone.';
     confirmBody.node.appendChild(caution);
 
     const title = this._trans.__('Clean Up Parallel Sessions');
@@ -904,9 +912,11 @@ export class AssistantSessionsPanel extends Widget {
       defaultButton: 0,
       renderer: dialogRenderer
     });
-    // showDialog names a dialog only when its body is a string, and this body
-    // is a Widget: name it here, and again when the question is restated and
-    // the warning joins it.
+    // Scopes the armed style in base.css to this one dialog.
+    confirmDialog.addClass('jp-AiAssistantsPanel-cleanupDialog');
+    // The Dialog names itself only when its body is a string, and this body is
+    // a Widget: name it here, and again when the question is restated and the
+    // warning joins it.
     const nameDialog = (): void => {
       confirmDialog.node.setAttribute(
         'aria-label',
@@ -922,6 +932,119 @@ export class AssistantSessionsPanel extends Widget {
       );
     };
     nameDialog();
+
+    // The house two-step destructive action (design-language.md, "Two-step
+    // destructive action"; the branch popup's Delete is the shipped form):
+    // while the newer state is unknown or newer, the accept button arms on the
+    // first activation and removes on the second, the arm lapsing after 4 s.
+    // It starts required: the branch fetch that decides whether a removal is
+    // safe is still out when the dialog opens.
+    let armRequired = true;
+    let armed = false;
+    let armTimer = 0;
+    // The arming activation's event.timeStamp, which the confirming one is
+    // measured against.
+    let armedAt = 0;
+
+    /** Find and relabel the accept button. The Dialog keeps its button nodes
+     * private and puts the label in a child whose aria-label overrides its
+     * text, so both are set. */
+    const updateAccept = (): void => {
+      const button =
+        confirmDialog.node.querySelector<HTMLButtonElement>('.jp-mod-accept');
+      const label = button?.querySelector('.jp-Dialog-buttonLabel');
+      if (!button || !label) {
+        return;
+      }
+      const text = armed
+        ? this._trans.__('Confirm remove %1', extra)
+        : armRequired
+          ? this._trans.__('Remove (%1)', extra)
+          : this._trans.__('Remove');
+      label.textContent = text;
+      label.setAttribute('aria-label', text);
+      button.classList.toggle('jp-mod-armed', armed);
+    };
+
+    const disarm = (): void => {
+      armed = false;
+      window.clearTimeout(armTimer);
+    };
+
+    /** Consume one accept activation. True means it only armed, or was the
+     * ignored half of a double-click, and the Dialog must not resolve; false
+     * lets the Dialog's own handler resolve it. */
+    const activate = (event: MouseEvent | KeyboardEvent): boolean => {
+      if (!armRequired) {
+        return false;
+      }
+      // The second click of a double-click is not a confirmation (DEF-PANE-336):
+      // a multi-click within 600 ms of arming is ignored. A later click
+      // confirms whatever its detail, since the OS double-click interval can
+      // be longer than the user's pause (DEF-PANE-338).
+      if (armed && event.detail > 1 && event.timeStamp - armedAt < 600) {
+        return true;
+      }
+      if (!armed) {
+        armed = true;
+        armedAt = event.timeStamp;
+        window.clearTimeout(armTimer);
+        armTimer = window.setTimeout(() => {
+          disarm();
+          updateAccept();
+        }, 4000);
+        updateAccept();
+        return true;
+      }
+      disarm();
+      return false;
+    };
+
+    // Registered before launch(): the Dialog attaches its own capture
+    // listeners on this same node when launch() attaches it, so these run
+    // first and can swallow an activation that must only arm. Space arrives
+    // as a click; Enter arrives as a keydown the Dialog would otherwise
+    // resolve from, so both are intercepted here.
+    confirmDialog.node.addEventListener(
+      'click',
+      event => {
+        const button = confirmDialog.node.querySelector('.jp-mod-accept');
+        if (!button || !button.contains(event.target as Node)) {
+          return;
+        }
+        if (activate(event)) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+        }
+      },
+      true
+    );
+    confirmDialog.node.addEventListener(
+      'keydown',
+      event => {
+        if (event.key !== 'Enter') {
+          return;
+        }
+        const accept = confirmDialog.node.querySelector('.jp-mod-accept');
+        if (!accept || document.activeElement !== accept) {
+          return;
+        }
+        // A held key's auto-repeat is not a second press (DEF-PANE-347): it
+        // must neither confirm nor arm, and consuming it stops the Dialog's
+        // own Enter handler from resolving the accept.
+        if (event.repeat) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          return;
+        }
+        if (activate(event)) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+        }
+      },
+      true
+    );
+    updateAccept();
 
     // Alongside the question, never in front of it: the request layer allows
     // 60 s, and the confirmation must open at once. When the list lands the
@@ -956,6 +1079,13 @@ export class AssistantSessionsPanel extends Widget {
               'active after the one kept.';
             confirmBody.node.appendChild(warning);
           }
+          // The list just decided what the button acts on: an arm given while
+          // it was pending could confirm a different set, so drop it and
+          // restate the label with the fetched count. With no newer branch the
+          // button returns to the one-click Remove.
+          disarm();
+          armRequired = newer > 0;
+          updateAccept();
           nameDialog();
         }
         return fetched;

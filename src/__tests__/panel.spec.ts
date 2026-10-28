@@ -220,19 +220,39 @@ describe('DEF-51 - the destructive dialogs open with Cancel under the keyboard',
     // when no trash accepts the move.
     let done = (panel as any)._removeProject(session()) as Promise<void>;
     await openButtons();
-    let body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
-    expect(body).toContain(
-      'moved to the trash when the system accepts them; a refused move may remove them permanently or leave them in place'
+    // A Widget body leaves the Dialog no string to name itself from, so the
+    // aria-label is the dialog's only accessible name - the whole of it.
+    const label = document
+      .querySelector('.jp-Dialog')!
+      .getAttribute('aria-label')!;
+    expect(label).toContain('Remove from Testbed');
+    expect(label).toContain(
+      'Remove "proj"? Every conversation in it goes to the trash.'
     );
-    expect(body).toContain('A permanent removal cannot be undone');
+    expect(label).toContain('A refused move deletes permanently.');
+    let lines = Array.from(document.querySelectorAll('.jp-Dialog-body p')).map(
+      line => line.textContent ?? ''
+    );
+    expect(lines).toEqual([
+      'Remove "proj"? Every conversation in it goes to the trash.',
+      'A refused move deletes permanently.'
+    ]);
+    // The body states its outcome in at most twenty words, the caution in at
+    // most twelve (DEF-PANE-371-DIALOG-TEXT).
+    expect(lines[0].trim().split(/\s+/).length).toBeLessThanOrEqual(20);
+    expect(lines[1].trim().split(/\s+/).length).toBeLessThanOrEqual(12);
     pressEnter();
     await done;
 
     (panel as any)._deleteToTrash = false;
     done = (panel as any)._removeProject(session()) as Promise<void>;
     await openButtons();
-    body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
-    expect(body).toContain('deleted permanently. This cannot be undone.');
+    lines = Array.from(document.querySelectorAll('.jp-Dialog-body p')).map(
+      line => line.textContent ?? ''
+    );
+    expect(lines).toEqual([
+      'Remove "proj"? Every conversation in it is deleted permanently.'
+    ]);
     pressEnter();
     await done;
   });
@@ -258,7 +278,10 @@ describe('DEF-51 - the destructive dialogs open with Cancel under the keyboard',
     ) as Promise<void>;
     const buttons = await openButtons();
 
-    expect(buttons.map(b => b.textContent)).toEqual(['Cancel', 'Remove']);
+    // The branch fetch has answered without a list, so the newer state stays
+    // unknown and the accept button keeps its arming label - and Cancel is
+    // still the default the fresh dialog puts under the keyboard.
+    expect(buttons.map(b => b.textContent)).toEqual(['Cancel', 'Remove (3)']);
     expect(document.activeElement).toBe(buttons[0]);
 
     pressEnter();
@@ -2286,9 +2309,9 @@ describe('ACC-SESS-61, ACC-SESS-62 - what the destructive confirmations state', 
     const body = document.querySelector('.jp-Dialog-body')!.textContent ?? '';
 
     // The name, not just the word "project": two rows differ only by it, and
-    // this dialog drops an entire history.
+    // this dialog drops every conversation in it.
     expect(body).toContain('ledger-tools');
-    expect(body).toContain('entire project history');
+    expect(body).toContain('Every conversation in it goes to the trash');
     pressEnter();
     await done;
     expect(request).not.toHaveBeenCalled();
@@ -2580,6 +2603,379 @@ describe('ACC-PANE-221, ACC-PANE-222 - the cleanup confirmation warning and hint
     );
     pressEnter();
     await done;
+  });
+});
+
+// ------------------------------------------- ACC-PANE-233..236 - arming Remove
+
+describe('ACC-PANE-233..236 - the cleanup confirmation arms Remove while the newer state is unknown or newer', () => {
+  const HOUR = 3_600_000;
+
+  const openButtons = async (): Promise<HTMLButtonElement[]> => {
+    await flush();
+    const dialog = document.querySelector('.jp-Dialog');
+    expect(dialog).not.toBeNull();
+    return Array.from(
+      dialog!.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+    );
+  };
+
+  /** The label element, whose aria-label is the part of the button's
+   * accessible name that overrides its text. */
+  const labelOf = (button: HTMLButtonElement): HTMLDivElement =>
+    button.querySelector('.jp-Dialog-buttonLabel') as HTMLDivElement;
+
+  /** Dispatch a click with a chosen detail and timeStamp, so the double-click
+   * guard is exercised without a 600 ms wait. */
+  const click = (
+    button: HTMLButtonElement,
+    detail = 1,
+    timeStamp?: number
+  ): void => {
+    const event = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      detail
+    });
+    if (timeStamp !== undefined) {
+      Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+    }
+    button.dispatchEvent(event);
+  };
+
+  /** Dispatch Enter on the dialog and return the event, so a caller can
+   * assert the handler consumed the browser's default activation. */
+  const pressEnter = (repeat = false): KeyboardEvent => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      repeat,
+      bubbles: true,
+      cancelable: true
+    });
+    document.querySelector('.jp-Dialog')!.dispatchEvent(event);
+    return event;
+  };
+
+  const deletes = (): any[] =>
+    request.mock.calls.filter(call => call[3]?.method === 'DELETE');
+
+  const branches = (mtimes: number[]): any => ({
+    current: 'sid-kept',
+    total: mtimes.length + 1,
+    branches: mtimes.map((file_mtime, index) => ({
+      session_id: `sid-branch-${index}`,
+      file_mtime,
+      label: `Branch ${index}`
+    }))
+  });
+
+  /** Answer the branch fetch with this list and the DELETE with the same
+   * conversations removed; every other route answers empty. */
+  const serve = (mtimes: number[]): void => {
+    request.mockImplementation(
+      (_id: string, path: string, _s: unknown, init?: any) =>
+        Promise.resolve(
+          init?.method === 'DELETE'
+            ? {
+                removed_count: mtimes.length,
+                removed_ids: mtimes.map((_m, index) => `sid-branch-${index}`),
+                live_ids: []
+              }
+            : path === 'branches'
+              ? branches(mtimes)
+              : {}
+        )
+    );
+  };
+
+  const row = (extra_sessions: number, file_mtime: number): ISession =>
+    session({ name: 'ledger-tools', extra_sessions, file_mtime });
+
+  const closeProgress = async (): Promise<void> => {
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.jp-Dialog-button')
+    )
+      .find(button => button.textContent === 'Close')!
+      .click();
+    await flush();
+  };
+
+  it('ACC-PANE-233 - Remove arms to Confirm remove when the warning shows, and the second activation removes', async () => {
+    const now = Date.now();
+    serve([now - HOUR, now - 3 * HOUR]);
+    const done = (panel as any)._cleanupParallel(
+      row(2, now - 2 * HOUR)
+    ) as Promise<void>;
+    const buttons = await openButtons();
+
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupWarning')
+    ).not.toBeNull();
+    expect(buttons[1].textContent).toBe('Remove (2)');
+
+    click(buttons[1]);
+    // Armed, not removed: the dialog is still up and no DELETE went out.
+    expect(buttons[1].textContent).toBe('Confirm remove 2');
+    expect(buttons[1].classList.contains('jp-mod-armed')).toBe(true);
+    // The accessible name follows the visible label, which the Dialog's own
+    // label element would otherwise pin to Remove.
+    expect(labelOf(buttons[1]).getAttribute('aria-label')).toBe(
+      'Confirm remove 2'
+    );
+    expect(document.querySelector('.jp-Dialog')).not.toBeNull();
+    expect(deletes()).toHaveLength(0);
+
+    click(buttons[1]);
+    await done;
+    const sent = deletes();
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0][3].body).session_ids).toEqual([
+      'sid-branch-0',
+      'sid-branch-1'
+    ]);
+  });
+
+  it('ACC-PANE-234 - an armed Remove lapses after four seconds and the next activation arms again', async () => {
+    // The fetch fails: the newer state stays unknown, so arming stays required.
+    request.mockRejectedValueOnce(new Error('offline'));
+    const done = (panel as any)._cleanupParallel(
+      row(3, Date.now() - 2 * HOUR)
+    ) as Promise<void>;
+    const buttons = await openButtons();
+    expect(buttons[1].textContent).toBe('Remove (3)');
+
+    jest.useFakeTimers();
+    try {
+      click(buttons[1], 1, 1000);
+      expect(buttons[1].textContent).toBe('Confirm remove 3');
+
+      jest.advanceTimersByTime(4000);
+      expect(buttons[1].textContent).toBe('Remove (3)');
+      expect(buttons[1].classList.contains('jp-mod-armed')).toBe(false);
+
+      // The next activation starts the two steps again; it does not remove.
+      click(buttons[1], 1, 9000);
+      expect(buttons[1].textContent).toBe('Confirm remove 3');
+      expect(deletes()).toHaveLength(0);
+    } finally {
+      jest.useRealTimers();
+    }
+
+    buttons[0].click(); // Cancel
+    await done;
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it('ACC-PANE-235 - the second click of a double-click does not confirm, and a later click does', async () => {
+    const now = Date.now();
+    serve([now - HOUR]);
+    const done = (panel as any)._cleanupParallel(
+      row(1, now - 2 * HOUR)
+    ) as Promise<void>;
+    const buttons = await openButtons();
+    expect(buttons[1].textContent).toBe('Remove (1)');
+
+    click(buttons[1], 1, 1000);
+    // 200 ms after the arming click, with detail 2: the double-click half is
+    // ignored and the arm stands.
+    click(buttons[1], 2, 1200);
+    await flush();
+    expect(buttons[1].textContent).toBe('Confirm remove 1');
+    expect(buttons[1].classList.contains('jp-mod-armed')).toBe(true);
+    expect(deletes()).toHaveLength(0);
+
+    // A later click confirms whatever its detail: 700 ms after arming.
+    click(buttons[1], 2, 1700);
+    await done;
+    expect(deletes()).toHaveLength(1);
+  });
+
+  it('ACC-PANE-236 - an unarmed activation never removes while the branch list is still being fetched', async () => {
+    const now = Date.now();
+    let release: ((value: any) => void) | undefined;
+    request.mockImplementationOnce(
+      () => new Promise(resolve => (release = resolve))
+    );
+    const done = (panel as any)._cleanupParallel(
+      row(2, now - 2 * HOUR)
+    ) as Promise<void>;
+    const buttons = await openButtons();
+
+    // The fetch is out: one activation arms and does not remove.
+    expect(buttons[1].textContent).toBe('Remove (2)');
+    click(buttons[1]);
+    expect(buttons[1].textContent).toBe('Confirm remove 2');
+    expect(deletes()).toHaveLength(0);
+
+    // The list lands with a conversation newer than the kept one; the earlier
+    // activation still must not have removed anything, and the arm is dropped
+    // so it cannot confirm this list either.
+    release!(branches([now - HOUR]));
+    await flush();
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupWarning')
+    ).not.toBeNull();
+    expect(buttons[1].textContent).toBe('Remove (1)');
+    expect(buttons[1].classList.contains('jp-mod-armed')).toBe(false);
+    expect(deletes()).toHaveLength(0);
+
+    buttons[0].click(); // Cancel
+    await done;
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it('arms while the branch fetch is pending, before any newer state is known', async () => {
+    const now = Date.now();
+    let release: ((value: any) => void) | undefined;
+    request.mockImplementationOnce(
+      () => new Promise(resolve => (release = resolve))
+    );
+    const done = (panel as any)._cleanupParallel(
+      row(4, now - 2 * HOUR)
+    ) as Promise<void>;
+    const buttons = await openButtons();
+
+    // The row's own count while the list is unknown, and no warning yet.
+    expect(buttons[1].textContent).toBe('Remove (4)');
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupWarning')
+    ).toBeNull();
+    click(buttons[1]);
+    expect(buttons[1].textContent).toBe('Confirm remove 4');
+    expect(buttons[1].classList.contains('jp-mod-armed')).toBe(true);
+    expect(labelOf(buttons[1]).getAttribute('aria-label')).toBe(
+      'Confirm remove 4'
+    );
+    expect(deletes()).toHaveLength(0);
+
+    // Let the held fetch answer, then cancel, so the dialog leaves cleanly.
+    release!(branches([now - 3 * HOUR]));
+    await flush();
+    buttons[0].click();
+    await done;
+  });
+
+  it('arms after a failed branch fetch, and the second activation removes', async () => {
+    request.mockRejectedValueOnce(new Error('offline'));
+    // The removal's own refetch answers with the branch it deletes.
+    request.mockResolvedValueOnce({
+      current: 'sid-kept',
+      total: 2,
+      branches: [
+        { session_id: 'sid-branch-0', file_mtime: 1, label: 'Branch 0' }
+      ]
+    });
+    const done = (panel as any)._cleanupParallel(
+      row(3, Date.now() - 2 * HOUR)
+    ) as Promise<void>;
+    const buttons = await openButtons();
+
+    expect(buttons[1].textContent).toBe('Remove (3)');
+    click(buttons[1]);
+    expect(buttons[1].textContent).toBe('Confirm remove 3');
+    expect(deletes()).toHaveLength(0);
+
+    click(buttons[1]);
+    await done;
+    const sent = deletes();
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0][3].body).session_ids).toEqual(['sid-branch-0']);
+  });
+
+  it('a restatement drops an arm given before the list landed and relabels with the new count', async () => {
+    const now = Date.now();
+    let release: ((value: any) => void) | undefined;
+    request.mockImplementationOnce(
+      () => new Promise(resolve => (release = resolve))
+    );
+    const done = (panel as any)._cleanupParallel(
+      row(3, now - 2 * HOUR)
+    ) as Promise<void>;
+    const buttons = await openButtons();
+
+    click(buttons[1]);
+    expect(buttons[1].textContent).toBe('Confirm remove 3');
+    expect(buttons[1].classList.contains('jp-mod-armed')).toBe(true);
+
+    // The fetched list holds two conversations, one newer: the count changes
+    // and the warning appears, so the arm must not survive to confirm them.
+    release!(branches([now - HOUR, now - 3 * HOUR]));
+    await flush();
+    expect(buttons[1].textContent).toBe('Remove (2)');
+    expect(buttons[1].classList.contains('jp-mod-armed')).toBe(false);
+    expect(deletes()).toHaveLength(0);
+
+    // The two steps now apply to the restated list.
+    click(buttons[1]);
+    expect(buttons[1].textContent).toBe('Confirm remove 2');
+    click(buttons[1]);
+    await done;
+    expect(JSON.parse(deletes()[0][3].body).session_ids).toEqual([
+      'sid-branch-0',
+      'sid-branch-1'
+    ]);
+  });
+
+  it('keeps the one-click Remove when the fetched list has no newer conversation', async () => {
+    const now = Date.now();
+    serve([now - 3 * HOUR]);
+    const done = (panel as any)._cleanupParallel(
+      row(1, now - 2 * HOUR)
+    ) as Promise<void>;
+    const buttons = await openButtons();
+
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupWarning')
+    ).toBeNull();
+    expect(buttons[1].textContent).toBe('Remove');
+    expect(buttons[1].classList.contains('jp-mod-armed')).toBe(false);
+
+    click(buttons[1]);
+    await done;
+    expect(deletes()).toHaveLength(1);
+  });
+
+  it('Enter and Space on the accept button arm first and confirm second', async () => {
+    const now = Date.now();
+    serve([now - HOUR]);
+
+    let done = (panel as any)._cleanupParallel(
+      row(1, now - 2 * HOUR)
+    ) as Promise<void>;
+    let buttons = await openButtons();
+    buttons[1].focus();
+    // The capture handler must consume the Enter default: a real browser
+    // would otherwise fire the focused button's activation click, and that
+    // click would confirm in one press.
+    const armingEnter = pressEnter();
+    expect(armingEnter.defaultPrevented).toBe(true);
+    expect(buttons[1].textContent).toBe('Confirm remove 1');
+    expect(deletes()).toHaveLength(0);
+    // A held Enter sends repeats; they are not a second press and must not
+    // confirm, though the Dialog's own Enter handler would resolve the accept.
+    const repeatEnter = pressEnter(true);
+    expect(repeatEnter.defaultPrevented).toBe(true);
+    expect(deletes()).toHaveLength(0);
+    expect(document.querySelector('.jp-Dialog')).not.toBeNull();
+    expect(buttons[1].textContent).toBe('Confirm remove 1');
+    expect(buttons[1].classList.contains('jp-mod-armed')).toBe(true);
+    pressEnter();
+    await done;
+    expect(deletes()).toHaveLength(1);
+    await closeProgress();
+
+    // Space reaches a button as a click; the same two steps hold.
+    request.mockClear();
+    done = (panel as any)._cleanupParallel(
+      row(1, now - 2 * HOUR)
+    ) as Promise<void>;
+    buttons = await openButtons();
+    buttons[1].click();
+    expect(buttons[1].textContent).toBe('Confirm remove 1');
+    expect(deletes()).toHaveLength(0);
+    buttons[1].click();
+    await done;
+    expect(deletes()).toHaveLength(1);
   });
 });
 

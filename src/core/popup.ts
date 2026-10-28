@@ -162,7 +162,7 @@ export function showManageSessionsPopup(
   deleteBtn.type = 'button';
   deleteBtn.className = 'jp-AiAssistantsPanel-branchDelete';
   deleteBtn.title = options.deleteToTrash
-    ? 'Deleted conversations move to the trash when the system accepts them; a refused move may remove them permanently or leave them in place'
+    ? 'Deleted conversations go to the trash; a refused move deletes permanently.'
     : 'Deleted conversations are removed permanently';
   footer.appendChild(deleteBtn);
   // Plain visual counter (selection, or the last action), beside the button

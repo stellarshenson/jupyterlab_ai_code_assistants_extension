@@ -664,6 +664,32 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - log: 2026-10-27T12:41:32Z @kj added
   - log: 2026-10-27T22:31:10Z @kj closed: each panel header and sidebar tab caption read Claude Code, Codex, Kimi Code, Gemini or DeepSeek alone, the settings descriptions read 'Show the <name> panel.', and the Refresh command keeps its label Refresh <name> Sessions; reason: the line names the tests, the mutations that redden them, build 1.2.283 and the gate counts, as the close stage requires
   - log: 2026-10-28T01:17:30Z @kj header screenshots recaptured after the cold-load veil lifts: the earlier pale headers were the designed veil drawn over the header, not a header rule; the Galata test now waits for the veil to hide and asserts the title colour rgba(0, 0, 0, 0.87), opacity 1 and nothing drawn over it
+- [x] `ACC-PANE-233-ARMED-REMOVE` **Clean Up arms Remove when a removed conversation is newer** - HIGH; When the Clean Up confirmation shows its newer-conversation warning, Remove arms to Confirm remove on the first click and removes on the second.
+  - evidence: panel.spec.ts -t 'ACC-PANE-233': 9 passed 129 skipped, exit 0; -t 'Clean Up': 4 passed 134 skipped, exit 0; the Galata cleanup-confirmation.spec.ts warning case passed in the gate's 100/100 first run at 1.2.292; mutation V1 severed the arming branch and reddened ACC-PANE-233 with a DELETE on the first activation
+  - test: jlpm jest src/__tests__/panel.spec.ts -t 'Clean Up'; Galata ui-tests/tests/cleanup-confirmation.spec.ts
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-10-28T21:01:09Z @kj Capture-phase click and keydown guard on the dialog node, the popup's arm pattern: jp-mod-armed and the error colour
+  - log: 2026-10-28T21:01:09Z @kj added
+  - log: 2026-10-28T22:27:37Z @kj closed: the Clean Up confirmation that warns of a newer removed conversation arms Remove to Confirm remove on the first activation, and the second activation removes
+- [x] `ACC-PANE-234-ARM-LAPSE` **An armed Remove lapses after four seconds** - MEDIUM; An armed Remove returns to Remove after four seconds; a click after that arms again rather than removing.
+  - evidence: panel.spec.ts -t 'ACC-PANE-234': 1 passed 137 skipped, exit 0 at 1.2.292; mutation V3 stretched the lapse 4000 -> 40000 ms and reddened ACC-PANE-234, the label still 'Confirm remove 3' after 4000 ms
+  - test: freeze timers, arm, advance 4 s, assert the label is back to Remove and one click arms again
+  - test-tags: UNIT
+  - log: 2026-10-28T21:01:09Z @kj added
+  - log: 2026-10-28T22:27:40Z @kj closed: an armed Remove returns to Remove after four seconds, and the next activation arms again instead of removing
+- [x] `ACC-PANE-235-ARM-DOUBLECLICK` **The second click of a double-click does not confirm an armed Remove** - MEDIUM; The second click of a double-click within 600 ms of the arming click is ignored; a later click confirms whatever its detail.
+  - evidence: panel.spec.ts -t 'ACC-PANE-235': 1 passed 137 skipped, exit 0 at 1.2.292; mutation V2 changed the detail guard > 1 to > 99 and reddened ACC-PANE-235 at panel.spec.ts:2762, one DELETE after the 200 ms second click
+  - test: dispatch two clicks within 600 ms on the armed button, assert no DELETE
+  - test-tags: UNIT
+  - log: 2026-10-28T21:01:09Z @kj added
+  - log: 2026-10-28T22:27:40Z @kj closed: the second click of a double-click within 600 ms of the arming click is ignored, and a later click confirms whatever its detail
+- [x] `ACC-PANE-236-UNARMED-NEWER` **No unarmed click removes a newer conversation** - HIGH; No accept click that has not armed removes a conversation newer than the one kept, including while the branch list is still being fetched.
+  - evidence: panel.spec.ts -t 'ACC-PANE-236': 1 passed 137 skipped, exit 0; the Galata cleanup-confirmation.spec.ts warning case passed in the gate's 100/100 first run at 1.2.292; mutation V5 set the pending arm requirement false and reddened ACC-PANE-236, the label Remove instead of Remove (N)
+  - test: hold the branches response, click Remove once, release a newer branch, assert no DELETE
+  - test-tags: UNIT, FUNCTIONAL
+  - mechanism: 2026-10-28T21:01:09Z @kj The warning state is unknown until the branch list lands, so an accept click arms while the fetch is pending; a landing warning or a restated count disarms
+  - log: 2026-10-28T21:01:09Z @kj added
+  - log: 2026-10-28T22:27:40Z @kj closed: an activation that has not armed never removes a conversation newer than the one kept, including while the branch list is still being fetched
 
 ## Sessions `SESS`
 
@@ -734,13 +760,14 @@ Resume, branch, switch, delete and clean up, served by one core against per-prov
   - log: 2026-09-17T17:25:58Z @kj edited importance
   - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
 - [x] `ACC-SESS-61` **Remove project** - HIGH; drops a project's history after a confirmation naming the project, honouring the trash setting
-  - evidence: panel.spec.ts ACC-SESS-61 asserts the confirmation names the project and says it drops the entire project history; 'says a deletion may be permanent when the trash might refuse' covers both trash settings and the fallback warning; test_routes.py test_a_delete_the_store_refuses_outright_is_a_failure covers the route. Mutation: replacing the project name with 'this project' reddens it
+  - evidence: panel.spec.ts asserts the confirmation names the project, says every conversation goes to the trash, the trash-off case says deleted permanently; aria-label carries title, body and caution (severing it reddens); screenshot tmp/workflows/cleanup-evidence/screenshots/remove-confirm.png; ui-tests/tests/remove-confirmation.spec.ts renders it; test_routes.py test_a_delete_the_store_refuses_outright_is_a_failure covers the route; Mutation: replacing the project name with 'this project' reddens it
   - test-tags: UNIT, FUNCTIONAL
   - test: jlpm jest src/__tests__/panel.spec.ts -t ACC-SESS-61
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:25:58Z @kj edited importance
   - log: 2026-09-19T23:33:10Z @kj edited test (added) and test-tags (added) and evidence (added)
   - log: 2026-10-18T01:07:00Z @kj edited evidence "panel.spec.ts ACC-SESS-61 asserts the confirmation names the project and says it drops the entire project history; 'says a deletion cannot be undone only when it is permanent' covers both trash settings; test_routes.py test_a_delete_the_store_refuses_outright_is_a_failure covers the route. Mutation: replacing the project name with 'this project' reddens it" -> "panel.spec.ts ACC-SESS-61 asserts the confirmation names the project and says it drops the entire project history; 'says a deletion may be permanent when the trash might refuse' covers both trash settings and the fallback warning; test_routes.py test_a_delete_the_store_refuses_outright_is_a_failure covers the route. Mutation: replacing the project name with 'this project' reddens it"
+  - log: 2026-10-28T22:16:36Z @kj edited evidence "panel.spec.ts ACC-SESS-61 asserts the confirmation names the project and says it drops the entire project history; 'says a deletion may be permanent when the trash might refuse' covers both trash settings and the fallback warning; test_routes.py test_a_delete_the_store_refuses_outright_is_a_failure covers the route. Mutation: replacing the project name with 'this project' reddens it" -> "panel.spec.ts asserts the confirmation names the project, says every conversation goes to the trash, the trash-off case says deleted permanently; aria-label carries title, body and caution (severing it reddens); screenshot tmp/workflows/cleanup-evidence/screenshots/remove-confirm.png; ui-tests/tests/remove-confirmation.spec.ts renders it; test_routes.py test_a_delete_the_store_refuses_outright_is_a_failure covers the route; Mutation: replacing the project name with 'this project' reddens it"
 - [x] `ACC-SESS-62` **Clean up parallel sessions** - HIGH; removes a project's extra conversations keeping only the current, showing the count and confirming first
   - evidence: panel.spec.ts ACC-SESS-62 asserts the count, the project and the kept conversation, plus 'states the empty outcome and refreshes the list when the fetched list is empty': the Close-only dialog says 'Nothing left to clean up.', its aria-label carries that statement, the cleanup message carries role=status, no DELETE, one listing after the branches fetch, and 'Clean Up Parallel Sessions: Enter on the Remove button still cleans up' asserts the progress dialog's aria-label carries the title. Mutations, sources restored byte-equal: resolve(0), deleted branch and removed refresh; severing each of the three attribute writes reddens exactly its assertion - the guard's aria-label the outcome name, role=status the message announcement, the build-time aria-label the progress dialog's name; Jest 426/426, pytest 418, Galata 96/96 at 1.2.281.
   - test-tags: UNIT, E2E

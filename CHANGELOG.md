@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [1.2.294] - 2026-10-29
+
+### Changed
+
+- The Clean Up Parallel Sessions confirmation arms Remove when it warns that a parallel conversation was active after the one kept: the first activation reads Confirm remove and the second removes, an armed button returns to Remove after four seconds, and the second click of a double-click is ignored
+- The confirmation that removes a project's history states its consequence in two short lines, the project and the trash outcome in the body and a refused move deleting permanently on its own caution line, and the Manage Sessions delete tooltip drops from 23 words to 11
+
+### Fixed
+
+- A held Enter on the Clean Up confirmation's Remove button no longer confirms it: the key's auto-repeat is ignored, so one press arms Remove and a fresh press confirms
+
 ## [1.2.288] - 2026-10-28
 
 ### Added

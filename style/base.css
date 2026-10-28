@@ -683,20 +683,23 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
   color: var(--jp-error-color1);
 }
 
-/* The cleanup confirmation's question, hint, caution and warning. The warning
+/* The two destructive confirmations' lines: the Remove question with its
+   caution, and the cleanup question, hint, caution and warning. The warning
    box is separate from the body text because it answers one question - is a
    conversation this removal deletes newer than the one kept? - and it uses the
    warning colour, not the error colour: the removal is still the user's call.
    The tint is mixed with the surface colour, so both themes keep the text
    readable. */
-.jp-AiAssistantsPanel-cleanupConfirm {
+.jp-AiAssistantsPanel-cleanupConfirm,
+.jp-AiAssistantsPanel-removeConfirm {
   display: flex;
   flex-direction: column;
   gap: 8px;
   max-width: 440px;
 }
 
-.jp-AiAssistantsPanel-cleanupConfirm p {
+.jp-AiAssistantsPanel-cleanupConfirm p,
+.jp-AiAssistantsPanel-removeConfirm p {
   margin: 0;
 }
 
@@ -710,6 +713,16 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
     var(--jp-layout-color1)
   );
   color: var(--jp-ui-font-color1);
+}
+
+/* Armed for the second step of the destructive action (design-language.md,
+   "Two-step destructive action"): the error fill, as the branch popup's
+   Delete carries it. Scoped to the Clean Up confirmation's own dialog, so no
+   other dialog changes. */
+.jp-AiAssistantsPanel-cleanupDialog .jp-Dialog-button.jp-mod-armed,
+.jp-AiAssistantsPanel-cleanupDialog .jp-Dialog-button.jp-mod-armed:hover {
+  background: var(--jp-error-color1);
+  color: var(--jp-ui-inverse-font-color1);
 }
 
 .jp-AiAssistantsPanel-row.jp-mod-busy {

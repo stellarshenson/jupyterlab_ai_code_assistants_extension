@@ -232,8 +232,8 @@ describe('Manage Sessions popup Delete button (DEF-PANE-307)', () => {
   });
 
   it('names the trash outcome without promising recoverability', () => {
-    expect(deleteButton().title).toContain(
-      'a refused move may remove them permanently or leave them in place'
+    expect(deleteButton().title).toBe(
+      'Deleted conversations go to the trash; a refused move deletes permanently.'
     );
   });
 

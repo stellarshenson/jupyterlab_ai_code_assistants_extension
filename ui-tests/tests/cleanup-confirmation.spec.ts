@@ -24,7 +24,8 @@ const WARNING = '.jp-AiAssistantsPanel-cleanupWarning';
 const HINT = '.jp-AiAssistantsPanel-cleanupHint';
 const CAUTION = '.jp-AiAssistantsPanel-cleanupCaution';
 
-/** Right-click one project's row, open Clean Up, and return the modal. */
+/** Right-click one project's row, open Clean Up, and return the modal with the
+ * branch list its own fetch answered - the list its removal deletes. */
 async function openCleanup(page: any, project: string) {
   const row = page
     .locator(PANEL)
@@ -50,16 +51,15 @@ async function openCleanup(page: any, project: string) {
     .locator('.lm-Menu-item', { hasText: 'Clean Up Parallel Sessions' })
     .first()
     .click();
-  await (await listed).finished();
+  const response = await listed;
+  await response.finished();
+  const fetched = (await response.json()) as {
+    branches?: Array<{ session_id: string }>;
+  };
 
   const dialog = page.locator('.jp-Dialog');
   await expect(dialog).toBeVisible({ timeout: 15000 });
-  return dialog;
-}
-
-async function cancel(dialog: any): Promise<void> {
-  await dialog.locator('.jp-Dialog-button', { hasText: 'Cancel' }).click();
-  await expect(dialog).toBeHidden();
+  return { dialog, branches: fetched.branches ?? [] };
 }
 
 /** The hint is one sentence of at most twelve words. */
@@ -70,7 +70,7 @@ async function expectShortHint(dialog: any): Promise<void> {
   expect(words.length).toBeLessThanOrEqual(12);
 }
 
-test('ACC-PANE-221 and ACC-PANE-222 - Clean Up warns of a newer removed conversation and keeps its hint short', async ({
+test('ACC-PANE-221, ACC-PANE-222, ACC-PANE-233 and ACC-PANE-236 - Clean Up warns of a newer removed conversation, keeps its hint short, and arms Remove', async ({
   page
 }) => {
   await page.goto();
@@ -78,7 +78,8 @@ test('ACC-PANE-221 and ACC-PANE-222 - Clean Up warns of a newer removed conversa
 
   // A conversation the removal deletes was active after the one kept: the
   // warning box is in the modal.
-  let dialog = await openCleanup(page, 'cleanup-newer');
+  const newer = await openCleanup(page, 'cleanup-newer');
+  const dialog = newer.dialog;
   const warning = dialog.locator(WARNING);
   await expect(warning).toBeVisible();
 
@@ -97,11 +98,70 @@ test('ACC-PANE-221 and ACC-PANE-222 - Clean Up warns of a newer removed conversa
   // The permanent-deletion caution is a separate statement, so the hint can
   // stay short without losing the safety warning.
   await expect(dialog.locator(CAUTION)).toContainText('cannot be undone');
-  await cancel(dialog);
 
-  // Every conversation it removes is older than the one kept: no warning box.
-  dialog = await openCleanup(page, 'cleanup-older');
-  await expect(dialog.locator(WARNING)).toHaveCount(0);
-  await expectShortHint(dialog);
-  await cancel(dialog);
+  // The warning means one activation never removes: the first click arms the
+  // button to its error-coloured confirming label and the dialog stays up.
+  const remove = dialog.locator('.jp-Dialog-button.jp-mod-accept');
+  await expect(remove).toHaveText('Remove (1)');
+  await remove.click();
+  await expect(dialog).toBeVisible();
+  await expect(remove).toHaveText('Confirm remove 1');
+  await expect(remove).toHaveClass(/jp-mod-armed/);
+
+  // Cancel that arm, so the same project's branches are still there for the
+  // keyboard proof below.
+  await dialog.locator('.jp-Dialog-button.jp-mod-reject').click();
+  await expect(dialog).toHaveCount(0);
+
+  // A real Enter press, not a JS dispatch: the browser fires the focused
+  // button's default activation click after the keydown unless the capture
+  // handler consumes it, and that click would confirm in one press. The first
+  // Enter must only arm.
+  const reopened = await openCleanup(page, 'cleanup-newer');
+  const keyboardRemove = reopened.dialog.locator(
+    '.jp-Dialog-button.jp-mod-accept'
+  );
+  await expect(keyboardRemove).toHaveText('Remove (1)');
+  await keyboardRemove.focus();
+  await page.keyboard.press('Enter');
+  await expect(reopened.dialog).toBeVisible();
+  await expect(keyboardRemove).toHaveText('Confirm remove 1');
+  await expect(keyboardRemove).toHaveClass(/jp-mod-armed/);
+
+  // The second Enter confirms and issues the DELETE for the fetched ids.
+  const deleting = page.waitForRequest(
+    (request: any) =>
+      request.method() === 'DELETE' && request.url().includes('/sessions')
+  );
+  await page.keyboard.press('Enter');
+  const sent = JSON.parse((await deleting).postData() ?? '{}');
+  expect(sent.session_ids).toEqual(
+    reopened.branches.map(branch => branch.session_id)
+  );
+  // The confirmation closes and the progress dialog reports the removal; close
+  // it so the next project's confirmation is the only dialog.
+  const progress = page.locator('.jp-Dialog');
+  await expect(progress).toContainText('Removed', { timeout: 15000 });
+  await progress.locator('.jp-Dialog-button', { hasText: 'Close' }).click();
+  await expect(progress).toHaveCount(0);
+
+  // Every conversation it removes is older than the one kept: no warning box,
+  // and one click still removes with today's label.
+  const older = await openCleanup(page, 'cleanup-older');
+  await expect(older.dialog.locator(WARNING)).toHaveCount(0);
+  await expectShortHint(older.dialog);
+  const removeOlder = older.dialog.locator('.jp-Dialog-button.jp-mod-accept');
+  await expect(removeOlder).toHaveText('Remove');
+  const deletingOlder = page.waitForRequest(
+    (request: any) =>
+      request.method() === 'DELETE' && request.url().includes('/sessions')
+  );
+  await removeOlder.click();
+  const sentOlder = JSON.parse((await deletingOlder).postData() ?? '{}');
+  expect(sentOlder.session_ids).toEqual(
+    older.branches.map(branch => branch.session_id)
+  );
+  await expect(page.locator('.jp-Dialog')).toContainText('Removed', {
+    timeout: 15000
+  });
 });

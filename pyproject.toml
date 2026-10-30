@@ -23,16 +23,16 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "jupyter_server>=2.13.0,<3",
+    "jupyter_server>=2.21.0,<3",
     # The DeepSeek Harness stores every conversation log as concatenated
     # Zstandard frames (its default; a raw-text root is opt-in), so listing
     # its sessions means decoding them here. 0.13 is the first release whose
     # stream reader crosses frame boundaries.
-    "zstandard>=0.13",
+    "zstandard>=0.25.0,<1",
     # Spawns the terminal a Launcher tile launches into (ACC-LNCH-154). The
     # coupling is the command id string basic-terminal:launch, not a token, so
     # there is no npm dependency to match this one (ACC-LNCH-159).
-    "jupyterlab-basic-terminal-extension>=1.0.7",
+    "jupyterlab-basic-terminal-extension>=1.0.7,<2",
     # Companion labextension providing the IColourfulTabs token. Declared as a
     # non-bundled webpack singleton (package.json sharedPackages), so it must be
     # present at runtime or the whole extension fails to load with "Shared
@@ -42,11 +42,11 @@ dependencies = [
     # server route reporting each terminal's pty incarnation. Below it the
     # extension loads and tints nothing, which is the degraded mode the
     # runtime probe still covers for anyone pinning an older companion.
-    "jupyterlab_colourful_tab_extension>=1.1.20",
+    "jupyterlab_colourful_tab_extension>=1.1.20,<2",
     # The move-to-trash half of every destructive action. jupyter_server pulls
     # it in transitively today, but a delete that promised the user a
     # recoverable outcome must not depend on somebody else's dependency graph.
-    "send2trash>=1.8.0",
+    "send2trash>=2.1.0,<3",
 ]
 dynamic = ["version", "description", "authors", "urls", "keywords"]
 
@@ -55,15 +55,16 @@ jupyterlab-ai-code-assistants = "jupyterlab_ai_code_assistants_extension.cli:mai
 
 [project.optional-dependencies]
 dev = [
-    "jupyterlab>=4",
-    "jupyter-builder>=1.2.0",
+    "jupyterlab>=4.6.0,<5",
+    "jupyter-builder>=1.2.0,<2",
 ]
 test = [
-    "coverage",
-    "pytest",
-    "pytest-asyncio",
-    "pytest-cov",
-    "pytest-jupyter[server]>=0.6.0"
+    # coverage 7.17 needs Python 3.11; on 3.10 pytest-cov brings a coverage that fits.
+    "coverage>=7.17.0,<8; python_version >= '3.11'",
+    "pytest>=9.2.0,<10",
+    "pytest-asyncio>=1.4.0,<2",
+    "pytest-cov>=7.1.0,<8",
+    "pytest-jupyter[server]>=0.11.0,<1"
 ]
 
 [tool.hatch.version]

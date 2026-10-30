@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: v4.6.4
+_commit: v4.6.5
 _src_path: https://github.com/jupyterlab/extension-template
 advanced: false
 author_email: konrad.jelen+github@gmail.com
@@ -8,7 +8,7 @@ has_ai_rules: false
 has_binder: false
 has_settings: true
 kind: frontend-and-server
-labextension_name: jupyterlab_ai_code_assistants_extension
+labextension_name: '@stellarshenson/jupyterlab-ai-code-assistants-extension'
 project_short_description: Jupyterlab extension to replace individual jupyterlab_*_code_extension
     and integrate into one, that offers joint capability, joint settings page and
     individual right toolbar panels per code assistant, with the ability in settings

@@ -38,7 +38,8 @@ import { PROVIDERS } from './providers';
 /** Which sidebar the panels dock into unless the user says otherwise. */
 const DEFAULT_SIDEBAR = 'right';
 
-const PLUGIN_ID = 'jupyterlab-ai-code-assistants-extension:plugin';
+const PLUGIN_ID =
+  '@stellarshenson/jupyterlab-ai-code-assistants-extension:plugin';
 /** JupyterLab's own plugin, whose `layout` setting stores the sidebar a user
  * chose for a widget with "Switch Sidebar Side". */
 const SHELL_PLUGIN_ID = '@jupyterlab/application-extension:shell';
@@ -443,6 +444,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
         );
         for (const entry of result.migrated ?? []) {
           for (const [key, value] of Object.entries(entry.keys ?? {})) {
+            // An old file can hold keys the extension has since dropped.
+            if (!settings?.schema.properties?.[key]) {
+              continue;
+            }
             // A value already saved here is the user's newer choice and
             // stays. The marker that stops a second migration lives in the
             // Jupyter data folder, apart from these settings, so a server
@@ -459,16 +464,16 @@ const plugin: JupyterFrontEndPlugin<void> = {
             try {
               await settings?.set(key, value as any);
             } catch (err) {
-              console.warn(
-                `${LOG_PREFIX} could not carry over "${key}" from the retired extension.`,
-                err
-              );
+              console.warn(`${LOG_PREFIX} could not carry over "${key}".`, err);
+              // The registry keeps a rejected value in its copy of the file,
+              // and that copy fails every later save until it is read again.
+              await settingRegistry?.reload(PLUGIN_ID);
             }
           }
         }
       } catch (err) {
         console.warn(
-          `${LOG_PREFIX} migration from the retired extensions failed; nothing was carried over.`,
+          `${LOG_PREFIX} migration failed; settings not yet saved were not carried over.`,
           err
         );
       }
@@ -583,14 +588,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
     if (settingRegistry) {
       try {
         settings = await settingRegistry.load(PLUGIN_ID);
-        sidebar =
-          setting<string>('sidebar', DEFAULT_SIDEBAR) === 'left'
-            ? 'left'
-            : 'right';
-        settings.changed.connect(() => {
-          applySidebar();
-          reconcile();
-        });
       } catch (err) {
         // Defaults apply: every provider enabled, right sidebar.
         console.warn(
@@ -602,7 +599,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     }
 
     /** Save one shared setting from a panel header's context menu. The
-     * `changed` handler above applies a saved value. A failed save does not
+     * `changed` handler applies a saved value. A failed save does not
      * change the composite value the menu reads, so the menu keeps showing
      * the previous state. */
     const saveSetting = async (
@@ -662,6 +659,21 @@ const plugin: JupyterFrontEndPlugin<void> = {
     });
 
     await migrate();
+
+    // Read and connected after the carry, so carried values are the state the
+    // first dock reads. Heard as changes, each carried key docks panels before
+    // the next key is saved, and a carried `sidebar` moves a panel the user
+    // placed and saves that move in JupyterLab's layout.
+    if (settings) {
+      sidebar =
+        setting<string>('sidebar', DEFAULT_SIDEBAR) === 'left'
+          ? 'left'
+          : 'right';
+      settings.changed.connect(() => {
+        applySidebar();
+        reconcile();
+      });
+    }
 
     reconcile();
 

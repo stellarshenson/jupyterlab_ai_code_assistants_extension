@@ -34,6 +34,11 @@ _log = logging.getLogger(__name__)
 
 MARKER_FILENAME = "migration.json"
 
+# This extension's own settings folder before the npm package took its scoped name.
+OLD_SETTINGS_FOLDER = "jupyterlab_ai_code_assistants_extension"
+# Marks that folder as carried, in the marker that holds provider ids; no provider has this id.
+SETTINGS_FOLDER_ID = "settings-folder"
+
 
 def _legacy_settings(plugin_id: str, settings_dir: Path | None = None) -> dict:
     """The saved settings of a retired plugin, or empty when it has none.
@@ -106,9 +111,20 @@ def migrate(
 
     ``settings_dir`` is passed through to :func:`_legacy_settings` - see there
     for why the caller supplies it rather than this module deriving it.
+
+    Values saved in this extension's own old settings folder come first, under
+    ``SETTINGS_FOLDER_ID``: they are newer than anything a retired extension
+    left, and the frontend keeps the first value it applies for a key.
     """
     done = _load_marker()
     migrated: list[dict] = []
+    if SETTINGS_FOLDER_ID not in done:
+        keys = _legacy_settings(OLD_SETTINGS_FOLDER, settings_dir)
+        if keys:
+            done.add(SETTINGS_FOLDER_ID)
+            migrated.append(
+                {"provider_id": SETTINGS_FOLDER_ID, "keys": keys, "favourites": []}
+            )
     for provider in providers:
         legacy = provider.descriptor.legacy
         if legacy is None or provider.id in done:

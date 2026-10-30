@@ -238,6 +238,13 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - log: 2026-10-30T11:33:37Z @kj added; reason: quotes the exact mechanism; shortening drops the tie-break that makes the failure reproducible
   - log: 2026-10-30T11:39:22Z @kj owner directive 2026-10-30: the fix lives in the shared fixture write_kimi_tree, not in the one test case
   - log: 2026-10-30T11:56:47Z @kj closed: fixed: shared fixture write_kimi_tree stamps the list's sessions strictly increasing above the tree's existing mtimes
+- [x] `DEF-SERV-378-SETTINGS-FOLDER` **Server reads provider toggles from the old settings folder** - MAJOR; _user_settings reads the folder of the old npm name, which JupyterLab no longer writes, so a provider disabled on the settings page stays enabled on the server
+  - evidence: test_the_toggle_is_read_where_jupyterlab_saves_it_for_the_package_name and ui-tests/tests/settings-folder.spec.ts test one pass; each fails with SETTINGS_PLUGIN_ID mutated to the old name; gate at 1.2.302: Jest 452, pytest 536, Galata 103/103, lint clean, pm-tools check 0 errors
+  - repro: save providers.codex.enabled=false through JupyterLab: _provider_enabled('codex') stays True
+  - test-tags: UNIT, FUNCTIONAL
+  - root-cause: 2026-10-30T14:00:29Z @kj routes.py SETTINGS_PLUGIN_ID left on the old name by b05404a
+  - log: 2026-10-30T14:00:29Z @kj added
+  - log: 2026-10-30T14:53:42Z @kj closed
 
 ## Providers `PROV`
 
@@ -2710,10 +2717,13 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - root-cause: 2026-10-30T10:01:31Z @kj the spec pins ui-tests/.venv/bin/python (line 30); that venv is created only by the local gate recipe, and CI installs the wheel into the runner python and creates no ui-tests/.venv
   - log: 2026-10-30T10:01:31Z @kj added
   - log: 2026-10-30T10:07:43Z @kj closed
-- [ ] `DEF-GUARD-377-JLAB465` **JupyterLab 4.6.5 breaks the settings registry in the UI suite** - MAJOR; jupyterlab 4.6.5 bundles ajv with fast-uri, which rejects an underscored plugin id scheme: getSchema throws URI scheme is malformed, masked as errors.forEach. 16 Galata tests fail. Upstream bug, hits every underscored extension; no version cap.
+- [x] `DEF-GUARD-377-JLAB465` **JupyterLab 4.6.5 breaks the settings registry in the UI suite** - MAJOR; jupyterlab 4.6.5 bundles ajv with fast-uri, which rejects an underscored plugin id scheme: getSchema throws URI scheme is malformed, masked as errors.forEach. 16 Galata tests fail. Upstream bug, hits every underscored extension; no version cap.
+  - evidence: Build run 41059241066 on b05404a green on jupyterlab 4.6.5: Integration tests 101 passed, 0 forEach errors in the log; build, test_isolated, Check Links, Check Release passed; fix is the dashed plugin id, no version cap
   - repro: reproduce in Node at /tmp/jlab465/repro: ajv getSchema rejects the underscored plugin id with URI scheme is malformed; in CI the Integration tests job on jupyterlab 4.6.5 fails 16 Galata tests in SettingRegistry.set, 4.6.4 passes
   - log: 2026-10-30T12:20:52Z @kj added
   - log: 2026-10-30T12:25:17Z @kj capped the fourth install site (update-integration-tests.yml:25) the same way
   - log: 2026-10-30T12:38:59Z @kj edited text "CI installs jupyterlab>=4.0.0,<5; 4.6.5 makes SettingRegistry.set throw "i.forEach is not a function", 16 Galata tests fail on e021c1e while 4.6.4 was green on b47e139; fix is the CI cap." -> "jupyterlab 4.6.5 bundles ajv with fast-uri, which rejects an underscored plugin id scheme: getSchema throws URI scheme is malformed, masked as errors.forEach. 16 Galata tests fail. Upstream bug, hits every underscored extension; no version cap."; repro "run the Integration tests job with jupyterlab 4.6.5: 16 Galata tests fail in SettingRegistry.set, 4.6.4 passes" -> "reproduce in Node at /tmp/jlab465/repro: ajv getSchema rejects the underscored plugin id with URI scheme is malformed; in CI the Integration tests job on jupyterlab 4.6.5 fails 16 Galata tests in SettingRegistry.set, 4.6.4 passes"
   - log: 2026-10-30T12:39:03Z @kj the owner rejected the version cap on 2026-10-30; the cap commit is reverted; the fix must be upstream or an id change, not a pin
   - log: 2026-10-30T12:55:27Z @kj renamed the npm package and the plugin id to the URI-safe jupyterlab-ai-code-assistants-extension; gate Jest 15 suites / 449 passed twice, pytest 532, lint clean, make install exit 0, pm-tools check 0 errors / 1020 warnings
+  - log: 2026-10-30T13:09:25Z @kj closed
+  - log: 2026-10-30T14:53:42Z @kj npm name moved to the scoped @stellarshenson/jupyterlab-ai-code-assistants-extension because npm is expected to reject an unscoped punctuation twin of jupyterlab_ai_code_assistants_extension

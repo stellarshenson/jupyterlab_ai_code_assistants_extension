@@ -127,3 +127,37 @@ async def test_the_route_reads_the_configured_settings_dir(
     )
 
     assert _entry(body, "claude")["keys"] == {MAPPED_KEY: True}
+
+
+async def test_the_route_carries_the_old_settings_folder(
+    jp_fetch, jp_serverapp, tmp_path, monkeypatch
+):
+    """ACC-RETI-237 - from the server's own settings folder, not the default.
+
+    The default location holds another value for the same key, so a route that
+    read it answers 5.
+    """
+    config_root = _default_config_dir(monkeypatch, tmp_path)
+    configured = tmp_path / "configured-user-settings"
+    for root, value in (
+        (config_root / "lab" / "user-settings", 5),
+        (configured, 25),
+    ):
+        folder = root / "jupyterlab_ai_code_assistants_extension"
+        folder.mkdir(parents=True)
+        (folder / "plugin.jupyterlab-settings").write_text(
+            json.dumps({"recentLimit": value}), encoding="utf-8"
+        )
+    monkeypatch.setitem(
+        jp_serverapp.web_app.settings, "lab", _FakeLabApp(str(configured))
+    )
+
+    body = json.loads(
+        (await jp_fetch(URL, "migrate", method="POST", body="")).body
+    )
+
+    assert body["migrated"][0] == {
+        "provider_id": "settings-folder",
+        "keys": {"recentLimit": 25},
+        "favourites": [],
+    }

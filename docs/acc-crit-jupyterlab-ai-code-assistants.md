@@ -1209,6 +1209,12 @@ This extension retires the three standalone extensions. A user upgrading must no
   - log: 2026-08-07T00:00:00Z @kj closed - conformance review (v0.1.7)
   - log: 2026-09-17T17:26:01Z @kj edited importance
   - log: 2026-09-19T23:27:04Z @kj edited test (added) and test-tags (added) and evidence (added)
+- [x] `ACC-RETI-237-SETTINGS-FOLDER` **Saved settings follow the npm rename** - HIGH; values saved in the old folder are applied once on the first load under the new name; a value already saved in the new folder stays; keys no schema declares are not carried; the old file is left in place
+  - evidence: test_the_old_settings_folder_is_carried_once_at_the_front, test_the_route_carries_the_old_settings_folder, 3 new index.spec.ts tests, settings-folder.spec.ts test two pass; 5 mutations (carry severed, schema check, reload, handler order, sidebar read) each failed one; gate at 1.2.302: Jest 452, pytest 536, Galata 103/103
+  - test: seed the old folder with a declared and an undeclared key, load: declared key saved in the new folder, undeclared absent, old file bytes unchanged
+  - test-tags: UNIT, FUNCTIONAL
+  - log: 2026-10-30T14:00:29Z @kj added
+  - log: 2026-10-30T14:53:42Z @kj closed
 
 ## Claude Provider `CLAU`
 

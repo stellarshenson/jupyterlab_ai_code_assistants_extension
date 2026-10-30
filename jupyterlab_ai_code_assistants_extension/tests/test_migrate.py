@@ -173,3 +173,44 @@ def test_migration_state_lives_outside_every_assistant_store(config_dir, tmp_pat
     assert migrate._marker_path().parent == state.state_dir()
     assert (tmp_path / "legacy").is_dir()
     assert [p.name for p in (tmp_path / "legacy").iterdir()] == ["alpha.json"]
+
+
+# Literal, not the module's constant: the folder JupyterLab really wrote before
+# the npm package took its scoped name.
+OLD_FOLDER = "jupyterlab_ai_code_assistants_extension"
+
+
+def test_the_old_settings_folder_is_carried_once_at_the_front(config_dir, tmp_path):
+    """ACC-RETI-237 - first, so its value beats a retired extension's for a key."""
+    provider = fake_provider("alpha", tmp_path / "legacy" / "alpha.json")
+    write_legacy_settings(
+        config_dir, provider.descriptor.legacy.plugin_id, {"unsafeMode": True}
+    )
+    write_legacy_settings(
+        config_dir, OLD_FOLDER, {"recentLimit": 25, "providers.alpha.unsafeMode": False}
+    )
+    old_file = (
+        config_dir / "lab" / "user-settings" / OLD_FOLDER / "plugin.jupyterlab-settings"
+    )
+    before = old_file.read_bytes()
+
+    first, second = migrate.migrate([provider])
+    assert first == {
+        "provider_id": "settings-folder",
+        "keys": {"recentLimit": 25, "providers.alpha.unsafeMode": False},
+        "favourites": [],
+    }
+    assert second["provider_id"] == "alpha"
+
+    assert migrate.migrate([provider]) == []
+    assert old_file.read_bytes() == before
+
+
+def test_an_empty_old_settings_folder_writes_no_marker(config_dir, tmp_path):
+    """A fresh install stays silent, and a later file would still be carried."""
+    assert migrate.migrate([]) == []
+    assert not migrate._marker_path().exists()
+
+    provider = fake_provider("alpha", tmp_path / "absent.json")
+    assert [entry["provider_id"] for entry in migrate.migrate([provider])] == ["alpha"]
+    assert migrate._load_marker() == {"alpha"}

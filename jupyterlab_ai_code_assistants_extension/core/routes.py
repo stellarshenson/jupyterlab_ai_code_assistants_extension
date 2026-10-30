@@ -41,7 +41,7 @@ URL_PREFIX = "jupyterlab-ai-code-assistants-extension"
 
 # The npm package name is what JupyterLab names the user-settings folder it
 # writes this extension's saved settings into.
-SETTINGS_PLUGIN_ID = "jupyterlab_ai_code_assistants_extension"
+SETTINGS_PLUGIN_ID = "@stellarshenson/jupyterlab-ai-code-assistants-extension"
 
 # The Tornado application this extension's routes were added to, kept so the
 # saved settings are read from the folder the RUNNING server writes them to.

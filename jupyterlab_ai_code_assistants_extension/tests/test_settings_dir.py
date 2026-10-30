@@ -12,8 +12,11 @@ import json
 from pathlib import Path
 
 import pytest
+from jupyterlab_server.settings_utils import _path
 
 from jupyterlab_ai_code_assistants_extension.core import routes
+
+REPO = Path(__file__).resolve().parents[2]
 
 
 class _FakeLabApp:
@@ -51,6 +54,27 @@ def test_default_settings_dir_without_a_server(config_dir):
     """A server that exposes no JupyterLab app behaves as it always did."""
     assert routes._user_settings_dir() == config_dir
     _write_toggle(config_dir, "codex", False)
+    assert routes._provider_enabled("codex") is False
+
+
+def test_the_toggle_is_read_where_jupyterlab_saves_it_for_the_package_name(config_dir):
+    """DEF-SERV-378 - JupyterLab's own path logic and the real package name.
+
+    The other tests here build their fixture from ``SETTINGS_PLUGIN_ID``, so
+    they pass whatever that constant says.
+    """
+    name = json.loads((REPO / "package.json").read_text(encoding="utf-8"))["name"]
+    saved = Path(
+        _path(
+            str(config_dir),
+            f"{name}:plugin",
+            make_dirs=True,
+            extension=".jupyterlab-settings",
+        )
+    )
+    saved.write_text(
+        json.dumps({routes.enabled_setting_key("codex"): False}), encoding="utf-8"
+    )
     assert routes._provider_enabled("codex") is False
 
 

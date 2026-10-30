@@ -39,7 +39,11 @@ jest.mock('../core/request', () => ({
   withQuery: (path: string) => path
 }));
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 import { Notification } from '@jupyterlab/apputils';
+import { SettingRegistry } from '@jupyterlab/settingregistry';
 import { CommandRegistry } from '@lumino/commands';
 import { Signal } from '@lumino/signaling';
 import { Widget } from '@lumino/widgets';
@@ -755,7 +759,7 @@ describe('ACC-PROV - the activation contract', () => {
     window.dispatchEvent(new Event('focus'));
     await flush(32);
     expect(live.reloaded).toEqual([
-      'jupyterlab-ai-code-assistants-extension:plugin'
+      '@stellarshenson/jupyterlab-ai-code-assistants-extension:plugin'
     ]);
 
     live.docked.forEach(widget => widget.dispose());
@@ -768,7 +772,7 @@ describe('ACC-PROV - the activation contract', () => {
     one.save();
     await flush(32);
     expect(other.reloaded).toEqual([
-      'jupyterlab-ai-code-assistants-extension:plugin'
+      '@stellarshenson/jupyterlab-ai-code-assistants-extension:plugin'
     ]);
     // The other window's reload fires `changed` and posts in turn; the window
     // that saved already holds the server's copy, so the echo stops there.
@@ -1148,6 +1152,14 @@ describe('ACC-SETT - settings drive the panels', () => {
     }))
   });
 
+  /** The shipped schema, as the registry hands it to the plugin. */
+  const SHIPPED_SCHEMA = JSON.parse(
+    fs.readFileSync(
+      path.join(__dirname, '..', '..', 'schema', 'plugin.json'),
+      'utf8'
+    )
+  );
+
   interface ISettingsHarness {
     app: any;
     /** Every `labShell.add` call, as `[widget, area]`, in order. */
@@ -1191,6 +1203,11 @@ describe('ACC-SETT - settings drive the panels', () => {
       /** The `migrated` list `POST migrate` answers with; without it the
        * request fails, as with nothing to carry over. */
       migrated?: unknown[];
+      /** JupyterLab's own registry, in place of the fake one below. */
+      registry?: SettingRegistry;
+      /** Sidebars the user chose in an earlier load, by provider id. The shell
+       * has them before the panel exists. */
+      placed?: Record<string, string>;
     } = {}
   ): Promise<ISettingsHarness> {
     const serverSettings = socketSettings();
@@ -1226,7 +1243,12 @@ describe('ACC-SETT - settings drive the panels', () => {
         if (options.shellNotRestored) {
           return;
         }
-        areaOf.set(widget, placements.get(widget) ?? area);
+        areaOf.set(
+          widget,
+          placements.get(widget) ??
+            options.placed?.[widget.descriptor.id] ??
+            area
+        );
         widget.hide();
       },
       widgets: (area: string) =>
@@ -1293,12 +1315,14 @@ describe('ACC-SETT - settings drive the panels', () => {
         changed.emit(undefined);
       },
       changed,
-      raw: '{}'
+      raw: '{}',
+      schema: SHIPPED_SCHEMA
     };
     const layoutSaves: [string, string, unknown][] = [];
     const settingRegistry = options.noRegistry
       ? null
-      : ({
+      : (options.registry ??
+        ({
           connector: { fetch: async () => ({ raw: settings.raw }) },
           // A save to another plugin's settings, by plugin id.
           set: async (pluginId: string, key: string, value: unknown) => {
@@ -1313,7 +1337,7 @@ describe('ACC-SETT - settings drive the panels', () => {
             }
             return settings;
           }
-        } as any);
+        } as any));
 
     // A running terminal, to prove a disable never reaches it. Both ways of
     // ending a terminal are wired to a flag, so the assertion is on the panel
@@ -1594,6 +1618,116 @@ describe('ACC-SETT - settings drive the panels', () => {
   it('ACC-RETI-85 - a migrated key with nothing saved here is carried over', async () => {
     const live = await activate({}, { migrated: migratedSkip(true) });
     expect(live.saved).toEqual([[SKIP_KEY, true]]);
+    dispose(live);
+  });
+
+  it('ACC-RETI-237 - a migrated key the schema does not declare is not set, and a declared key is', async () => {
+    const live = await activate(
+      {},
+      {
+        migrated: [
+          {
+            provider_id: 'settings-folder',
+            keys: { 'providers.gemini.approvalMode': 'yolo', [SKIP_KEY]: true },
+            favourites: []
+          }
+        ]
+      }
+    );
+    expect(live.saved).toEqual([[SKIP_KEY, true]]);
+    dispose(live);
+  });
+
+  it('ACC-RETI-237 - a carried value the schema rejects costs only that key', async () => {
+    const warned = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    // JupyterLab's own registry, because it keeps a rejected value in its copy
+    // of the file and the fake registry does not.
+    let file = '{}';
+    const registry = new SettingRegistry({
+      connector: {
+        fetch: async (id: string) => ({
+          id,
+          schema: SHIPPED_SCHEMA,
+          raw: file,
+          version: 'test',
+          data: { composite: {}, user: {} }
+        }),
+        list: async () => ({ ids: [], values: [] }),
+        save: async (_id: string, raw: string) => {
+          file = raw;
+        },
+        remove: async () => undefined
+      } as any
+    });
+
+    const live = await activate(
+      {},
+      {
+        registry,
+        migrated: [
+          {
+            provider_id: 'settings-folder',
+            keys: {
+              'providers.claude.enabled': false,
+              recentLimit: 1000,
+              'providers.codex.enabled': false,
+              'providers.kimi.enabled': false,
+              sidebar: 'left'
+            },
+            favourites: []
+          }
+        ]
+      }
+    );
+
+    const saved = await registry.load(plugin.id);
+    expect(saved.user).toEqual({
+      'providers.claude.enabled': false,
+      'providers.codex.enabled': false,
+      'providers.kimi.enabled': false,
+      sidebar: 'left'
+    });
+    // A save after the carry, in the same window, is accepted too.
+    await saved.set('recentLimit', 25);
+    expect(saved.user.recentLimit).toBe(25);
+    warned.mockRestore();
+    dispose(live);
+  });
+
+  it('ACC-RETI-237 - carried values are the first state: no panel moves or undocks, and no layout is saved', async () => {
+    const enabled = PROVIDERS.map(module => module.descriptor.id).filter(
+      id => id !== 'kimi'
+    );
+    const live = await activate(
+      {},
+      {
+        placed: { claude: 'right' },
+        migrated: [
+          {
+            provider_id: 'settings-folder',
+            keys: {
+              recentLimit: 25,
+              'providers.kimi.enabled': false,
+              sidebar: 'left'
+            },
+            favourites: []
+          }
+        ]
+      }
+    );
+
+    // Each enabled panel was docked once, on the carried side, and kimi never.
+    expect(live.docks.map(([, area]) => area)).toEqual(
+      enabled.map(() => 'left')
+    );
+    expect(live.areas()).toEqual({
+      ...Object.fromEntries(enabled.map(id => [id, 'left'])),
+      claude: 'right'
+    });
+    expect(live.shellMoves).toEqual([]);
+    expect(live.layoutSaves).toEqual([]);
     dispose(live);
   });
 

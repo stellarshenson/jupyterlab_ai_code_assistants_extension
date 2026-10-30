@@ -2710,3 +2710,7 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - root-cause: 2026-10-30T10:01:31Z @kj the spec pins ui-tests/.venv/bin/python (line 30); that venv is created only by the local gate recipe, and CI installs the wheel into the runner python and creates no ui-tests/.venv
   - log: 2026-10-30T10:01:31Z @kj added
   - log: 2026-10-30T10:07:43Z @kj closed
+- [ ] `DEF-GUARD-377-JLAB465` **JupyterLab 4.6.5 breaks the settings registry in the UI suite** - MAJOR; CI installs jupyterlab>=4.0.0,<5; 4.6.5 makes SettingRegistry.set throw "i.forEach is not a function", 16 Galata tests fail on e021c1e while 4.6.4 was green on b47e139; fix is the CI cap.
+  - repro: run the Integration tests job with jupyterlab 4.6.5: 16 Galata tests fail in SettingRegistry.set, 4.6.4 passes
+  - log: 2026-10-30T12:20:52Z @kj added
+  - log: 2026-10-30T12:25:17Z @kj capped the fourth install site (update-integration-tests.yml:25) the same way

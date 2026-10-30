@@ -17,7 +17,7 @@ export const AVAILABLE = ['claude', 'codex', 'deepseek', 'kimi'];
 /** Providers with no binary on PATH, so no panel is expected. */
 export const ABSENT = ['gemini'];
 
-export const PLUGIN_ID = 'jupyterlab_ai_code_assistants_extension:plugin';
+export const PLUGIN_ID = 'jupyterlab-ai-code-assistants-extension:plugin';
 
 export const STATUS_URL = '/jupyterlab-ai-code-assistants-extension/status';
 

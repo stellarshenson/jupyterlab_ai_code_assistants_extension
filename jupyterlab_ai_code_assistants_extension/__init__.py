@@ -13,7 +13,7 @@ from .core.routes import setup_route_handlers
 def _jupyter_labextension_paths():
     return [{
         "src": "labextension",
-        "dest": "jupyterlab_ai_code_assistants_extension"
+        "dest": "jupyterlab-ai-code-assistants-extension"
     }]
 
 

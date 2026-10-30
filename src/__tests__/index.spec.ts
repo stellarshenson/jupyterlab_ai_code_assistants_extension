@@ -755,7 +755,7 @@ describe('ACC-PROV - the activation contract', () => {
     window.dispatchEvent(new Event('focus'));
     await flush(32);
     expect(live.reloaded).toEqual([
-      'jupyterlab_ai_code_assistants_extension:plugin'
+      'jupyterlab-ai-code-assistants-extension:plugin'
     ]);
 
     live.docked.forEach(widget => widget.dispose());
@@ -768,7 +768,7 @@ describe('ACC-PROV - the activation contract', () => {
     one.save();
     await flush(32);
     expect(other.reloaded).toEqual([
-      'jupyterlab_ai_code_assistants_extension:plugin'
+      'jupyterlab-ai-code-assistants-extension:plugin'
     ]);
     // The other window's reload fires `changed` and posts in turn; the window
     // that saved already holds the server's copy, so the echo stops there.

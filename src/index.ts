@@ -38,7 +38,7 @@ import { PROVIDERS } from './providers';
 /** Which sidebar the panels dock into unless the user says otherwise. */
 const DEFAULT_SIDEBAR = 'right';
 
-const PLUGIN_ID = 'jupyterlab_ai_code_assistants_extension:plugin';
+const PLUGIN_ID = 'jupyterlab-ai-code-assistants-extension:plugin';
 /** JupyterLab's own plugin, whose `layout` setting stores the sidebar a user
  * chose for a widget with "Switch Sidebar Side". */
 const SHELL_PLUGIN_ID = '@jupyterlab/application-extension:shell';

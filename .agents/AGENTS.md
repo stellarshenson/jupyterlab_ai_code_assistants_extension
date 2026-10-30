@@ -72,7 +72,7 @@ All three share the same shape - `icons.ts` / `index.ts` / `request.ts` / `types
 
 **Stack**: TypeScript frontend (`src/`) against `@jupyterlab/application` 4.x, Python `jupyter_server` extension (`jupyterlab_ai_code_assistants_extension/routes.py`), settings schema in `schema/plugin.json`, Jest unit tests, Playwright UI tests in `ui-tests/`. Scaffolded from the `jupyterlab/extension-template` copier template (`.copier-answers.yml`) - do not hand-edit that file.
 
-**Packaging**: npm package `jupyterlab_ai_code_assistants_extension`, PyPI package `jupyterlab-ai-code-assistants-extension`.
+**Packaging**: npm package `jupyterlab-ai-code-assistants-extension`, PyPI package `jupyterlab-ai-code-assistants-extension`.
 
 ## Journal Rules (Project-Specific)
 

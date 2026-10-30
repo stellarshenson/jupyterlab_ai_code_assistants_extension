@@ -2,6 +2,19 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.0] - 2026-10-30
+
+### Changed
+
+- This release is the upgrade to JupyterLab 4.6.5. The extension is built against the 4.6.5 packages from template v4.6.5, and CI runs the whole test suite on JupyterLab 4.6.5
+- The npm package is now `@stellarshenson/jupyterlab-ai-code-assistants-extension`. The PyPI package name is unchanged, so pip users change nothing
+- Saved settings move to the folder JupyterLab derives from the new name. They carry over once on the first load, a value already saved under the new name stays, and the old file is left unchanged
+- The minimum server dependency versions are higher: `jupyter_server` 2.21.0, `zstandard` 0.25.0 and `send2trash` 2.1.0. `zstandard` must stay below 1, `send2trash` below 3, and the companion extensions `jupyterlab-basic-terminal-extension` and `jupyterlab_colourful_tab_extension` below 2
+
+### Fixed
+
+- On JupyterLab 4.6.5 the extension's settings failed to load, with the error "i.forEach is not a function", because the settings validator in 4.6.5 rejected the old underscored plugin id
+
 ## [1.2.299] - 2026-10-30
 
 ### Changed

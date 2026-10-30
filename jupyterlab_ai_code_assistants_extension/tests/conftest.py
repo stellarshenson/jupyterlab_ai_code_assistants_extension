@@ -14,7 +14,9 @@ Two invariants hold for every test in this package:
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import time
 import uuid
 from pathlib import Path
 
@@ -187,11 +189,20 @@ def write_kimi_tree(root: Path, wd_id: str, sessions: list[dict]) -> Path:
     )
     wd_dir = root / "sessions" / wd_id
     wd_dir.mkdir(parents=True, exist_ok=True)
+    # Recency is the state.json mtime, and this call rewrites sessions that
+    # already exist - microseconds before the new ones. On a filesystem whose
+    # timestamp grain merges those writes the new conversation ties with an
+    # older one and stops being the newest, so stamp the list at one-second
+    # steps above everything the tree already holds: the list order is the
+    # recency order on any timestamp grain.
+    existing = [path.stat().st_mtime for path in wd_dir.glob("*/state.json")]
+    base = max([time.time(), *existing]) + 1
     index_lines = []
-    for entry in sessions:
+    for position, entry in enumerate(sessions):
         session_dir = wd_dir / entry["id"]
         (session_dir / "agents" / "main").mkdir(parents=True, exist_ok=True)
-        (session_dir / "state.json").write_text(
+        state_path = session_dir / "state.json"
+        state_path.write_text(
             json.dumps(
                 {
                     "title": entry.get("title", ""),
@@ -203,6 +214,8 @@ def write_kimi_tree(root: Path, wd_id: str, sessions: list[dict]) -> Path:
             ),
             encoding="utf-8",
         )
+        stamp = base + position
+        os.utime(state_path, (stamp, stamp))
         wire = session_dir / "agents" / "main" / "wire.jsonl"
         wire.write_text(
             "".join(

@@ -231,6 +231,13 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - root-cause: 2026-10-25T04:51:55Z @kj process_comm reads /proc and answers None everywhere else; _is_claude_process maps None to False, and the live scan treated that as not-Claude and dropped the record
   - log: 2026-10-25T04:51:55Z @kj added
   - log: 2026-10-25T05:02:19Z @kj closed
+- [x] `DEF-SERV-375-PIN-MTIME` **Branch-pin route test races on a coarse mtime grain and fails on CI** - MAJOR; `test_a_branch_pin_yields_only_to_a_conversation_created_after_it` bumps the sibling `state.json` mtime, then rewrites the Kimi tree, resetting that mtime to now; on a merged timestamp grain the new session ties the sibling, so the `pick_current` fresh branch returns the sibling and CI fails; the test, not the product, is racy; `jupyterlab_ai_code_assistants_extension/tests/test_routes.py`
+  - evidence: write_kimi_tree stamps entry i at base+i, one second apart, above the tree's existing mtimes; severing pick_current's fresh branch reddens the branch-pin case; make test Jest 449, pytest 532 passed, lint clean; exposed by Build on b47e139.
+  - repro: GitHub Actions run b47e139 Build job: pytest fails in tests/test_routes.py::test_a_branch_pin_yields_only_to_a_conversation_created_after_it with "assert 'session_66666666-7777-8888-9999-000000000000' == 'session_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'"; 531 other tests passed and the case passes locally
+  - root-cause: 2026-10-30T11:33:37Z @kj core/state.pick_current returns max(activity) whenever an id is missing from the pin's known set; the second write_kimi_tree rewrites the sibling's state.json, resetting its mtime to now, and writes the new session microseconds later, so a merged timestamp grain ties them and max() returns the sibling - first in _session_dirs order - making the test, not the product, racy
+  - log: 2026-10-30T11:33:37Z @kj added; reason: quotes the exact mechanism; shortening drops the tie-break that makes the failure reproducible
+  - log: 2026-10-30T11:39:22Z @kj owner directive 2026-10-30: the fix lives in the shared fixture write_kimi_tree, not in the one test case
+  - log: 2026-10-30T11:56:47Z @kj closed: fixed: shared fixture write_kimi_tree stamps the list's sessions strictly increasing above the tree's existing mtimes
 
 ## Providers `PROV`
 
@@ -1894,6 +1901,11 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-10-30T10:32:29Z @kj the hint was created as a bare p with no role; stateHint rewrote its textContent when the branch list landed, and nameDialog's aria-label rewrite renames the dialog but an accessible-name change is not announced
   - log: 2026-10-30T10:32:29Z @kj added; reason: filed from the round-19 adversarial review finding; no defect id existed for it
   - log: 2026-10-30T10:41:54Z @kj closed: fixed; reason: the close brief requires the Jest cases and their mutation, the Galata assertion and the gate counts in one evidence line
+- [ ] `DEF-PANE-376-FILTER-PATH` **Panel filter matches the project path, so a path word shows every session** - MEDIUM; Typing a word the project path contains, such as workspace, leaves every session visible: _matchesFilter also tests s.project_path, and the path match drowns the name match. Filtering by conversation name is unusable for any word the path holds.
+  - repro: type workspace in the panel filter; every row stays visible because each project_path contains workspace
+  - test-tags: UNIT
+  - root-cause: 2026-10-30T11:53:54Z @kj src/core/panel.ts _matchesFilter (around line 640) ORs a fuzzy match on s.project_path with the matches on s.name and _lookupName, so a query word found in the path matches every session of the project and the name match cannot narrow the list
+  - log: 2026-10-30T11:53:54Z @kj added
 
 ## Colour store `COLO`
 

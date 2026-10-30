@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Clean Up Parallel Sessions confirmation names every conversation it removes by short id and states their disposal, removed with the trash and deleted permanently without it; the caution line is gone and the warning names the current session
+
+### Fixed
+
+- The Clean Up Parallel Sessions confirmation announces its list of removed conversations by short id to screen readers
+
 ## [1.2.294] - 2026-10-29
 
 ### Changed

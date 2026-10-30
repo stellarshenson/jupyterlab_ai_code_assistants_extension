@@ -1,3 +1,5 @@
+import * as path from 'path';
+
 import { expect, test } from '@jupyterlab/galata';
 
 import { openPanelTab, panelId, waitForApplication } from './shared';
@@ -14,7 +16,8 @@ import { openPanelTab, panelId, waitForApplication } from './shared';
  *
  * The unit tier proves the same rule from a mocked provider; this file proves
  * the rendered modal - the warning box is a distinct element, its colour is the
- * theme's warning token, and the hint a user reads is twelve words at most.
+ * theme's warning token, and the hint names every session the confirmation
+ * removes by short id.
  */
 test.use({ autoGoto: false, waitForApplication });
 
@@ -22,7 +25,10 @@ const PANEL = `#${panelId('claude')}`;
 const MENU = '.lm-Menu.jp-AiAssistantsContextMenu';
 const WARNING = '.jp-AiAssistantsPanel-cleanupWarning';
 const HINT = '.jp-AiAssistantsPanel-cleanupHint';
-const CAUTION = '.jp-AiAssistantsPanel-cleanupCaution';
+/** Screenshots land beside the run's other artefacts, in the port-keyed
+ * `test-results/<port>` the config already owns and sweeps. */
+const shotPath = (name: string): string =>
+  path.join(test.info().project.outputDir, 'screenshots', `${name}.png`);
 
 /** Right-click one project's row, open Clean Up, and return the modal with the
  * branch list its own fetch answered - the list its removal deletes. */
@@ -62,22 +68,32 @@ async function openCleanup(page: any, project: string) {
   return { dialog, branches: fetched.branches ?? [] };
 }
 
-/** The hint is one sentence of at most twelve words. */
-async function expectShortHint(dialog: any): Promise<void> {
+/** The hint names every session the confirmation fetched, by short id, and
+ * states the disposal. This spec runs Claude, whose descriptor carries no
+ * sessionIdPrefix, so the short id is the first eight characters. */
+async function expectNamedHint(
+  dialog: any,
+  branches: Array<{ session_id: string }>
+): Promise<void> {
   const hint = dialog.locator(HINT);
   await expect(hint).toBeVisible();
-  const words = (await hint.textContent())!.trim().split(/\s+/);
-  expect(words.length).toBeLessThanOrEqual(12);
+  // A live region, so the restatement with the short ids is announced
+  // (DEF-PANE-374-HINT-ANNOUNCE).
+  await expect(hint).toHaveAttribute('role', 'status');
+  for (const branch of branches) {
+    await expect(hint).toContainText(branch.session_id.slice(0, 8));
+  }
+  await expect(hint).toHaveText(/will be removed\.$/);
 }
 
-test('ACC-PANE-221, ACC-PANE-222, ACC-PANE-233 and ACC-PANE-236 - Clean Up warns of a newer removed conversation, keeps its hint short, and arms Remove', async ({
+test('ACC-PANE-221, ACC-PANE-222, ACC-PANE-233 and ACC-PANE-236 - Clean Up warns of a newer removed conversation, names the sessions it removes, and arms Remove', async ({
   page
 }) => {
   await page.goto();
   await openPanelTab(page, 'claude');
 
-  // A conversation the removal deletes was active after the one kept: the
-  // warning box is in the modal.
+  // A conversation the removal deletes was active after the current session:
+  // the warning box is in the modal.
   const newer = await openCleanup(page, 'cleanup-newer');
   const dialog = newer.dialog;
   const warning = dialog.locator(WARNING);
@@ -94,10 +110,10 @@ test('ACC-PANE-221, ACC-PANE-222, ACC-PANE-233 and ACC-PANE-236 - Clean Up warns
   });
   expect(colours.border).toBe(colours.token);
 
-  await expectShortHint(dialog);
-  // The permanent-deletion caution is a separate statement, so the hint can
-  // stay short without losing the safety warning.
-  await expect(dialog.locator(CAUTION)).toContainText('cannot be undone');
+  await expectNamedHint(dialog, newer.branches);
+
+  // The whole confirmation as rendered, before any click.
+  await dialog.screenshot({ path: shotPath('cleanup-dialog') });
 
   // The warning means one activation never removes: the first click arms the
   // button to its error-coloured confirming label and the dialog stays up.
@@ -145,11 +161,11 @@ test('ACC-PANE-221, ACC-PANE-222, ACC-PANE-233 and ACC-PANE-236 - Clean Up warns
   await progress.locator('.jp-Dialog-button', { hasText: 'Close' }).click();
   await expect(progress).toHaveCount(0);
 
-  // Every conversation it removes is older than the one kept: no warning box,
-  // and one click still removes with today's label.
+  // Every conversation it removes is older than the current session: no
+  // warning box, and one click still removes with today's label.
   const older = await openCleanup(page, 'cleanup-older');
   await expect(older.dialog.locator(WARNING)).toHaveCount(0);
-  await expectShortHint(older.dialog);
+  await expectNamedHint(older.dialog, older.branches);
   const removeOlder = older.dialog.locator('.jp-Dialog-button.jp-mod-accept');
   await expect(removeOlder).toHaveText('Remove');
   const deletingOlder = page.waitForRequest(

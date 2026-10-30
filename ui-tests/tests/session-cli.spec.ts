@@ -17,17 +17,21 @@ import {
  * and what an open page shows of it: the server pushes every change a route
  * makes to every open window, so the page needs no reload and no poll.
  *
- * The command is the module the server package ships, run with the suite's
- * venv Python and addressed by an explicit `--url`. Its runtime directory is
- * this server's own and no ambient token reaches it, so it can address no
- * other Jupyter server and carries no credential of the developer's.
+ * The command is the module the server package ships, run with the venv Python
+ * the local gate recipe creates, or with the runner's own python3 under CI,
+ * which creates no venv, and addressed by an explicit `--url`. Its runtime
+ * directory is this server's own and no ambient token reaches it, so it can
+ * address no other Jupyter server and carries no credential of the developer's.
  */
 test.use({ autoGoto: false, waitForApplication });
 
 const PORT = process.env.JLAB_TEST_PORT || '8888';
 const SCRATCH =
   process.env.JLAB_TEST_SCRATCH || path.join(__dirname, '..', '.scratch', PORT);
-const PYTHON = path.join(__dirname, '..', '.venv', 'bin', 'python');
+const VENV_PYTHON = path.join(__dirname, '..', '.venv', 'bin', 'python');
+const PYTHON =
+  process.env.JLAB_TEST_PYTHON ||
+  (fs.existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python3');
 const SHOTS = path.join(
   __dirname,
   '..',

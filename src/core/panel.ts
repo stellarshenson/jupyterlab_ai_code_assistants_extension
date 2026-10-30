@@ -881,23 +881,25 @@ export class AssistantSessionsPanel extends Widget {
     };
     askCount(extra);
     confirmBody.node.appendChild(question);
-    // One sentence, twelve words or fewer: what happens, not the detail.
+    // The second line states what happens to the rest: the count, the short
+    // ids once the branch list names them, and the disposal the setting chose.
     const hint = document.createElement('p');
     hint.className = 'jp-AiAssistantsPanel-cleanupHint';
-    hint.textContent = this._deleteToTrash
-      ? 'The current conversation is kept; the rest go to the trash.'
-      : 'The current conversation is kept; the rest are deleted permanently.';
+    // Announced when restated with the short ids; an aria-label change is not.
+    hint.setAttribute('role', 'status');
+    const stateHint = (ids: string[] | null): void => {
+      const shortIds = ids?.map(id =>
+        shortSessionId(id, this._descriptor.sessionIdPrefix)
+      );
+      hint.textContent =
+        `Remaining ${extra} session${extra === 1 ? '' : 's'}` +
+        (shortIds?.length ? ` ${shortIds.join(', ')}` : '') +
+        (this._deleteToTrash
+          ? ' will be removed.'
+          : ' will be deleted permanently.');
+    };
+    stateHint(null);
     confirmBody.node.appendChild(hint);
-    // The irreversible note is a safety statement, not the hint, so it keeps
-    // its own line. With the trash on it names the refusal: a refused move
-    // deletes permanently, while the hint promises the trash
-    // (DEF-PANE-363-CAUTION-REFUSAL).
-    const caution = document.createElement('p');
-    caution.className = 'jp-AiAssistantsPanel-cleanupCaution';
-    caution.textContent = this._deleteToTrash
-      ? 'A refused trash move deletes permanently and cannot be undone.'
-      : 'This cannot be undone.';
-    confirmBody.node.appendChild(caution);
 
     const title = this._trans.__('Clean Up Parallel Sessions');
     let warning: HTMLElement | null = null;
@@ -915,8 +917,8 @@ export class AssistantSessionsPanel extends Widget {
     // Scopes the armed style in base.css to this one dialog.
     confirmDialog.addClass('jp-AiAssistantsPanel-cleanupDialog');
     // The Dialog names itself only when its body is a string, and this body is
-    // a Widget: name it here, and again when the question is restated and the
-    // warning joins it.
+    // a Widget: name it here, and again when the question and hint are
+    // restated and the warning joins it.
     const nameDialog = (): void => {
       confirmDialog.node.setAttribute(
         'aria-label',
@@ -924,7 +926,6 @@ export class AssistantSessionsPanel extends Widget {
           title,
           question.textContent ?? '',
           hint.textContent ?? '',
-          caution.textContent ?? '',
           warning?.textContent ?? ''
         ]
           .filter(part => part)
@@ -1048,11 +1049,11 @@ export class AssistantSessionsPanel extends Widget {
 
     // Alongside the question, never in front of it: the request layer allows
     // 60 s, and the confirmation must open at once. When the list lands the
-    // question states its length and a conversation newer than the kept one
-    // adds the warning, drawn last so it reads after the caution. The same
-    // list is what the removal deletes. A failed fetch leaves the question as
-    // the row reported it, with no warning, and the removal fetches again
-    // below.
+    // question and hint state its length and ids, and a conversation newer
+    // than the kept one adds the warning, drawn last so it reads after the
+    // hint. The same list is what the removal deletes. A failed fetch leaves
+    // the question as the row reported it, with no ids and no warning, and
+    // the removal fetches again below.
     const branchesReady = this._fetchBranches(session).then(
       fetched => {
         const list = fetched?.branches;
@@ -1067,6 +1068,7 @@ export class AssistantSessionsPanel extends Widget {
         } else if (list) {
           extra = list.length;
           askCount(extra);
+          stateHint(list.map(branch => branch.session_id));
           const newer = list.filter(
             branch => branch.file_mtime > session.file_mtime
           ).length;
@@ -1076,7 +1078,7 @@ export class AssistantSessionsPanel extends Widget {
             warning.setAttribute('role', 'alert');
             warning.textContent =
               `${newer} parallel session${newer === 1 ? ' was' : 's were'} ` +
-              'active after the one kept.';
+              'active after the current session.';
             confirmBody.node.appendChild(warning);
           }
           // The list just decided what the button acts on: an arm given while

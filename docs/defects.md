@@ -1839,6 +1839,7 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-10-25T05:22:18Z @kj the caution reused the Remove-from dialog's irreversible note, whose body states the refusal; the Clean Up hint does not
   - log: 2026-10-25T05:22:18Z @kj added
   - log: 2026-10-25T05:22:45Z @kj closed: fixed: the Clean Up caution names the refused trash move when delete_to_trash is on, while the Remove-from dialog keeps its own note
+  - log: 2026-10-30T09:59:08Z @kj owner directive 2026-10-30: the Clean Up caution line is removed; the hint states the disposal - 'will be removed.' with the trash, 'will be deleted permanently.' without it - and names the removed sessions' short ids
 - [x] `DEF-PANE-364-CLEANUP-EMPTY` **Clean Up offers Remove with zero parallel sessions when the fetched list is empty** - MINOR; The confirmation builds from the row's extra_sessions, one poll old, while the branch fetch runs beside it; when the fetched list is empty the question said 'Remove 0 parallel sessions' and the red Remove stayed offered. DEF-GUARD-96 fixed only the accept path; a second client reaches it.
   - evidence: Jest 'ends the confirmation when the fetched list is empty' mirrors the deferred-fetch case with branches([]): after the list lands the .jp-Dialog is gone, _cleanupParallel resolves, and request ran once (branches only, no DELETE); removing the empty-list branch left 'Remove 0 parallel sessions' on screen and reddened it; panel.spec.ts 124/124
   - repro: clean the project from a second tab, then open Clean Up in the first before its next poll: the dialog asks to remove 0 parallel sessions and offers the red Remove
@@ -1886,6 +1887,13 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - test-tags: UNIT
   - log: 2026-10-28T22:47:37Z @kj added; reason: filed from the round-17 review finding: the Clean Up dialog's new Enter route never consumes key auto-repeat
   - log: 2026-10-28T22:47:45Z @kj closed: fixed; reason: the close brief requires the assertions, the mutation result and the gate counts in one line
+- [x] `DEF-PANE-374-HINT-ANNOUNCE` **The Clean Up hint restated with the short ids is never announced to a screen reader** - MINOR; Clean Up Parallel Sessions states the number of removed sessions on its second line before the dialog opens; when the branch fetch answers, that line is restated with the removed sessions' short ids, and the dialog's aria-label is rewritten to carry it. The line is a bare <p class="jp-AiAssistantsPanel-cleanupHint"> with no role, so the restatement is silent: a change to the dialog's accessible name is not announced, and the only live regions are the question (role=status) and the warning (role=alert). A screen-reader user never hears which conversations will go. Round 19 (run wf_e54758bb-847) left this as its one open material MINOR. src/core/panel.ts
+  - evidence: Jest panel.spec 'opens at once and warns when the branch list lands later' and 'lists the sessions it removes by short id in both disposal settings' assert the hint's role is status at open and after the short-id restatement with the trash on and off; removing hint.setAttribute("role", "status") reddens both (Expected: "status", Received: null; 2 failed, 136 skipped), and both pass after the byte-equal restore (2 passed, 136 skipped; whole file 138 passed); Galata cleanup-confirmation.spec.ts:82 asserts toHaveAttribute('role', 'status') on .jp-AiAssistantsPanel-cleanupHint, 1 passed (7.4 s, port 8931) at build 1.2.297; make test exit 0 on that build - Jest 15 suites / 449 tests, pytest 532 passed; pm-tools check docs/ exit 0, 0 errors, 1018 warnings
+  - repro: screen reader over Clean Up Parallel Sessions: open it and let the branch fetch answer; the hint is restated with the short ids and nothing is announced (round 19, run wf_e54758bb-847)
+  - test-tags: UNIT
+  - root-cause: 2026-10-30T10:32:29Z @kj the hint was created as a bare p with no role; stateHint rewrote its textContent when the branch list landed, and nameDialog's aria-label rewrite renames the dialog but an accessible-name change is not announced
+  - log: 2026-10-30T10:32:29Z @kj added; reason: filed from the round-19 adversarial review finding; no defect id existed for it
+  - log: 2026-10-30T10:41:54Z @kj closed: fixed; reason: the close brief requires the Jest cases and their mutation, the Galata assertion and the gate counts in one evidence line
 
 ## Colour store `COLO`
 
@@ -2683,3 +2691,10 @@ Test suites, lint and cross-runtime guards, and defects surfaced by review round
   - root-cause: 2026-10-16T11:33:44Z @kj DEF-GUARD-111 removed Gemini's enum approvalMode but left the comments that describe it and the string half of the mode-record type
   - log: 2026-10-16T11:33:44Z @kj added
   - log: 2026-10-16T13:58:22Z @kj closed
+- [x] `DEF-GUARD-373-CI-VENV` **CI integration tests cannot spawn the suite venv python** - MAJOR; Integration tests job fails at session-cli.spec.ts:104 ACC-CLI-227 and :135 ACC-CLI-228 with `spawnSync .../ui-tests/.venv/bin/python ENOENT`; cause: the spec pins ui-tests/.venv/bin/python, which only the local gate recipe creates, while CI installs the wheel into the runner python; fix: JLAB_TEST_PYTHON, else the venv python when present, else python3; `ui-tests/tests/session-cli.spec.ts`
+  - evidence: both interpreter branches of session-cli.spec.ts green at the gate: 4 passed via ui-tests/.venv/bin/python, 4 via JLAB_TEST_PYTHON=/opt/conda/bin/python3; wheel import exits 0 in both; red run https://github.com/stellarshenson/jupyterlab_ai_code_assistants_extension/actions/runs/40786220400/job/123161936869
+  - repro: GitHub Actions run 40786220400 job 123161936869, step 'Execute integration tests': tests/session-cli.spec.ts:104 ACC-CLI-227 and :135 ACC-CLI-228 fail at line 66 with 'Error: spawnSync .../ui-tests/.venv/bin/python ENOENT'
+  - test-tags: FUNCTIONAL
+  - root-cause: 2026-10-30T10:01:31Z @kj the spec pins ui-tests/.venv/bin/python (line 30); that venv is created only by the local gate recipe, and CI installs the wheel into the runner python and creates no ui-tests/.venv
+  - log: 2026-10-30T10:01:31Z @kj added
+  - log: 2026-10-30T10:07:43Z @kj closed

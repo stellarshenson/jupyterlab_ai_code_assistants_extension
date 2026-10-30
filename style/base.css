@@ -684,7 +684,7 @@ body[data-jp-theme-light='true'] .jp-AiAssistantsPanel-dotHalo {
 }
 
 /* The two destructive confirmations' lines: the Remove question with its
-   caution, and the cleanup question, hint, caution and warning. The warning
+   caution, and the cleanup question, hint and warning. The warning
    box is separate from the body text because it answers one question - is a
    conversation this removal deletes newer than the one kept? - and it uses the
    warning colour, not the error colour: the removal is still the user's call.

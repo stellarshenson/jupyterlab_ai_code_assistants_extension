@@ -2317,15 +2317,17 @@ describe('ACC-SESS-61, ACC-SESS-62 - what the destructive confirmations state', 
     expect(request).not.toHaveBeenCalled();
   });
 
-  it('ACC-SESS-62 - the cleanup confirmation states how many go and that one stays', async () => {
+  it('ACC-SESS-62 - the cleanup confirmation names the three removed sessions by short id', async () => {
     // The fetched list is what the question counts: three branches despite a
-    // row that claims nine. It also gives Cancel a DELETE to withhold.
+    // row that claims nine. It also gives Cancel a DELETE to withhold. The
+    // ids differ in their first eight characters, so each short id names one
+    // conversation.
     request.mockImplementationOnce(() =>
       Promise.resolve({
         current: 'sid-ledger-tools',
         total: 4,
-        branches: [0, 1, 2].map(index => ({
-          session_id: `sid-branch-${index}`,
+        branches: ['alpha', 'bravo', 'charlie'].map((name, index) => ({
+          session_id: `sess-${name}`,
           file_mtime: 1,
           label: `Branch ${index}`
         }))
@@ -2338,7 +2340,9 @@ describe('ACC-SESS-61, ACC-SESS-62 - what the destructive confirmations state', 
 
     expect(body).toContain('3 parallel sessions');
     expect(body).toContain('ledger-tools');
-    expect(body).toContain('current conversation is kept');
+    expect(body).toContain(
+      'Remaining 3 sessions sess-alp, sess-bra, sess-cha will be removed.'
+    );
     pressEnter();
     await done;
     // Cancelling after the question's branches fetch sends no DELETE.
@@ -2414,6 +2418,10 @@ describe('ACC-PANE-221, ACC-PANE-222 - the cleanup confirmation warning and hint
     expect(
       document.querySelector('.jp-Dialog-body p')!.getAttribute('role')
     ).toBe('status');
+    // The hint is a live region too, because the fetch restates it with the
+    // short ids (DEF-PANE-374-HINT-ANNOUNCE).
+    const hint = document.querySelector('.jp-AiAssistantsPanel-cleanupHint')!;
+    expect(hint.getAttribute('role')).toBe('status');
     // The Widget body leaves showDialog no string to name the dialog from, so
     // the name is set here and carries the question on screen.
     expect(
@@ -2431,8 +2439,12 @@ describe('ACC-PANE-221, ACC-PANE-222 - the cleanup confirmation warning and hint
       '.jp-AiAssistantsPanel-cleanupWarning'
     )!;
     expect(warning.textContent).toBe(
-      '1 parallel session was active after the one kept.'
+      '1 parallel session was active after the current session.'
     );
+    // The restatement kept the hint a live region and put the ids in it, so
+    // the change is announced.
+    expect(hint.getAttribute('role')).toBe('status');
+    expect(hint.textContent).toContain('sid-bran');
     // The warning is announced, and the dialog's name follows the restated
     // question and the warning.
     expect(warning.getAttribute('role')).toBe('alert');
@@ -2502,7 +2514,7 @@ describe('ACC-PANE-221, ACC-PANE-222 - the cleanup confirmation warning and hint
     );
   });
 
-  it('warns when a conversation it removes was active after the one kept', async () => {
+  it('warns when a conversation it removes was active after the current session', async () => {
     const now = Date.now();
     const row = session({
       name: 'ledger-tools',
@@ -2549,7 +2561,7 @@ describe('ACC-PANE-221, ACC-PANE-222 - the cleanup confirmation warning and hint
     await done;
   });
 
-  it('states its hint in at most twelve words, in both disposal settings', async () => {
+  it('lists the sessions it removes by short id in both disposal settings', async () => {
     const now = Date.now();
     const row = session({ name: 'ledger-tools', extra_sessions: 1 });
     request.mockResolvedValueOnce(branches([now - 3 * HOUR]));
@@ -2559,14 +2571,30 @@ describe('ACC-PANE-221, ACC-PANE-222 - the cleanup confirmation warning and hint
     let hint = document.querySelector(
       '.jp-AiAssistantsPanel-cleanupHint'
     )!.textContent!;
-    expect(hint.trim().split(/\s+/).length).toBeLessThanOrEqual(12);
-    expect(hint).toContain('go to the trash');
-    // The hint promises the trash; the caution names the refusal that deletes
-    // permanently.
+    // The fetched branch is `sid-branch-0`; its short id is its first eight
+    // characters, which for Claude is the whole display id.
+    expect(hint).toBe('Remaining 1 session sid-bran will be removed.');
+    // A live region from creation: the restatement with the ids is announced
+    // (DEF-PANE-374-HINT-ANNOUNCE).
     expect(
-      document.querySelector('.jp-AiAssistantsPanel-cleanupCaution')!
-        .textContent
-    ).toContain('A refused trash move deletes permanently');
+      document
+        .querySelector('.jp-AiAssistantsPanel-cleanupHint')!
+        .getAttribute('role')
+    ).toBe('status');
+    // The caution line is gone from the confirmation entirely.
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupCaution')
+    ).toBeNull();
+    pressEnter();
+    await done;
+
+    // A failed fetch leaves no ids known: the hint states the count alone.
+    request.mockRejectedValueOnce(new Error('offline'));
+    done = (panel as any)._cleanupParallel(row) as Promise<void>;
+    await openButtons();
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupHint')!.textContent
+    ).toBe('Remaining 1 session will be removed.');
     pressEnter();
     await done;
 
@@ -2577,13 +2605,18 @@ describe('ACC-PANE-221, ACC-PANE-222 - the cleanup confirmation warning and hint
     hint = document.querySelector(
       '.jp-AiAssistantsPanel-cleanupHint'
     )!.textContent!;
-    expect(hint.trim().split(/\s+/).length).toBeLessThanOrEqual(12);
-    expect(hint).toContain('deleted permanently');
-    // The caution is not the hint: it stays visible on its own.
+    expect(hint).toBe(
+      'Remaining 1 session sid-bran will be deleted permanently.'
+    );
+    // The live region holds with the trash off as well.
     expect(
-      document.querySelector('.jp-AiAssistantsPanel-cleanupCaution')!
-        .textContent
-    ).toContain('cannot be undone');
+      document
+        .querySelector('.jp-AiAssistantsPanel-cleanupHint')!
+        .getAttribute('role')
+    ).toBe('status');
+    expect(
+      document.querySelector('.jp-AiAssistantsPanel-cleanupCaution')
+    ).toBeNull();
     pressEnter();
     await done;
   });

@@ -19,3 +19,4 @@ docs/acc-crit-jupyterlab-ai-code-assistants.md
 # journal format has four.
 .claude
 .agents
+package-lock.json

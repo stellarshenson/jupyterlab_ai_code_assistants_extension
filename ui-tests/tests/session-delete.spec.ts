@@ -28,7 +28,8 @@ import {
  */
 test.use({ autoGoto: false, waitForApplication });
 
-const PORT = process.env.JLAB_TEST_PORT || '8888';
+const PORT =
+  process.env.JUPYTER_TEST_PORT || process.env.JLAB_TEST_PORT || '8888';
 const SCRATCH =
   process.env.JLAB_TEST_SCRATCH || path.join(__dirname, '..', '.scratch', PORT);
 const HOME = path.join(SCRATCH, 'home');

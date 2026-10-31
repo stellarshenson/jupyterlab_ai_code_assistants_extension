@@ -3,7 +3,7 @@ import { Dialog, Notification } from '@jupyterlab/apputils';
 import { TranslationBundle, nullTranslator } from '@jupyterlab/translation';
 import { ServerConnection } from '@jupyterlab/services';
 import { ITerminalTracker } from '@jupyterlab/terminal';
-import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
+import { IColourfulTabs } from '@stellarshenson/jupyterlab-colourful-tab-extension';
 import { Widget } from '@lumino/widgets';
 
 import { ColourStore, effectiveColour, sessionForCwds } from './colour';

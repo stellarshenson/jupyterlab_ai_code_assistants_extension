@@ -35,7 +35,7 @@ from pathlib import Path
 HERE = Path(__file__).parent.resolve()
 # Read with ``or`` and not a ``get()`` default, so an exported-but-empty
 # variable still yields a port rather than an empty path segment.
-PORT = os.environ.get("JLAB_TEST_PORT") or "8888"
+PORT = os.environ.get("JUPYTER_TEST_PORT") or os.environ.get("JLAB_TEST_PORT") or "8888"
 SCRATCH = Path(os.environ.get("JLAB_TEST_SCRATCH") or (HERE / ".scratch" / PORT))
 
 # Binaries stubbed onto PATH, so their providers appear in the shell: the

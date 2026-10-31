@@ -27,7 +27,9 @@ jest.mock('@jupyter/web-components', () => ({
 // load for real; `@jupyterlab/terminal` pulls the ESM-only `color` package and
 // the tab extension ships untransformed ESM. Neither token is used here.
 jest.mock('@jupyterlab/terminal', () => ({ ITerminalTracker: {} }));
-jest.mock('jupyterlab_colourful_tab_extension', () => ({ IColourfulTabs: {} }));
+jest.mock('@stellarshenson/jupyterlab-colourful-tab-extension', () => ({
+  IColourfulTabs: {}
+}));
 // No route in this spec reaches the server.
 jest.mock('../core/request', () => ({
   API_NAMESPACE: 'jupyterlab-ai-code-assistants-extension',

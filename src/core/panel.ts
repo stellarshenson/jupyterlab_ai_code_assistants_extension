@@ -8,7 +8,7 @@ import {
 import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
 import { ServerConnection } from '@jupyterlab/services';
 import { ITerminalTracker } from '@jupyterlab/terminal';
-import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
+import { IColourfulTabs } from '@stellarshenson/jupyterlab-colourful-tab-extension';
 import {
   LabIcon,
   MenuSvg,

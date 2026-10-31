@@ -79,7 +79,7 @@ cd ./ui-tests
 JLAB_TEST_PORT=8899 jlpm playwright test > run.log 2>&1; echo exit:$?
 ```
 
-`JLAB_TEST_PORT` moves the test server off 8888, which a live JupyterLab or JupyterHub usually holds; it reaches the `baseURL`, the server command and `jupyter_server_test_config.py` alike. Redirect the output rather than piping through `tee` - a pipe reports the exit status of `tee`, so a suite whose server never started would read as a pass.
+`JLAB_TEST_PORT` moves the test server off 8888, which a live JupyterLab or JupyterHub usually holds; it reaches the `baseURL`, the server command and `jupyter_server_test_config.py` alike. `JUPYTER_TEST_PORT` does the same and wins when both are set. Redirect the output rather than piping through `tee` - a pipe reports the exit status of `tee`, so a suite whose server never started would read as a pass.
 
 Test results will be shown in the terminal. In case of any test failures, the test report
 will be opened in your browser at the end of the tests execution; see

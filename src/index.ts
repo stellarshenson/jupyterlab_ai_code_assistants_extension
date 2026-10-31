@@ -11,7 +11,7 @@ import { ILauncher } from '@jupyterlab/launcher';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { ITerminalTracker } from '@jupyterlab/terminal';
 import { ITranslator, nullTranslator } from '@jupyterlab/translation';
-import { IColourfulTabs } from 'jupyterlab_colourful_tab_extension';
+import { IColourfulTabs } from '@stellarshenson/jupyterlab-colourful-tab-extension';
 import { IDisposable } from '@lumino/disposable';
 
 import { addCallbackCommand } from './core/callback';

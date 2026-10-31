@@ -36,13 +36,13 @@ dependencies = [
     # Companion labextension providing the IColourfulTabs token. Declared as a
     # non-bundled webpack singleton (package.json sharedPackages), so it must be
     # present at runtime or the whole extension fails to load with "Shared
-    # module jupyterlab_colourful_tab_extension doesn't exist in shared scope".
-    # 1.1.20 is the release that first ships the ownership API this extension
-    # depends on - claim() and the colourChanged signal - together with the
-    # server route reporting each terminal's pty incarnation. Below it the
-    # extension loads and tints nothing, which is the degraded mode the
-    # runtime probe still covers for anyone pinning an older companion.
-    "jupyterlab_colourful_tab_extension>=1.1.20,<2",
+    # module @stellarshenson/jupyterlab-colourful-tab-extension doesn't exist in
+    # shared scope". 1.1.28 is the first release that registers the module under
+    # that scoped npm name, so a companion below it fails the same way; its
+    # Python distribution name did not change. The ownership API this extension
+    # depends on - claim() and the colourChanged signal - and the server route
+    # reporting each terminal's pty incarnation first shipped in 1.1.20.
+    "jupyterlab_colourful_tab_extension>=1.1.28,<2",
     # The move-to-trash half of every destructive action. jupyter_server pulls
     # it in transitively today, but a delete that promised the user a
     # recoverable outcome must not depend on somebody else's dependency graph.

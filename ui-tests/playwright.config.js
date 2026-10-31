@@ -1,10 +1,11 @@
 /**
  * Configuration for Playwright using default from @jupyterlab/galata
  *
- * `JLAB_TEST_PORT` overrides the test server port (default 8888) so the suite
- * runs on machines where 8888 is already taken by a live JupyterLab or
- * JupyterHub. The same value reaches `jupyter_server_test_config.py` through
- * the spawned server's environment, so the config and the command line agree.
+ * `JUPYTER_TEST_PORT`, or else `JLAB_TEST_PORT`, overrides the test server port
+ * (default 8888) so the suite runs on machines where 8888 is already taken by a
+ * live JupyterLab or JupyterHub. The same value reaches
+ * `jupyter_server_test_config.py` through the spawned server's environment, so
+ * the config and the command line agree.
  *
  * The port is also the run's IDENTITY. Every directory a run owns is a
  * subdirectory named after it - `.scratch/<port>`, `test-results/<port>`,
@@ -39,7 +40,8 @@
 const path = require('path');
 const baseConfig = require('@jupyterlab/galata/lib/playwright-config');
 
-const port = process.env.JLAB_TEST_PORT || '8888';
+const port =
+  process.env.JUPYTER_TEST_PORT || process.env.JLAB_TEST_PORT || '8888';
 
 // The run's own scratch tree: the fake HOME, the seeded stores, the stub
 // binaries. `global-teardown.js` sweeps this exact path - hand it the resolved
@@ -107,6 +109,14 @@ module.exports = {
       // spec's blocked-trash path is the one send2trash actually uses, and no
       // fixture can reach the developer's trash.
       XDG_DATA_HOME: path.join(scratch, 'home', '.local', 'share'),
+      // An exported value outranks HOME, and the settings specs seed this path.
+      JUPYTERLAB_SETTINGS_DIR: path.join(
+        scratch,
+        'home',
+        '.jupyter',
+        'lab',
+        'user-settings'
+      ),
       JLAB_TEST_SCRATCH: scratch
     },
     // Never adopt a running lab. The suite drives terminals and session

@@ -30,7 +30,8 @@ import { waitForApplication } from './shared';
 test.use({ autoGoto: false, waitForApplication });
 
 /** The companion plugin, whose provided service IS the injected token. */
-const COMPANION_PLUGIN = 'jupyterlab_colourful_tab_extension:plugin';
+const COMPANION_PLUGIN =
+  '@stellarshenson/jupyterlab-colourful-tab-extension:plugin';
 
 const LOG_PREFIX = '[jupyterlab_ai_code_assistants_extension]';
 /** Enough of the warning to identify it without pinning its wording. */

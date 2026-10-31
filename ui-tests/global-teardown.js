@@ -16,7 +16,11 @@ const path = require('path');
 module.exports = async () => {
   const scratch =
     process.env.JLAB_TEST_SCRATCH ||
-    path.join(__dirname, '.scratch', process.env.JLAB_TEST_PORT || '8888');
+    path.join(
+      __dirname,
+      '.scratch',
+      process.env.JUPYTER_TEST_PORT || process.env.JLAB_TEST_PORT || '8888'
+    );
   fs.rmSync(scratch, {
     recursive: true,
     force: true

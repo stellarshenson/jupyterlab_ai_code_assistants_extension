@@ -2,6 +2,16 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.4] - 2026-10-31
+
+### Changed
+
+- The minimum `jupyterlab_colourful_tab_extension` version is 1.1.28
+
+### Fixed
+
+- With `jupyterlab_colourful_tab_extension` 1.1.28 installed, the extension failed to load in the browser and no assistant panel appeared, with the error "Shared module jupyterlab_colourful_tab_extension doesn't exist in shared scope default". The extension now imports the colourful tab token from `@stellarshenson/jupyterlab-colourful-tab-extension`
+
 ## [1.3.0] - 2026-10-30
 
 ### Changed

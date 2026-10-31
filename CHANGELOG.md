@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.5] - 2026-10-31
+
+### Changed
+
+- No code change since 1.3.4. This release adds the 1.3.4 changelog and journal entry to the package source
+
 ## [1.3.4] - 2026-10-31
 
 ### Changed

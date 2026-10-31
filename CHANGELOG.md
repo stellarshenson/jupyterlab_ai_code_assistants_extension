@@ -2,6 +2,13 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.7] - 2026-10-31
+
+### Changed
+
+- Require Python 3.12
+- Add the 1.3.6 changelog and journal entry
+
 ## [1.3.6] - 2026-10-31
 
 ### Changed

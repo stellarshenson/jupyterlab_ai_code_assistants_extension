@@ -54,7 +54,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 ## Requirements
 
 - JupyterLab >= 4.6.0
-- Python >= 3.10
+- Python >= 3.12
 - At least one assistant CLI on `PATH`: `claude`, `codex`, `kimi`, `gemini`, or `dsh` (the DeepSeek Harness)
 - For DeepSeek: the community TUI bundle mounted as the `tui` profile, `dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui` - a DeepSeek launch without it is refused with these words before any terminal opens
 

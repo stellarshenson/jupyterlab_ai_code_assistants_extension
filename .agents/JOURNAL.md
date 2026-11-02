@@ -263,3 +263,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 173. **Task - Template files** (v1.3.8): applied the template v4.6.5 files and packages the upgrade left out<br>
     **Result**: `template_sync.py` updated the CI workflows, `package.json`, the build sections of `pyproject.toml` and the locks; `typescript` moves from ~5.5.4 to ~5.8.0, and no locked version goes down. `package-lock.json` goes into `.prettierignore`. The kept local lines are `tsconfig.json` include and exclude and the types of `tsconfig.test.json`, marked `template-sync: keep`, and HOME and PATH in the ui-tests start script. Jest passes 452 of 452 and `template_sync.py --check` exits 0.
+
+174. **Task - Build lifecycle brought to Makefile 1.48** (v1.3.8): the canonical Makefile went to every extension on 2026-11-02<br>
+    **Result**: Makefile 1.48 copied verbatim from `@utils/jupyterlab-extensions/Makefile`, and `diff` reports no difference; mrproper now removes tmp, logs, .venv, graphify-out, coverage and .pytest_cache, so a cleaned tree holds no build or environment artefacts; install and publish are .NOTPARALLEL, the guard `jupyterlab_vscode_icons_extension` carried locally; the cleaned tree carries the tag CHECKPOINT_JUPYTERLAB_4.6.5_UPGRADE_PORTED_1.3.8. `make mrproper` exits 0, `git status --porcelain` prints nothing, and CI is green on `289906c`.

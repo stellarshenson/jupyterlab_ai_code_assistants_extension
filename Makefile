@@ -1,6 +1,6 @@
 # Makefile for Jupyterlab extensions version 1.48
 # changelog:
-#   1.48 - mrproper removes tmp, logs and .venv too; install and publish are .NOTPARALLEL, the guard jupyterlab_vscode_icons_extension carried locally.
+#   1.48 - mrproper removes tmp, logs, .venv, graphify-out, coverage and .pytest_cache too; install and publish are .NOTPARALLEL, the guard jupyterlab_vscode_icons_extension carried locally.
 #   1.47 - increment_version takes BUMP none|patch|minor|major; none leaves the version unchanged.
 #   1.46 - increment_version also writes the version into package-lock.json, in the text, and publish stages it.
 #   1.45 - install adds every optional-dependencies group of pyproject.toml in a second pip run without --force-reinstall.
@@ -230,7 +230,7 @@ upgrade: check_dependencies
 
 ## cleanup all build and metabuild artefacts (including the project-local nodeenv)
 mrproper: clean uninstall
-	rm -rf node_modules .yarn ui-tests/node_modules .nodeenv tmp logs .venv || true
+	rm -rf node_modules .yarn ui-tests/node_modules .nodeenv tmp logs .venv graphify-out coverage .pytest_cache || true
 
 ## prints the list of available commands
 help:

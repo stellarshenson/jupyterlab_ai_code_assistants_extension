@@ -1,17 +1,26 @@
 # Makefile for Jupyterlab extensions version 1.48
 # changelog:
-#   1.48 - mrproper also removes tmp, logs and .venv. A campaign leaves checkpoints,
-#          environments and tool logs in the first two, a uv or venv run leaves the
-#          third, and a project handed on should carry none of them. install and
-#          publish are .NOTPARALLEL, the guard jupyterlab_vscode_icons_extension
-#          added locally, so tests finish before install and the version moves
-#          before build when the caller supplies -j. Requested on 2026-11-02.
-#   1.47 - increment_version takes a BUMP level: none leaves the version unchanged,
-#          patch (the default) raises the last number, minor raises the middle number
-#          and sets the last to 0, major raises the first number and sets the rest to
-#          0; any other level exits 1. Until now the target raised the last number
-#          only, so a minor release took a hand edit. Requested on 2026-11-01.
-#   1.46 and earlier: the git history of this file.
+#   1.48 - mrproper removes tmp, logs and .venv too; install and publish are .NOTPARALLEL, the guard jupyterlab_vscode_icons_extension carried locally.
+#   1.47 - increment_version takes BUMP none|patch|minor|major; none leaves the version unchanged.
+#   1.46 - increment_version also writes the version into package-lock.json, in the text, and publish stages it.
+#   1.45 - install adds every optional-dependencies group of pyproject.toml in a second pip run without --force-reinstall.
+#   1.44 - check_dependencies reports a missing pytest when the package has tests/, and install_dependencies installs the test extras.
+#   1.43 - the auth gate in test loads the source tree, not the last installed wheel.
+#   1.42 - increment_version moves from publish onto install, so every make install raises the patch version and publish raises it once.
+#   1.41 - increment_version moves off build onto publish; publish gains test; the metadata commit and push happen before either registry; npm install and package-lock.json are dropped.
+#   1.40 - publish stages yarn.lock in the post-publish commit.
+#   1.39 - upgrade reports with jlpm npm audit --recursive instead of npm audit fix --force, which rewrote @jupyterlab ranges to 0.x and the lockfile to Yarn 1 format.
+#   1.38 - keep python -m build as the build command, approve blocked npm install scripts, and assert dist/ holds a wheel and an sdist before the npm push.
+#   1.37 - pin the global install prefix to the nodeenv when installing yarn and rimraf.
+#   1.36 - test runs the Python suite too when the package has tests/, not just jlpm.
+#   1.35 - resolve node and npm from the project-local nodeenv via $(NODE) and $(NPM), and read VERSION lazily.
+#   1.34 - build formats the lockfiles with jlpm prettier instead of npx prettier.
+#   1.33 - check_dependencies treats a missing node_modules as missing, and install_dependencies runs jlpm install.
+#   1.32 - use a project-local nodeenv at .nodeenv/ instead of overwriting the python prefix with nodeenv -p; mrproper removes it.
+#   1.31 - mrproper also removes ui-tests/node_modules.
+#   1.30 - check twine in check_dependencies.
+#   1.29 - replace yarn with jlpm, add prettier format, commit and push after publish.
+#   1.28 - initial versioned Makefile.
 # author: Stellars Henson <konrad.jelen+github@gmail.com>
 # License: MIT Open Source License
 

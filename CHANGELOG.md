@@ -2,6 +2,13 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.17] - 2026-11-04
+
+### Fixed
+
+- The panel's retry line states the client deadline in minutes - `... Request to providers/claude/sessions timed out after 1 minute` instead of `60000 ms`
+- A row's time ends 10px from the panel's right edge, the inset the workspace manager's rows take, with the left edge unchanged
+
 ## [1.3.16] - 2026-11-04
 
 ### Changed

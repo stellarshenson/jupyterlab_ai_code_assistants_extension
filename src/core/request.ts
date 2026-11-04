@@ -54,7 +54,11 @@ export class RequestTimeoutError extends Error {
     readonly endPoint: string,
     readonly timeoutMs: number
   ) {
-    super(`Request to ${endPoint} timed out after ${timeoutMs} ms`);
+    super(
+      `Request to ${endPoint} timed out after ${timeoutMs / 60_000} ${
+        timeoutMs === 60_000 ? 'minute' : 'minutes'
+      }`
+    );
     this.name = 'RequestTimeoutError';
   }
 }

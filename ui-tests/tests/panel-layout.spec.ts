@@ -22,6 +22,10 @@ const SESSIONS_URL =
 /** The shared inset `style/base.css` declares as `--aica-inset`. */
 const INSET = 4;
 
+/** The right padding a session row takes behind the time (DEF-PANE-387), the
+ * workspace manager row's own (`padding: 0 10px 0 18px`). */
+const ROW_RIGHT_INSET = 10;
+
 /** `branchy` is the newest seeded project (28 s old) and `renamable` was
  * seeded 900 s old, so with the clock fixed below their labels read "now" and
  * "14m ago". */
@@ -333,30 +337,21 @@ test('ACC-PANE-183 - content stands 4px from the panel border on both sides', as
     .boundingBox())!;
   expect(caret.x - left).toBeCloseTo(INSET, 0);
 
-  // The dot column, live or placeholder, shares the caret's edge; the time
-  // column ends the inset short of the list's content edge - the list reserves
-  // a scrollbar gutter beyond that, which this inset does not include.
+  // The dot column, live or placeholder, shares the caret's edge. The time's
+  // 10px right inset belongs to DEF-PANE-387's own test.
   const list = page.locator(`${ALL} .jp-AiAssistantsPanel-list`);
-  const contentRight = await list.evaluate((el: HTMLElement) => {
-    const r = el.getBoundingClientRect();
-    return r.left + el.clientLeft + el.clientWidth;
-  });
   const rows = list.locator('.jp-AiAssistantsPanel-row');
   const count = await rows.count();
   expect(count).toBeGreaterThan(0);
   for (let i = 0; i < count; i++) {
-    const row = rows.nth(i);
-    const dot = (await row
+    const dot = (await rows
+      .nth(i)
       .locator(
         '.jp-AiAssistantsPanel-dot, .jp-AiAssistantsPanel-dotPlaceholder'
       )
       .first()
       .boundingBox())!;
     expect(dot.x - left).toBeCloseTo(INSET, 0);
-    const time = (await row
-      .locator('.jp-AiAssistantsPanel-rowTime')
-      .boundingBox())!;
-    expect(contentRight - (time.x + time.width)).toBeCloseTo(INSET, 0);
   }
 });
 
@@ -505,4 +500,60 @@ test("DEF-PANE-384 - a hovered row takes three quarters of the band's fill", asy
   expect(widths.row).toBeCloseTo(widths.list, 0);
   expect(Math.abs(widths.listRight - widths.rootRight)).toBeLessThanOrEqual(1);
   expect(Math.abs(widths.rowRight - widths.rootRight)).toBeLessThanOrEqual(1);
+});
+
+test('DEF-PANE-387 - a row ends 10px from the panel edge behind the time', async ({
+  page
+}) => {
+  // Tall enough for the 13 seeded All rows, so the list does not scroll and
+  // the panel edge is the row's own edge (DEF-PANE-384).
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  const row = page.locator(`${ALL} .jp-AiAssistantsPanel-row`).first();
+  await expect(row).toBeVisible({ timeout: 15000 });
+
+  const measure = () =>
+    row.evaluate((el: HTMLElement) => {
+      const list = el.closest('.jp-AiAssistantsPanel-list') as HTMLElement;
+      const root = el.closest('.jp-AiAssistantsPanel') as HTMLElement;
+      const time = el.querySelector(
+        '.jp-AiAssistantsPanel-rowTime'
+      ) as HTMLElement;
+      const listRect = list.getBoundingClientRect();
+      return {
+        rootRight: root.getBoundingClientRect().right,
+        listRight: listRect.right,
+        listClientRight: listRect.left + list.clientLeft + list.clientWidth,
+        scrollHeight: list.scrollHeight,
+        clientHeight: list.clientHeight,
+        timeRight: time.getBoundingClientRect().right
+      };
+    });
+
+  const wide = await measure();
+  expect(wide.scrollHeight).toBeLessThanOrEqual(wide.clientHeight);
+  expect(Math.abs(wide.listRight - wide.rootRight)).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(wide.rootRight - wide.timeRight - ROW_RIGHT_INSET)
+  ).toBeLessThanOrEqual(1);
+
+  // Measured: at 700 the All list still fits its 13 rows (clientHeight 342
+  // against 312 of rows); at 360 it holds 113 and must scroll. A scrolling
+  // list ends the row at its client edge, the scrollbar taking the strip
+  // beyond it.
+  await page.setViewportSize({ width: 1280, height: 360 });
+  // Lumino applies a viewport resize asynchronously; until it lands the All
+  // list still reports its tall viewport's clientHeight, so poll for the
+  // shorter one before reading geometry.
+  await expect
+    .poll(async () => (await measure()).clientHeight, { timeout: 15000 })
+    .toBeLessThan(wide.clientHeight);
+
+  const scrolled = await measure();
+  expect(scrolled.scrollHeight).toBeGreaterThan(scrolled.clientHeight);
+  expect(
+    Math.abs(scrolled.listClientRight - scrolled.timeRight - ROW_RIGHT_INSET)
+  ).toBeLessThanOrEqual(1);
 });

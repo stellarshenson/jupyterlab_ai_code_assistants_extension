@@ -13,12 +13,10 @@
      on purpose - the partial row is the scroll-continuation cue. */
   --aica-row-height: 24px;
 
-  /* Single source for the gap between the panel border and its content, on
-     both sides: the header, search field, error line, section headers and rows
-     all read it, so the search field, the caret column and the status-dot
-     column keep one left edge. 4px, not 8px: the lists reserve a
-     scrollbar gutter as well, so 8px put the time column 23px from the right
-     border where the file browser's sits 12px from it. */
+  /* The gap between the panel border and its content on the left: the header,
+     search field, error line, section headers and rows all read it, so the
+     search field, the caret column and the status-dot column keep one left
+     edge. Rows take 10px on the right for the time (DEF-PANE-387). */
   --aica-inset: 4px;
 
   display: flex;
@@ -352,7 +350,10 @@
 .jp-AiAssistantsPanel-row {
   display: flex;
   align-items: center;
-  padding: 0 var(--aica-inset);
+
+  /* DEF-PANE-387: the time ends 10px from the panel's right edge, the inset
+     the workspace manager's own row takes (padding: 0 10px 0 18px). */
+  padding: 0 10px 0 var(--aica-inset);
   height: var(--aica-row-height);
   line-height: var(--aica-row-height);
   cursor: pointer;

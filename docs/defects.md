@@ -1968,6 +1968,18 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-11-04T18:06:23Z @kj the owner's meta-ink ruling keeps the count in --jp-ui-font-color2 while the band fills sit close to it in luminance
   - log: 2026-11-04T18:06:23Z @kj added
   - log: 2026-11-04T18:06:26Z @kj rejected: accepted by the owner 2026-11-04 as a recorded trade-off: the meta ink is the ruling, an ink swap cannot reach AA where the Steel dark label ink is 3.62:1, and the band fill belongs to the theme; the measurements are kept above
+- [x] `DEF-PANE-386-TIMEOUT-UNITS` **The timeout line reports milliseconds** - MINOR; The retry line names the deadline as '60000 ms', which a reader must divide twice to learn the wait was one minute: 'Request to providers/claude/sessions timed out after 60000 ms'. The message states minutes: '... timed out after 1 minute'. Filed from the owner's Steel dark panel, 2026-11-04.
+  - evidence: request spec 12/12 passes and asserts 'Request to sessions timed out after 1 minute'; the 120000 ms case asserts '2 minutes'; build:lib exit 0; Jest 454/454 in 15 suites; lint 0 warnings, 0 errors; pm-tools check docs/ 0 errors; version stays 1.3.16
+  - repro: Hang the server's listing route for over a minute and open an assistant panel: the banner prints the deadline as 60000 ms.
+  - root-cause: 2026-11-04T20:12:36Z @kj src/core/request.ts:57 composes RequestTimeoutError's message from timeoutMs and the unit 'ms'.
+  - log: 2026-11-04T20:12:36Z @kj added
+  - log: 2026-11-04T20:17:30Z @kj closed: fixed; the deadline is stated in minutes
+- [x] `DEF-PANE-387-TIME-INSET` **Time-ago label sits too close to the panel edge** - MINOR; The row's right padding is --aica-inset (4px), so the time-ago label ends 4px from the panel edge; the workspace manager's row takes 10px there. The row takes 10px on the right, left unchanged.
+  - evidence: the DEF-PANE-387 Galata test passes 8 consecutive full-spec runs at 8/8 with the time 10px from the panel root and 10px inside the list client edge when it scrolls; the 4px mutation fails it with |4-10| = 6; Jest 454/454; lint 0 warnings; Steel dark screenshot shows the gap
+  - repro: Open an assistant panel: the time-ago label ends 4px from the panel's right edge; the workspace manager's rows end 10px from theirs.
+  - root-cause: 2026-11-04T20:25:25Z @kj `.jp-AiAssistantsPanel-row` pads both sides with `--aica-inset` (4px); the workspace manager's row sets `padding: 0 10px 0 18px`.
+  - log: 2026-11-04T20:25:25Z @kj added
+  - log: 2026-11-04T20:49:51Z @kj closed: fixed; the row takes 10px on the right, the workspace manager's row inset
 
 ## Colour store `COLO`
 

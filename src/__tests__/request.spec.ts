@@ -96,6 +96,15 @@ describe('requestAPI deadline', () => {
     expect(error).not.toBeInstanceOf(ServerConnection.NetworkError);
     expect((error as RequestTimeoutError).endPoint).toBe('sessions');
     expect((error as RequestTimeoutError).timeoutMs).toBe(REQUEST_TIMEOUT_MS);
+    expect((error as Error).message).toBe(
+      'Request to sessions timed out after 1 minute'
+    );
+  });
+
+  it('pluralises the deadline when it exceeds one minute', () => {
+    expect(new RequestTimeoutError('sessions', 120_000).message).toBe(
+      'Request to sessions timed out after 2 minutes'
+    );
   });
 
   it('states the deadline as sixty seconds, a full CLI timeout above codex', () => {

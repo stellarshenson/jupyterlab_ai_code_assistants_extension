@@ -341,3 +341,54 @@ test('ACC-PANE-183 - content stands 4px from the panel border on both sides', as
     expect(contentRight - (time.x + time.width)).toBeCloseTo(INSET, 0);
   }
 });
+
+test('DEF-PANE-383 - the section count takes the meta ink', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  const header = page
+    .locator(PANEL)
+    .locator('.jp-AiAssistantsPanel-sectionHeader')
+    .first();
+  await expect(header).toBeVisible({ timeout: 15000 });
+
+  const probe = await header.evaluate((el: HTMLElement) => {
+    const label = el.querySelector<HTMLElement>(
+      '.jp-AiAssistantsPanel-sectionLabel'
+    );
+    const count = el.querySelector<HTMLElement>(
+      '.jp-AiAssistantsPanel-sectionCount'
+    );
+    // The theme tokens as the browser resolves them, read off a probe element
+    // rather than the elements under test.
+    const token = document.createElement('span');
+    el.appendChild(token);
+    token.style.color = 'var(--jp-ui-font-color2)';
+    const meta = getComputedStyle(token).color;
+    token.style.color = 'var(--jp-ui-font-color1)';
+    const ink = getComputedStyle(token).color;
+    token.remove();
+    return {
+      hasLabel: label !== null,
+      hasCount: count !== null,
+      labelColour: label ? getComputedStyle(label).color : '',
+      countColour: count ? getComputedStyle(count).color : '',
+      meta,
+      ink,
+      labelRight: label?.getBoundingClientRect().right ?? NaN,
+      countLeft: count?.getBoundingClientRect().left ?? NaN
+    };
+  });
+
+  expect(probe.hasLabel).toBe(true);
+  expect(probe.hasCount).toBe(true);
+  expect(probe.countColour).toBe(probe.meta);
+  expect(probe.labelColour).toBe(probe.ink);
+  expect(probe.labelColour).not.toBe(probe.countColour);
+  // The 6px margin plus the label's glyph advance.
+  const gap = probe.countLeft - probe.labelRight;
+  expect(gap).toBeGreaterThanOrEqual(0);
+  expect(gap).toBeLessThanOrEqual(12);
+});

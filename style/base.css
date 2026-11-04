@@ -307,7 +307,18 @@
 }
 
 .jp-AiAssistantsPanel-sectionLabel {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* The count takes the caret's ink, not the label's (DEF-PANE-383): meta
+   text is --jp-ui-font-color2, as the workspace manager's section counts
+   and this design system's page state. */
+.jp-AiAssistantsPanel-sectionCount {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--jp-ui-font-color2);
+  white-space: nowrap;
 }
 
 .jp-AiAssistantsPanel-list {

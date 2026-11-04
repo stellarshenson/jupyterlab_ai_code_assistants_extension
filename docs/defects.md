@@ -1940,6 +1940,14 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-11-04T12:57:12Z @kj added
   - log: 2026-11-04T13:22:45Z @kj closed: fixed under the owner ruling of 2026-11-04
   - log: 2026-11-04T13:23:05Z @kj edited evidence "Galata panel-layout.spec.ts 5/5 passed exit 0 on the built bundle (DEF-PANE-382: expanded 0px, folded 1px --jp-layout-color3); mutation reinstating the unconditional section border fails it, expected 0px received 1px; jest 453/453; lint 0 warnings; Steel screenshots: no line above the band, a 1px rgb(77,90,101) --jp-layout-color3 line between bands" -> "Galata panel-layout.spec.ts 5/5 passed exit 0 on the built bundle (DEF-PANE-382-EXPANDED-LINE: expanded 0px, folded 1px --jp-layout-color3); mutation reinstating the unconditional section border fails it, expected 0px received 1px; jest 453/453; lint 0 warnings; Steel screenshots: no line above the band, a 1px rgb(77,90,101) --jp-layout-color3 line between bands"
+- [x] `DEF-PANE-383-COUNT-COLOUR` **Section count shares the label colour** - MINOR; the band's session count is one text node with the label, so it paints in --jp-ui-font-color1; the design gives it --jp-ui-font-color2 at 6px left, as the workspace manager extension renders its own counts
+  - evidence: DEF-PANE-383-COUNT-COLOUR Galata 1/1 passes on the built bundle; mutation 1 failed (count rgba(0,0,0,0.87) vs meta rgba(0,0,0,0.54)); panel-layout 6/6; jest 453/453, 15/15 suites; lint 0 findings; Steel dark: label 93.4, counts 81.7 and 80.3-81.7
+  - related: ACC-PANE-35
+  - repro: open any assistant panel in Steel dark: 'ALL (97)' is one colour, while WORKBENCH shows 'WORKSPACES (1)' with a dimmer count
+  - root-cause: 2026-11-04T13:40:34Z @kj _renderSection writes ${SECTION_LABELS[key]} (${items.length}) into one .jp-AiAssistantsPanel-sectionLabel text node
+  - log: 2026-11-04T13:40:34Z @kj added
+  - log: 2026-11-04T13:54:54Z @kj closed: fixed; count painted in the meta ink
+  - log: 2026-11-04T13:55:07Z @kj edited evidence "DEF-PANE-383 Galata 1/1 passes on the built bundle; mutation 1 failed (count rgba(0,0,0,0.87) vs meta rgba(0,0,0,0.54)); panel-layout 6/6; jest 453/453, 15/15 suites; lint 0 findings; Steel dark: label 93.4, counts 81.7 and 80.3-81.7" -> "DEF-PANE-383-COUNT-COLOUR Galata 1/1 passes on the built bundle; mutation 1 failed (count rgba(0,0,0,0.87) vs meta rgba(0,0,0,0.54)); panel-layout 6/6; jest 453/453, 15/15 suites; lint 0 findings; Steel dark: label 93.4, counts 81.7 and 80.3-81.7"
 
 ## Colour store `COLO`
 

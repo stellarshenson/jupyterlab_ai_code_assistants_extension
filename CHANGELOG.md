@@ -2,6 +2,12 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.15] - 2026-11-04
+
+### Changed
+
+- The session count in each section band is drawn in the meta ink (`--jp-ui-font-color2`), 6px beside the label, so the band states its size without sharing the label's colour
+
 ## [1.3.14] - 2026-11-04
 
 ### Changed

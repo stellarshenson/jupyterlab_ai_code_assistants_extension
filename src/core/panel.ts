@@ -2142,8 +2142,13 @@ export class AssistantSessionsPanel extends Widget {
 
     const label = document.createElement('span');
     label.className = 'jp-AiAssistantsPanel-sectionLabel';
-    label.textContent = `${SECTION_LABELS[key]} (${items.length})`;
+    label.textContent = SECTION_LABELS[key];
     header.appendChild(label);
+
+    const count = document.createElement('span');
+    count.className = 'jp-AiAssistantsPanel-sectionCount';
+    count.textContent = `(${items.length})`;
+    header.appendChild(count);
 
     header.addEventListener('click', () => {
       this._expanded[key] = !this._expanded[key];

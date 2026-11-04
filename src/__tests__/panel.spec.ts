@@ -3027,6 +3027,11 @@ describe('ACC-PANE-35..45 - what a row and a section show', () => {
       p.node.querySelectorAll<HTMLElement>('.jp-AiAssistantsPanel-sectionLabel')
     ).map(el => el.textContent ?? '');
 
+  const sectionCounts = (p: AssistantSessionsPanel): string[] =>
+    Array.from(
+      p.node.querySelectorAll<HTMLElement>('.jp-AiAssistantsPanel-sectionCount')
+    ).map(el => el.textContent ?? '');
+
   it('ACC-PANE-35 - Favorites, Recent and All each get their own scrolling list', () => {
     // Recent earns a heading only above the limit, so the limit is lowered
     // rather than eleven rows built.
@@ -3037,6 +3042,7 @@ describe('ACC-PANE-35..45 - what a row and a section show', () => {
     ]);
 
     const labels = sectionLabels(panel);
+    const counts = sectionCounts(panel);
     expect(labels.some(l => l.startsWith('Favorites'))).toBe(true);
     expect(labels.some(l => l.startsWith('Recent'))).toBe(true);
     expect(labels.some(l => l.startsWith('All'))).toBe(true);
@@ -3044,8 +3050,9 @@ describe('ACC-PANE-35..45 - what a row and a section show', () => {
     expect(
       panel.node.querySelectorAll('.jp-AiAssistantsPanel-list')
     ).toHaveLength(3);
-    // The heading states its own size.
-    expect(labels.find(l => l.startsWith('Favorites'))).toContain('(1)');
+    // The heading states its own size in a count of its own (DEF-PANE-383).
+    expect(labels.find(l => l.startsWith('Favorites'))).toBe('Favorites');
+    expect(counts[labels.indexOf('Favorites')]).toBe('(1)');
   });
 
   it('ACC-PANE-37 - the activity column reads now, m, h and d ago', () => {

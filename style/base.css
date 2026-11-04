@@ -328,9 +328,8 @@
   overflow-y: auto;
   min-height: 0;
 
-  /* Reserve the scrollbar gutter in every section so star and time columns
-     line up across the entire panel, scrollbar or not. */
-  scrollbar-gutter: stable;
+  /* DEF-PANE-384-ROW-HOVER-1: no gutter is reserved, so a row's fill reaches
+     the panel edge; a scrollbar, when the list scrolls, takes its own strip. */
 }
 
 /* Cap for Favourites/Recent lists: at most 10 rows, yielding to 33vh in
@@ -362,9 +361,16 @@
   font-size: var(--jp-ui-font-size1);
 }
 
-.jp-AiAssistantsPanel-row:hover,
-.jp-AiAssistantsPanel-row.jp-mod-active {
-  background: var(--jp-layout-color2);
+/* DEF-PANE-384: the band paints --jp-layout-color2, so a hover one full
+   step up would compete with it; the hover keeps three quarters of the
+   band's fill and the rest of the row's own. The selected row keeps
+   --jp-layout-color3. */
+.jp-AiAssistantsPanel-row:hover {
+  background: color-mix(
+    in srgb,
+    var(--jp-layout-color2) 75%,
+    var(--jp-layout-color1)
+  );
 }
 
 .jp-AiAssistantsPanel-row.jp-mod-active {

@@ -1948,6 +1948,26 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - log: 2026-11-04T13:40:34Z @kj added
   - log: 2026-11-04T13:54:54Z @kj closed: fixed; count painted in the meta ink
   - log: 2026-11-04T13:55:07Z @kj edited evidence "DEF-PANE-383 Galata 1/1 passes on the built bundle; mutation 1 failed (count rgba(0,0,0,0.87) vs meta rgba(0,0,0,0.54)); panel-layout 6/6; jest 453/453, 15/15 suites; lint 0 findings; Steel dark: label 93.4, counts 81.7 and 80.3-81.7" -> "DEF-PANE-383-COUNT-COLOUR Galata 1/1 passes on the built bundle; mutation 1 failed (count rgba(0,0,0,0.87) vs meta rgba(0,0,0,0.54)); panel-layout 6/6; jest 453/453, 15/15 suites; lint 0 findings; Steel dark: label 93.4, counts 81.7 and 80.3-81.7"
+- [x] `DEF-PANE-384-ROW-HOVER` **Row hover takes the band fill** - MINOR; a hovered row paints --jp-layout-color2, the section band's own fill, so the highlight is invisible against a band; the hover takes 75 parts layout-color2 mixed with 25 parts layout-color1, distinct from the band, the row fill and the selected row, from the theme's own tokens
+  - evidence: DEF-PANE-384 Galata 1/1 passes on the built bundle; mutation (band fill restored) 1 failed; panel-layout 7/7; jest 453/453, 15/15 suites; lint 0 warnings; Steel dark: row #303841, hover #3c464f between the row and the band #404b54
+  - related: ACC-PANE-182
+  - repro: Galaxa Steel dark: hover a row in an expanded section; its fill equals the band above it
+  - root-cause: 2026-11-04T15:06:02Z @kj .jp-AiAssistantsPanel-row:hover sets background var(--jp-layout-color2); no theme row-hover token exists
+  - log: 2026-11-04T15:06:02Z @kj added
+  - log: 2026-11-04T15:06:20Z @kj edited text "a hovered row paints --jp-layout-color2, the section band's own fill, so the highlight is invisible against a band and reads as a wash; the row hover needs the next fainter grade, half a step between the panel fill and the band" -> "a hovered row paints --jp-layout-color2, the section band's own fill, so the highlight is invisible against a band and reads as a wash; the row hover takes the standard next layout grade, --jp-layout-color3"
+  - log: 2026-11-04T15:20:58Z @kj edited text "a hovered row paints --jp-layout-color2, the section band's own fill, so the highlight is invisible against a band and reads as a wash; the row hover takes the standard next layout grade, --jp-layout-color3" -> "a hovered row paints --jp-layout-color2, the section band's own fill, so the highlight is invisible against a band; the hover takes 75 parts layout-color2 mixed with 25 parts layout-color1, distinct from the band, the row fill and the selected row, from the theme's own tokens"
+  - log: 2026-11-04T15:36:40Z @kj closed: fixed; hover takes three quarters of the band's fill
+  - log: 2026-11-04T18:53:38Z @kj regressed as DEF-PANE-384-ROW-HOVER-1
+- [x] `DEF-PANE-384-ROW-HOVER-1` **Row hover takes the band fill** - MINOR; a hovered row paints --jp-layout-color2, the section band's own fill, so the highlight is invisible against a band; the hover takes 75 parts layout-color2 mixed with 25 parts layout-color1, distinct from the band, the row fill and the selected row, from the theme's own tokens
+  - evidence: the DEF-PANE-384 Galata test passes with scrollbar-gutter auto and the row's right edge at the panel root's, and fails when stable is restored (Expected auto, Received stable); panel-layout 7/7; Jest 453/453; lint 0 warnings; Steel dark screenshot: hover fill painted x=0 to x=249, the panel's last pixel
+  - log: 2026-11-04T18:53:38Z @kj regression of DEF-PANE-384-ROW-HOVER: the owner reports the hover fill still stops short of the panel edge with no scrollbar showing: scrollbar-gutter stable reserves the strip unconditionally
+  - log: 2026-11-04T18:55:30Z @kj fixed in style/base.css: .jp-AiAssistantsPanel-list no longer sets scrollbar-gutter: stable; the cause was that the stable gutter reserved the strip whether or not the list scrolled, so the fill could not reach the panel edge; no gutter is now reserved and a scrolling list's scrollbar takes its own strip
+  - log: 2026-11-04T19:07:37Z @kj closed: fixed; no gutter is reserved and the fill reaches the panel edge
+- [-] `DEF-PANE-385-COUNT-AA` **Section count below AA on the bands** - MAJOR; the 11px count in --jp-ui-font-color2 measures 4.43:1 JupyterLab Light, 4.23:1 Dark, 4.91:1 Steel light, 2.44:1 Steel dark at rest, and 3.87/3.10/4.07/1.94 on the hovered band; AA needs 4.5:1, and the label ink itself is 3.62:1 on the Steel dark band
+  - repro: open any assistant panel: the (N) beside a band label is dimmer than AA allows at 11px, worst in Galaxa Steel dark
+  - root-cause: 2026-11-04T18:06:23Z @kj the owner's meta-ink ruling keeps the count in --jp-ui-font-color2 while the band fills sit close to it in luminance
+  - log: 2026-11-04T18:06:23Z @kj added
+  - log: 2026-11-04T18:06:26Z @kj rejected: accepted by the owner 2026-11-04 as a recorded trade-off: the meta ink is the ruling, an ink swap cannot reach AA where the Steel dark label ink is 3.62:1, and the band fill belongs to the theme; the measurements are kept above
 
 ## Colour store `COLO`
 

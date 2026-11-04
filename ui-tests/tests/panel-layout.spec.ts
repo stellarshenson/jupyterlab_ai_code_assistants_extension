@@ -307,6 +307,24 @@ test('ACC-PANE-183 - content stands 4px from the panel border on both sides', as
   const searchBox = (await search.boundingBox())!;
   expect(searchBox.x - left).toBeCloseTo(INSET, 0);
   expect(right - (searchBox.x + searchBox.width)).toBeCloseTo(INSET, 0);
+
+  // A shown filter suppresses the section separator: the header keeps the
+  // base --jp-border-color2 line, so the guard in style/base.css must not
+  // paint --jp-layout-color3 here. Probing the token, not the header's line
+  // before the filter: in Galaxa Steel light the two tokens resolve equal.
+  const divider = await panel.evaluate((root: HTMLElement) => {
+    const probe = document.createElement('span');
+    root.appendChild(probe);
+    probe.style.color = 'var(--jp-border-color2)';
+    const border = getComputedStyle(probe).color;
+    probe.remove();
+    const header = root.querySelector<HTMLElement>(
+      '.jp-AiAssistantsPanel-header'
+    )!;
+    return { border, headerBorder: getComputedStyle(header).borderBottomColor };
+  });
+  expect(divider.headerBorder).toBe(divider.border);
+
   await panel.getByTitle('Filter sessions').click();
   await expect(search).toBeHidden();
 
@@ -387,8 +405,104 @@ test('DEF-PANE-383 - the section count takes the meta ink', async ({
   expect(probe.countColour).toBe(probe.meta);
   expect(probe.labelColour).toBe(probe.ink);
   expect(probe.labelColour).not.toBe(probe.countColour);
-  // The 6px margin plus the label's glyph advance.
+  // The label rect already includes its glyph advance, so the gap is the
+  // count's 6px margin-left.
   const gap = probe.countLeft - probe.labelRight;
-  expect(gap).toBeGreaterThanOrEqual(0);
-  expect(gap).toBeLessThanOrEqual(12);
+  expect(gap).toBeCloseTo(6, 0);
+});
+
+test("DEF-PANE-384 - a hovered row takes three quarters of the band's fill", async ({
+  page
+}) => {
+  // Tall enough for the 13 seeded All rows, so the list does not scroll and
+  // the no-scrollbar case the owner reported is the one under test.
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  const row = page.locator(`${ALL} .jp-AiAssistantsPanel-row`).first();
+  await expect(row).toBeVisible({ timeout: 15000 });
+
+  // The theme tokens as the browser resolves them, read off a probe span
+  // rather than the row under test.
+  const tokens = await row.evaluate((el: HTMLElement) => {
+    const probe = document.createElement('span');
+    el.appendChild(probe);
+    const read = (name: string) => {
+      probe.style.color = `var(${name})`;
+      return getComputedStyle(probe).color;
+    };
+    const values = {
+      row: read('--jp-layout-color1'),
+      band: read('--jp-layout-color2'),
+      selected: read('--jp-layout-color3')
+    };
+    probe.remove();
+    return values;
+  });
+
+  // The rule under test is `color-mix(in srgb, var(--jp-layout-color2) 75%,
+  // var(--jp-layout-color1))`: three quarters of the band over the row's own
+  // fill. Compute it here from the probe values, allowing rounding per
+  // channel. Chrome serialises a color-mix result as `color(srgb 0..1 ...)`,
+  // while a plain token reads `rgb(0..255 ...)`, so scale the former.
+  const rgb = (value: string) => {
+    const scale = value.startsWith('color(srgb') ? 255 : 1;
+    return value
+      .match(/\d+(?:\.\d+)?/g)!
+      .slice(0, 3)
+      .map(channel => Number(channel) * scale);
+  };
+  const rowRgb = rgb(tokens.row);
+  const expected = rgb(tokens.band).map((channel, i) =>
+    Math.round(0.75 * channel + 0.25 * rowRgb[i])
+  );
+  const isMix = (value: string) =>
+    rgb(value).every((channel, i) => Math.abs(channel - expected[i]) <= 1);
+
+  await row.hover();
+  // The hover fill comes from a stylesheet rule, so poll until the pointer
+  // state has been applied.
+  await expect
+    .poll(async () =>
+      isMix(
+        await row.evaluate(
+          (el: HTMLElement) => getComputedStyle(el).backgroundColor
+        )
+      )
+    )
+    .toBe(true);
+  const hovered = await row.evaluate(
+    (el: HTMLElement) => getComputedStyle(el).backgroundColor
+  );
+
+  const hoverRgb = rgb(hovered);
+  const differs = (other: number[]) =>
+    hoverRgb.some((channel, i) => Math.abs(channel - other[i]) > 2);
+
+  expect(isMix(hovered)).toBe(true);
+  expect(differs(rgb(tokens.band))).toBe(true);
+  expect(differs(rgb(tokens.selected))).toBe(true);
+
+  // ACC-PANE-241-HOVER-WIDTH: no scrollbar gutter is reserved, so with no
+  // scrollbar showing the fill reaches the panel edge. A list that scrolls
+  // gives up only the scrollbar's own strip.
+  const widths = await row.evaluate((el: HTMLElement) => {
+    const list = el.closest('.jp-AiAssistantsPanel-list') as HTMLElement;
+    const root = el.closest('.jp-AiAssistantsPanel') as HTMLElement;
+    return {
+      row: el.getBoundingClientRect().width,
+      rowRight: el.getBoundingClientRect().right,
+      list: list.clientWidth,
+      listRight: list.getBoundingClientRect().right,
+      rootRight: root.getBoundingClientRect().right,
+      noScrollbar: list.scrollHeight <= list.clientHeight,
+      gutter: getComputedStyle(list).scrollbarGutter
+    };
+  });
+  expect(widths.noScrollbar).toBe(true);
+  expect(widths.gutter).toBe('auto');
+  expect(widths.row).toBeCloseTo(widths.list, 0);
+  expect(Math.abs(widths.listRight - widths.rootRight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(widths.rowRight - widths.rootRight)).toBeLessThanOrEqual(1);
 });

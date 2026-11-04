@@ -2,6 +2,17 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.16] - 2026-11-04
+
+### Changed
+
+- A hovered row takes a fill of its own - three quarters of the section band's colour mixed with the row's own - so the highlight no longer merges with a band; the selected row keeps its brighter fill
+
+### Fixed
+
+- The row highlight spans the panel edge to edge; the list no longer reserves a scrollbar gutter, so the fill reaches the edge unless a scrollbar is showing
+- The count, divider and hover tests assert what they claim: the count's 6px gap exactly, the hover's fill within one step per channel, the fill's reach to the panel edge, and the divider's line suppressed while the filter is open
+
 ## [1.3.15] - 2026-11-04
 
 ### Changed

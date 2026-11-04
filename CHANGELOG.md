@@ -2,6 +2,17 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.13] - 2026-11-04
+
+### Changed
+
+- The assistant panel draws a divider line under every folded section band and between the title band and the first section band, so the two bands no longer read as one in dark themes
+
+### Fixed
+
+- The session filter matches the session name and the row label only; a word found only in the project path no longer keeps every session of that project
+- A panel with no sessions keeps one line under the title band in the light themes; the panel body's divider is drawn only when a section band exists
+
 ## [1.3.8] - 2026-10-31
 
 ### Changed

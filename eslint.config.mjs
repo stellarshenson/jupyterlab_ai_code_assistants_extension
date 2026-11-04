@@ -76,7 +76,30 @@ export default defineConfig([
       ],
       curly: ['error', 'all'],
       eqeqeq: 'error',
-      'prefer-arrow-callback': 'error'
+      'prefer-arrow-callback': 'error',
+      // Activation needs these imports before the application starts, so
+      // deferring them would delay startup.
+      'jupyter/prefer-lazy-imports': [
+        'warn',
+        {
+          ignoreImports: [
+            './core/callback',
+            './core/icons',
+            './core/panel',
+            './providers'
+          ]
+        }
+      ]
+    }
+  },
+  {
+    // Provider labels and titles are build-time data: scripts/generate-schema.mjs
+    // imports the compiled descriptors under plain Node, where no translator
+    // exists, and those strings reach the user through the generated settings
+    // schema.
+    files: ['src/providers/*.ts'],
+    rules: {
+      'jupyter/no-untranslated-string': 'off'
     }
   },
   {

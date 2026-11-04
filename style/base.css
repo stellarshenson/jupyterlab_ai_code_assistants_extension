@@ -204,14 +204,24 @@
   min-height: 0;
 }
 
-/* The top border is the divider above the first band, below the title band or
-   the filter field (DEF-PANE-379): the title band's --jp-border-color2 line
-   equals the band colour in dark themes. It sits on the body, the scroll
-   container, so it stays when the sections scroll. Drawn only when a band
-   exists (DEF-PANE-380), so the empty state keeps the header's own line
-   alone. */
-.jp-AiAssistantsPanel-body:has(> .jp-AiAssistantsPanel-section) {
-  border-top: 1px solid var(--jp-border-color3);
+/* The line under the title band, above the first section (DEF-PANE-382, owner
+   ruling 2026-11-04): both paint --jp-layout-color2, so one fill step of the
+   theme's own --jp-layout-color3 separates them. The filter field and the
+   error strip always sit in the DOM between the header and the body, hidden
+   until shown, so the rule matches only while neither is showing: when either
+   stands between them, its own fills already separate the bands. A band must
+   exist (DEF-PANE-380), so the empty state keeps the header's own line alone.
+   The outer :has cannot contain another :has (CSS forbids nesting), so the
+   hidden-state tests sit in :not(:has(...)) on the panel root; :has inside
+   :not is allowed. */
+.jp-AiAssistantsPanel:has(
+    > .jp-AiAssistantsPanel-body > .jp-AiAssistantsPanel-section
+  ):not(
+    :has(> .jp-AiAssistantsPanel-searchWrap:not([hidden])),
+    :has(> .jp-AiAssistantsPanel-error:not([hidden]))
+  )
+  > .jp-AiAssistantsPanel-header {
+  border-bottom-color: var(--jp-layout-color3);
 }
 
 /* color2, not color3: this is the only content a new user sees, and color3
@@ -231,7 +241,16 @@
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--jp-border-color3);
+}
+
+/* A folded section with a section below it sits band on band - both paint
+   --jp-layout-color2 - so it takes one --jp-layout-color3 line (DEF-PANE-382,
+   owner ruling 2026-11-04). An expanded section ends in rows on the panel
+   fill, and the last section has nothing below: neither takes one. */
+.jp-AiAssistantsPanel-section:not(:has(> .jp-AiAssistantsPanel-list)):has(
+    + .jp-AiAssistantsPanel-section
+  ) {
+  border-bottom: 1px solid var(--jp-layout-color3);
 }
 
 /* Expanded `all` (it has a list) is the unbounded internal scroller: it grows
@@ -240,9 +259,8 @@
    be explicit: the automatic minimum would be the list's full CONTENT height
    (intrinsic sizing ignores overflow) and the section would never shrink,
    forcing the whole body to scroll. Collapsed (header-only) `all` keeps the
-   section's flex 0 0 auto: no growth, so its bottom line stays under its band
-   (DEF-PANE-379), and no shrink, or a crowded body squashes the bare header to
-   a sliver. */
+   section's flex 0 0 auto: no growth, so its band keeps its own height, and
+   no shrink, or a crowded body squashes the bare header to a sliver. */
 .jp-AiAssistantsPanel-section[data-section='all']:has(
     > .jp-AiAssistantsPanel-list
   ) {

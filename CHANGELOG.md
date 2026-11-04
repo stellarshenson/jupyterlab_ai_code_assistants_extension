@@ -2,6 +2,18 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.14] - 2026-11-04
+
+### Changed
+
+- The panel's dividing line separates only two adjacent section bands, one step from the band colour (`--jp-layout-color3`), so it reads as a slight shade difference rather than a dark border
+- Panel text goes through the translation bundle, and the settings dropdowns show labelled choices (Name, Path, Left, Right) instead of bare values
+
+### Fixed
+
+- An expanded section draws no line under its rows, the last section draws none at the panel edge, and the title band draws none while the filter field or an error strip is shown
+- `jlpm run lint:check` reports zero warnings and zero errors, down from 37
+
 ## [1.3.13] - 2026-11-04
 
 ### Changed

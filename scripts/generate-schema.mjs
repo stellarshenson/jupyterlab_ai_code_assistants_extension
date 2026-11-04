@@ -30,7 +30,10 @@ const SHARED = {
     title: 'Presentation mode',
     description:
       "How session rows are labelled, in every assistant's panel. `name` (default) shows the session name the assistant records for the project; the initial name is the project folder name, then the path is walked up to disambiguate when two projects share a folder name. `path` shows the project path relative to the JupyterLab notebook root (absolute if outside it).",
-    enum: ['name', 'path'],
+    oneOf: [
+      { const: 'name', title: 'Name' },
+      { const: 'path', title: 'Path' }
+    ],
     default: 'name'
   },
   recentLimit: {
@@ -54,7 +57,10 @@ const SHARED = {
     title: 'Sidebar position',
     description:
       'Which JupyterLab sidebar to dock the assistant panels to. `right` (default) keeps them clear of the file browser. `left` puts them next to it.',
-    enum: ['left', 'right'],
+    oneOf: [
+      { const: 'left', title: 'Left' },
+      { const: 'right', title: 'Right' }
+    ],
     default: 'right'
   },
   syncFileBrowser: {

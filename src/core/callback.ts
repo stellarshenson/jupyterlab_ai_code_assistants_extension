@@ -74,6 +74,7 @@ class CallbackForm extends Widget {
     this._input = document.createElement('input');
     this._input.type = 'text';
     this._input.className = 'jp-mod-styled';
+    // eslint-disable-next-line jupyter/no-untranslated-string -- the placeholder is the address shape the login prints, not prose
     this._input.placeholder = 'http://127.0.0.1:1455/auth/callback?code=...';
     label.appendChild(this._input);
     this._status = document.createElement('div');

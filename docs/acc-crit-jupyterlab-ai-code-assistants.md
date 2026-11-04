@@ -695,14 +695,16 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - mechanism: 2026-10-28T21:01:09Z @kj The warning state is unknown until the branch list lands, so an accept click arms while the fetch is pending; a landing warning or a restated count disarms
   - log: 2026-10-28T21:01:09Z @kj added
   - log: 2026-10-28T22:27:40Z @kj closed: an activation that has not armed never removes a conversation newer than the one kept, including while the branch list is still being fetched
-- [x] `ACC-PANE-238-DIVIDERS` **Section dividers** - LOW; Each folded section band ends with a 1px --jp-border-color3 line directly under it; a 1px --jp-border-color3 line stands above the first section band, below the title band or the filter field; the title band keeps its --jp-border-color2 line; no gap or margin between sections
+- [x] `ACC-PANE-238-DIVIDERS` **Section dividers** - LOW; A 1px --jp-layout-color3 line separates adjacent section bands: under a folded section with a section below, and under the title band above the first section. Rows of an expanded section, the last section, and the title band with a filter or error strip below carry none.
   - evidence: Galata panel-layout.spec.ts 'DEF-PANE-379 - folded sections end on their band, below a line above the first band' 1 passed at 1.3.9; mutation: no body border-top fails it (rgb 224 for 238), folded All flex 1 0 auto fails it (660 for 22); title band --jp-border-color2 line, filter-field state and touching bands measured in tmp/workflows/panel-dividers/implement.json
   - related: DEF-PANE-379-DIVIDERS - the missing and misplaced dividers this criterion covers
-  - test: Galata: fold every section, assert each section is its band plus 1px and a 1px --jp-border-color3 line ends at the first band's top
+  - test: Galata: fold every section; the last is its band alone and the earlier ones band plus 1px; an expanded section has no bottom line
   - test-tags: E2E
   - log: 2026-11-03T22:14:43Z @kj added
   - log: 2026-11-03T22:15:05Z @kj closed: closed: met at 1.3.9; reason: the evidence names the Galata test, both mutations and the measured states, as the criteria stage requires
   - log: 2026-11-03T22:20:50Z @kj amended text "Each section band ends with a 1px --jp-border-color3 line directly under it, open or folded; a 1px --jp-border-color3 line stands above the first section band, below the title band or the filter field; the title band keeps its --jp-border-color2 line; no gap or margin between sections" -> "Each folded section band ends with a 1px --jp-border-color3 line directly under it; a 1px --jp-border-color3 line stands above the first section band, below the title band or the filter field; the title band keeps its --jp-border-color2 line; no gap or margin between sections"
+  - log: 2026-11-04T12:57:17Z @kj amended text "Each folded section band ends with a 1px --jp-border-color3 line directly under it; a 1px --jp-border-color3 line stands above the first section band, below the title band or the filter field; the title band keeps its --jp-border-color2 line; no gap or margin between sections" -> "A 1px --jp-layout-color3 line separates adjacent section bands: under a folded section with a section below, and under the title band above the first section. Rows of an expanded section, the last section, and the title band with a filter or error strip below carry none."
+  - log: 2026-11-04T13:23:54Z @kj edited test "Galata: fold every section, assert each section is its band plus 1px and a 1px --jp-border-color3 line ends at the first band's top" -> "Galata: fold every section; the last is its band alone and the earlier ones band plus 1px; an expanded section has no bottom line"
 - [x] `ACC-PANE-239-FILTER-NAME` **Filter matches the session name and the row label** - MEDIUM; The panel filter matches the stored session name and the label the row displays; a project path counts only where the row label displays it, in path presentation mode or as a name-mode collision label
   - evidence: Jest panel.spec.ts 'DEF-PANE-376-FILTER-PATH - the filter matches session names, not the project path' passed (filter workspace 0 rows, ledger 1 row), panel.spec.ts 139/139 at 1.3.10; mutation: the s.project_path match put back fails it at panel.spec.ts:3160 (Received length 2 for 0)
   - related: DEF-PANE-376-FILTER-PATH - the path match this criterion removes
@@ -1720,6 +1722,12 @@ Three tiers - pytest for the server core and each provider module, Jest for fron
   - log: 2026-08-27T16:49:34Z @kj added
   - log: 2026-08-27T19:43:11Z @kj closed: verified in v1.1.8
   - log: 2026-09-17T17:26:05Z @kj edited importance
+- [x] `ACC-TEST-240-LINT-CLEAN` **Lint check is clean** - MEDIUM; `jlpm run lint:check` exits 0 with 0 warnings and 0 errors; the 37 warnings at 1.3.13 are fixed at the site, exempting only the callback URL placeholder and the build-time provider descriptors
+  - evidence: jlpm run lint:check exits 0 with 0 warnings and 0 errors; HEAD reproduces the 37 baseline warnings (2 no-schema-enum, 31 no-untranslated-string, 4 prefer-lazy-imports); jest 453/453; schema regeneration byte-identical across runs; verifier found 0 issues
+  - test: run `jlpm run lint:check`; expect exit 0, 0 warnings, 0 errors
+  - test-tags: MANUAL
+  - log: 2026-11-04T12:47:24Z @kj added
+  - log: 2026-11-04T12:56:56Z @kj closed: fixed in the lint-warnings workflow
 
 ## API `API`
 

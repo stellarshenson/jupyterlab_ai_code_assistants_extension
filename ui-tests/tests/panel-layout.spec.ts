@@ -128,9 +128,9 @@ test('DEF-PANE-379 - folded sections end on their band, below a line above the f
 
   const layout = await panel.evaluate((root: HTMLElement) => {
     const probe = document.createElement('span');
-    probe.style.color = 'var(--jp-border-color3)';
+    probe.style.color = 'var(--jp-layout-color3)';
     root.appendChild(probe);
-    const border3 = getComputedStyle(probe).color;
+    const layoutColor3 = getComputedStyle(probe).color;
     probe.remove();
 
     // Every full-width line any element of the panel draws, from its borders.
@@ -173,7 +173,7 @@ test('DEF-PANE-379 - folded sections end on their band, below a line above the f
       .querySelector<HTMLElement>('.jp-AiAssistantsPanel-sectionHeader')!
       .getBoundingClientRect().top;
     return {
-      border3,
+      layoutColor3,
       sections,
       above: lines
         .filter(l => Math.round(l.y + l.width) === Math.round(firstBand))
@@ -181,19 +181,62 @@ test('DEF-PANE-379 - folded sections end on their band, below a line above the f
     };
   });
 
-  // A folded section is its band plus its 1px bottom line, so the line sits
-  // directly under the band - a folded All that grows puts it at the panel
-  // bottom.
+  // A folded section with a section below it is its band plus its 1px bottom
+  // line; the last has nothing below, so it is its band alone (DEF-PANE-382).
   expect(layout.sections.length).toBeGreaterThan(0);
-  for (const section of layout.sections) {
+  layout.sections.forEach((section, index) => {
     expect(section.height, `section ${section.key}`).toBeCloseTo(
-      section.headerHeight + 1,
+      index === layout.sections.length - 1
+        ? section.headerHeight
+        : section.headerHeight + 1,
       1
     );
-  }
+  });
   // The title band's own --jp-border-color2 rule equals the band colour in
-  // dark themes, so a --jp-border-color3 line must stand above the first band.
-  expect(layout.above).toContain(`1px ${layout.border3}`);
+  // dark themes, so a --jp-layout-color3 line must stand above the first band.
+  expect(layout.above).toContain(`1px ${layout.layoutColor3}`);
+});
+
+test('DEF-PANE-382 - only two adjacent bands take a dividing line', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  // Favorites exists only once a row is starred, and it renders above All.
+  for (const name of STARRED) {
+    await toggleFavourite(page, name, 'Add to Favorites');
+  }
+  try {
+    const panel = page.locator(PANEL);
+    const favourites = panel.locator(
+      '.jp-AiAssistantsPanel-section[data-section="favourites"]'
+    );
+    await expect(favourites).toBeVisible({ timeout: 15000 });
+
+    // Expanded, the section ends in rows on the panel fill: no line above
+    // them.
+    await expect(favourites).toHaveCSS('border-bottom-width', '0px');
+
+    // Folded, its band sits directly above the next section's band - one fill,
+    // so it takes the one-fill-step line.
+    await favourites.locator('.jp-AiAssistantsPanel-sectionHeader').click();
+    await expect(favourites).toHaveCSS('border-bottom-width', '1px');
+    const layoutColor3 = await panel.evaluate((root: HTMLElement) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--jp-layout-color3)';
+      root.appendChild(probe);
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    });
+    await expect(favourites).toHaveCSS('border-bottom-color', layoutColor3);
+  } finally {
+    // One server serves the whole run; later specs expect no favourites.
+    for (const name of STARRED) {
+      await toggleFavourite(page, name, 'Remove from Favorites');
+    }
+  }
 });
 
 test('DEF-PANE-380 - an empty panel draws one line under the header', async ({

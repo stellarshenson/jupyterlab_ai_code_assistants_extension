@@ -385,8 +385,11 @@ export class AssistantSessionsPanel extends Widget {
     const nameNewButton = (): void => {
       newBtn.disabled = !this._rootDir;
       newBtn.title = this._rootDir
-        ? `New session in current folder${this._variantSuffix()}`
-        : 'Waiting for the server root';
+        ? this._trans.__(
+            'New session in current folder%1',
+            this._variantSuffix()
+          )
+        : this._trans.__('Waiting for the server root');
     };
     // Focus as well as hover, or the icon-only button's accessible name is the
     // generic one for everybody not using a mouse.
@@ -448,7 +451,7 @@ export class AssistantSessionsPanel extends Widget {
     const search = document.createElement('input');
     search.type = 'search';
     search.className = 'jp-AiAssistantsPanel-search';
-    search.placeholder = 'Filter sessions...';
+    search.placeholder = this._trans.__('Filter sessions...');
     search.setAttribute('aria-label', this._trans.__('Filter sessions'));
     search.spellcheck = false;
     search.addEventListener('input', () => {
@@ -1147,7 +1150,7 @@ export class AssistantSessionsPanel extends Widget {
         // to do" into `remove_failed` under a dialog that had just promised
         // to remove N.
         bar.remove();
-        message.textContent = 'Nothing left to clean up.';
+        message.textContent = this._trans.__('Nothing left to clean up.');
         dialog.node.setAttribute(
           'aria-label',
           `${title}. ${message.textContent ?? ''}`
@@ -1714,8 +1717,11 @@ export class AssistantSessionsPanel extends Widget {
    */
   private async _renameSession(session: ISession): Promise<void> {
     const named = await InputDialog.getText({
-      title: 'Rename Session',
-      label: `Name for this ${this._descriptor.label} conversation`,
+      title: this._trans.__('Rename Session'),
+      label: this._trans.__(
+        'Name for this %1 conversation',
+        this._descriptor.label
+      ),
       text: session.name_source === 'session' ? session.name : '',
       placeholder: this._lookupName(session),
       renderer: dialogRenderer
@@ -2035,13 +2041,18 @@ export class AssistantSessionsPanel extends Widget {
     if (sessions.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'jp-AiAssistantsPanel-empty';
-      empty.textContent = `No ${this._descriptor.label} sessions found.`;
+      empty.textContent = this._trans.__(
+        'No %1 sessions found.',
+        this._descriptor.label
+      );
       this._bodyEl.appendChild(empty);
       // The first-run state has to name the next step - the header's + button
       // is the only way out of it.
       const hint = document.createElement('div');
       hint.className = 'jp-AiAssistantsPanel-empty';
-      hint.textContent = 'Use + to start a session in the current folder.';
+      hint.textContent = this._trans.__(
+        'Use + to start a session in the current folder.'
+      );
       this._bodyEl.appendChild(hint);
       return;
     }
@@ -2150,7 +2161,7 @@ export class AssistantSessionsPanel extends Widget {
         // Only a filter can empty a section: the panel returns early when
         // there are no sessions at all, an empty filter matches every row,
         // and Recent's limit is clamped to at least one.
-        empty.textContent = 'No matches.';
+        empty.textContent = this._trans.__('No matches.');
         list.appendChild(empty);
       } else {
         // Roving tabindex: the section holds ONE tab stop, not one per row.
@@ -2234,7 +2245,7 @@ export class AssistantSessionsPanel extends Widget {
     if (this._descriptor.hasBgAgents && session.bg_id) {
       const bg = document.createElement('span');
       bg.className = 'jp-AiAssistantsPanel-bgBadge';
-      bg.textContent = 'bg';
+      bg.textContent = this._trans.__('bg');
       name.appendChild(bg);
     }
     row.appendChild(name);
@@ -2594,7 +2605,9 @@ export class AssistantSessionsPanel extends Widget {
 
     this._commands.addCommand(this._cmd('toggle-favourite'), {
       label: () =>
-        active()?.favourite ? 'Remove from Favorites' : 'Add to Favorites',
+        active()?.favourite
+          ? this._trans.__('Remove from Favorites')
+          : this._trans.__('Add to Favorites'),
       icon: starFilledIcon,
       execute: () => {
         const s = active();
@@ -2842,10 +2855,10 @@ export class AssistantSessionsPanel extends Widget {
       // entries that delete history (DEF-35).
       label: () =>
         this._visibleVariantCount() === 0
-          ? `Branch Session${this._variantSuffix()}`
+          ? this._trans.__('Branch Session%1', this._variantSuffix())
           : this._variantSuffix()
-            ? `Default${this._variantSuffix()}`
-            : 'Normal',
+            ? this._trans.__('Default%1', this._variantSuffix())
+            : this._trans.__('Normal'),
       // The suffix names the mode in words, but the icon slot is what marks
       // danger everywhere else in this menu - spending it on a branch glyph
       // left `Branch Session (Skip Permissions)` looking exactly as safe as
@@ -3233,8 +3246,8 @@ export class AssistantSessionsPanel extends Widget {
     }
     const bg = document.createElement('span');
     bg.className = 'jp-AiAssistantsPanel-bgBadge';
-    bg.textContent = 'bg';
-    bg.title = `Background agent: ${b.bg_id}`;
+    bg.textContent = this._trans.__('bg');
+    bg.title = this._trans.__('Background agent: %1', b.bg_id);
     return bg;
   }
 

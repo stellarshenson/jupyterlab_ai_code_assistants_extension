@@ -125,7 +125,7 @@ export function showManageSessionsPopup(
 
   const search = document.createElement('input');
   search.type = 'search';
-  search.placeholder = 'Filter sessions...';
+  search.placeholder = trans.__('Filter sessions...');
   search.setAttribute('aria-label', trans.__('Filter sessions'));
   search.className = 'jp-AiAssistantsPanel-branchSearch';
   body.appendChild(search);
@@ -162,8 +162,10 @@ export function showManageSessionsPopup(
   deleteBtn.type = 'button';
   deleteBtn.className = 'jp-AiAssistantsPanel-branchDelete';
   deleteBtn.title = options.deleteToTrash
-    ? 'Deleted conversations go to the trash; a refused move deletes permanently.'
-    : 'Deleted conversations are removed permanently';
+    ? trans.__(
+        'Deleted conversations go to the trash; a refused move deletes permanently.'
+      )
+    : trans.__('Deleted conversations are removed permanently');
   footer.appendChild(deleteBtn);
   // Plain visual counter (selection, or the last action), beside the button
   // whose count and result it reports. The screen-reader announcement lives in
@@ -211,10 +213,11 @@ export function showManageSessionsPopup(
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'jp-AiAssistantsPanel-branchOpen';
-    btn.textContent = options.mode === 'switch' ? 'Switch' : 'Open';
+    btn.textContent =
+      options.mode === 'switch' ? trans.__('Switch') : trans.__('Open');
     btn.title =
       options.mode === 'switch'
-        ? "Make this the project's current conversation"
+        ? trans.__("Make this the project's current conversation")
         : options.openTitle();
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -243,10 +246,10 @@ export function showManageSessionsPopup(
   const updateControls = (): void => {
     deleteBtn.disabled = deleting || selected.size === 0;
     deleteBtn.textContent = deleting
-      ? 'Deleting...'
+      ? trans.__('Deleting...')
       : armed
-        ? `Confirm delete ${selected.size}`
-        : `Delete (${selected.size})`;
+        ? trans.__('Confirm delete %1', selected.size)
+        : trans.__('Delete (%1)', selected.size);
     deleteBtn.classList.toggle('jp-mod-armed', armed && !deleting);
     selCount.textContent = selected.size ? `${selected.size} selected` : '';
     selCount.classList.remove('jp-mod-deleted');
@@ -290,7 +293,7 @@ export function showManageSessionsPopup(
     currentRow.appendChild(currentLabel);
     const badge = document.createElement('span');
     badge.className = 'jp-AiAssistantsPanel-branchCurrentBadge';
-    badge.textContent = 'current';
+    badge.textContent = trans.__('current');
     currentRow.appendChild(badge);
     // Switch mode has nothing to switch to on the row that is already current;
     // open mode can still launch it in a terminal.
@@ -305,8 +308,8 @@ export function showManageSessionsPopup(
       const empty = document.createElement('div');
       empty.className = 'jp-AiAssistantsPanel-emptySection';
       empty.textContent = items.length
-        ? 'No matching sessions.'
-        : 'No other conversations.';
+        ? trans.__('No matching sessions.')
+        : trans.__('No other conversations.');
       list.appendChild(empty);
       return;
     }

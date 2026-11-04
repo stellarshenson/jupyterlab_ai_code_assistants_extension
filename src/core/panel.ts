@@ -643,9 +643,7 @@ export class AssistantSessionsPanel extends Widget {
       return true;
     }
     return (
-      this._fuzzyMatch(s.name, q) ||
-      this._fuzzyMatch(s.project_path, q) ||
-      this._fuzzyMatch(this._lookupName(s), q)
+      this._fuzzyMatch(s.name, q) || this._fuzzyMatch(this._lookupName(s), q)
     );
   }
 

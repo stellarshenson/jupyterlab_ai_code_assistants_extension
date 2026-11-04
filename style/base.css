@@ -192,16 +192,26 @@
   font-size: var(--jp-ui-font-size0);
 }
 
-/* The body is the safety valve of the section layout: in normal windows the
-   `all` section absorbs all slack via flex and the body never scrolls; only
-   when the window is so short that the sections' minimum sizes cannot fit does
-   the body itself scroll, so no section is ever clipped. */
+/* The body is the safety valve of the section layout: in normal windows an
+   expanded `all` section absorbs all slack via flex and the body never
+   scrolls; only when the window is so short that the sections' minimum sizes
+   cannot fit does the body itself scroll, so no section is ever clipped. */
 .jp-AiAssistantsPanel-body {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden auto;
   min-height: 0;
+}
+
+/* The top border is the divider above the first band, below the title band or
+   the filter field (DEF-PANE-379): the title band's --jp-border-color2 line
+   equals the band colour in dark themes. It sits on the body, the scroll
+   container, so it stays when the sections scroll. Drawn only when a band
+   exists (DEF-PANE-380), so the empty state keeps the header's own line
+   alone. */
+.jp-AiAssistantsPanel-body:has(> .jp-AiAssistantsPanel-section) {
+  border-top: 1px solid var(--jp-border-color3);
 }
 
 /* color2, not color3: this is the only content a new user sees, and color3
@@ -224,22 +234,19 @@
   border-bottom: 1px solid var(--jp-border-color3);
 }
 
-/* `all` is the unbounded internal scroller: it grows to fill the remaining
-   body. Collapsed (header-only) it must not shrink - flex-shrink 0 here - or a
-   crowded body squashes the bare header to a sliver. */
-.jp-AiAssistantsPanel-section[data-section='all'] {
-  flex: 1 0 auto;
-}
-
-/* Expanded `all` (it has a list) shrinks when space is tight, down to a header
+/* Expanded `all` (it has a list) is the unbounded internal scroller: it grows
+   to fill the remaining body, and shrinks when space is tight, down to a header
    plus 3 rows - past that the body scrolls instead of clipping. min-height must
    be explicit: the automatic minimum would be the list's full CONTENT height
    (intrinsic sizing ignores overflow) and the section would never shrink,
-   forcing the whole body to scroll. */
+   forcing the whole body to scroll. Collapsed (header-only) `all` keeps the
+   section's flex 0 0 auto: no growth, so its bottom line stays under its band
+   (DEF-PANE-379), and no shrink, or a crowded body squashes the bare header to
+   a sliver. */
 .jp-AiAssistantsPanel-section[data-section='all']:has(
     > .jp-AiAssistantsPanel-list
   ) {
-  flex-shrink: 1;
+  flex: 1 1 auto;
   min-height: calc(24px + 3 * var(--aica-row-height));
 }
 

@@ -3139,6 +3139,36 @@ describe('ACC-PANE-35..45 - what a row and a section show', () => {
     expect(rowEls(panel)).toHaveLength(2);
   });
 
+  it('DEF-PANE-376-FILTER-PATH - the filter matches session names, not the project path', () => {
+    const rows = [
+      session({
+        name: 'ledger-tools',
+        name_source: 'session',
+        project_path: '/home/user/workspace/alpha'
+      }),
+      session({
+        name: 'photo-pipeline',
+        name_source: 'session',
+        project_path: '/home/user/workspace/bravo'
+      })
+    ];
+    render(panel, rows);
+    expect(rowEls(panel)).toHaveLength(2);
+
+    (panel as any)._filter = 'workspace';
+    (panel as any)._render();
+    expect(rowEls(panel)).toHaveLength(0);
+
+    (panel as any)._filter = 'ledger';
+    (panel as any)._render();
+    expect(
+      rowEls(panel).map(
+        row =>
+          row.querySelector('.jp-AiAssistantsPanel-nameText')?.textContent ?? ''
+      )
+    ).toEqual(['ledger-tools']);
+  });
+
   it('ACC-PANE-41 - presentation mode labels by session name or by path under the root', () => {
     const row = session({ name: 'ledger-tools' });
     row.project_path = '/home/user/work/ledger-tools';

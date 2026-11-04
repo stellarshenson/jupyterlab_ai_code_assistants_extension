@@ -107,6 +107,122 @@ test('ACC-PANE-182 - favourite stars keep one column beside the time', async ({
   }
 });
 
+test('DEF-PANE-379 - folded sections end on their band, below a line above the first band', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'claude');
+
+  const panel = page.locator(PANEL);
+  await expect(
+    panel.locator('.jp-AiAssistantsPanel-section').first()
+  ).toBeVisible({ timeout: 15000 });
+  // The folded state lives in this page's own localStorage.
+  const open = panel.locator(
+    '.jp-AiAssistantsPanel-sectionHeader[aria-expanded="true"]'
+  );
+  for (let i = await open.count(); i > 0; i--) {
+    await open.first().click();
+  }
+  await expect(open).toHaveCount(0);
+
+  const layout = await panel.evaluate((root: HTMLElement) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--jp-border-color3)';
+    root.appendChild(probe);
+    const border3 = getComputedStyle(probe).color;
+    probe.remove();
+
+    // Every full-width line any element of the panel draws, from its borders.
+    const width = root.getBoundingClientRect().width;
+    const lines: { y: number; width: number; colour: string }[] = [];
+    for (const el of [root, ...root.querySelectorAll<HTMLElement>('*')]) {
+      const r = el.getBoundingClientRect();
+      if (Math.abs(r.width - width) > 1) {
+        continue;
+      }
+      const s = getComputedStyle(el);
+      const top = parseFloat(s.borderTopWidth);
+      if (s.borderTopStyle !== 'none' && top > 0) {
+        lines.push({ y: r.top, width: top, colour: s.borderTopColor });
+      }
+      const bottom = parseFloat(s.borderBottomWidth);
+      if (s.borderBottomStyle !== 'none' && bottom > 0) {
+        lines.push({
+          y: r.bottom - bottom,
+          width: bottom,
+          colour: s.borderBottomColor
+        });
+      }
+    }
+
+    const sections = [
+      ...root.querySelectorAll<HTMLElement>('.jp-AiAssistantsPanel-section')
+    ].map(section => {
+      const box = section.getBoundingClientRect();
+      const header = section
+        .querySelector<HTMLElement>('.jp-AiAssistantsPanel-sectionHeader')!
+        .getBoundingClientRect();
+      return {
+        key: section.dataset.section,
+        height: box.height,
+        headerHeight: header.height
+      };
+    });
+    const firstBand = root
+      .querySelector<HTMLElement>('.jp-AiAssistantsPanel-sectionHeader')!
+      .getBoundingClientRect().top;
+    return {
+      border3,
+      sections,
+      above: lines
+        .filter(l => Math.round(l.y + l.width) === Math.round(firstBand))
+        .map(l => `${l.width}px ${l.colour}`)
+    };
+  });
+
+  // A folded section is its band plus its 1px bottom line, so the line sits
+  // directly under the band - a folded All that grows puts it at the panel
+  // bottom.
+  expect(layout.sections.length).toBeGreaterThan(0);
+  for (const section of layout.sections) {
+    expect(section.height, `section ${section.key}`).toBeCloseTo(
+      section.headerHeight + 1,
+      1
+    );
+  }
+  // The title band's own --jp-border-color2 rule equals the band colour in
+  // dark themes, so a --jp-border-color3 line must stand above the first band.
+  expect(layout.above).toContain(`1px ${layout.border3}`);
+});
+
+test('DEF-PANE-380 - an empty panel draws one line under the header', async ({
+  page
+}) => {
+  await page.goto();
+  await openPanelTab(page, 'kimi');
+  const panel = page.locator('#' + panelId('kimi'));
+  await expect(
+    panel.locator('.jp-AiAssistantsPanel-empty').first()
+  ).toBeVisible({ timeout: 15000 });
+  const probe = await panel.evaluate((root: HTMLElement) => {
+    const body = root.querySelector<HTMLElement>('.jp-AiAssistantsPanel-body')!;
+    const header = root.querySelector<HTMLElement>(
+      '.jp-AiAssistantsPanel-header'
+    )!;
+    const b = getComputedStyle(body);
+    return {
+      bodyTopWidth: b.borderTopWidth,
+      headerBottomWidth: getComputedStyle(header).borderBottomWidth,
+      bodyTop: body.getBoundingClientRect().top,
+      headerBottom: header.getBoundingClientRect().bottom
+    };
+  });
+  expect(probe.bodyTopWidth).toBe('0px');
+  expect(probe.headerBottomWidth).toBe('1px');
+  expect(probe.bodyTop).toBeCloseTo(probe.headerBottom, 1);
+});
+
 test('ACC-PANE-183 - content stands 4px from the panel border on both sides', async ({
   page
 }) => {

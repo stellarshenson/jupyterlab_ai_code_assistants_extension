@@ -1,8 +1,14 @@
 import { expect, test } from '@jupyterlab/galata';
 
-import { openPanelTab, panelId, waitForApplication } from './shared';
+import {
+  openPanelTab,
+  panelId,
+  shutdownTerminals,
+  waitForApplication
+} from './shared';
 
 test.use({ autoGoto: false, waitForApplication });
+test.beforeEach(({ page }) => shutdownTerminals(page));
 
 /**
  * The seeded "branchy" project is a real directory under the served root with

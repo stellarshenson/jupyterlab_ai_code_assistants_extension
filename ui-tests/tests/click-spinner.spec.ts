@@ -3,11 +3,13 @@ import { expect, test } from '@jupyterlab/galata';
 import {
   openPanelTab,
   panelId,
+  shutdownTerminals,
   terminalCount,
   waitForApplication
 } from './shared';
 
 test.use({ autoGoto: false, waitForApplication });
+test.beforeEach(({ page }) => shutdownTerminals(page));
 
 /**
  * The click's own feedback (DEF-PANE-318, DEF-PANE-324,

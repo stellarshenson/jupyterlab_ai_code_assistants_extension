@@ -158,3 +158,16 @@ export async function terminalCount(page: any): Promise<number> {
   ).json()) as unknown[];
   return running.length;
 }
+
+/** Shut down every terminal the server holds. The suite shares one server and
+ * its seeded conversations, and a launch answers a terminal already on the
+ * conversation (DEF-SERV-388-CLOSED-TAB), so a spec that counts the terminals
+ * a click starts begins each test with none. */
+export async function shutdownTerminals(page: any): Promise<void> {
+  const running = (await (
+    await page.request.get('/api/terminals')
+  ).json()) as Array<{ name: string }>;
+  for (const { name } of running) {
+    await page.request.delete(`/api/terminals/${name}`);
+  }
+}

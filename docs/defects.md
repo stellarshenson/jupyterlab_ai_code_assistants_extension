@@ -252,6 +252,7 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - root-cause: 2026-11-13T18:16:00Z @kj LaunchHandler.post always called terminal_manager.create; only the browser looked for a running terminal, and it enumerates tab widgets, not the server's terminals
   - log: 2026-11-13T18:16:00Z @kj added
   - log: 2026-11-13T18:25:47Z @kj closed
+  - log: 2026-11-13T19:01:22Z @kj CI Build red at adeed07: 9 Galata tests counted a new terminal while an earlier test left one on the same conversation; 4 specs now shut down terminals before each test; the two-branches test waits for the submenu; Galata 109 green against the 1.3.18 wheel
 
 ## Providers `PROV`
 

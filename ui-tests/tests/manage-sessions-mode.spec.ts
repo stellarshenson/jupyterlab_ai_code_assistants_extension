@@ -3,11 +3,13 @@ import { expect, test } from '@jupyterlab/galata';
 import {
   openPanelTab,
   panelId,
+  shutdownTerminals,
   terminalCount,
   waitForApplication
 } from './shared';
 
 test.use({ autoGoto: false, waitForApplication });
+test.beforeEach(({ page }) => shutdownTerminals(page));
 
 /**
  * DEF-PANE-326: the Manage Sessions popup's row action follows the submenu

@@ -5,6 +5,7 @@ import { expect, test } from '@jupyterlab/galata';
 import {
   openPanelTab,
   panelId,
+  shutdownTerminals,
   STATUS_URL,
   waitForApplication
 } from './shared';
@@ -34,6 +35,7 @@ import {
  * is covered by the unit tiers.
  */
 test.use({ autoGoto: false, waitForApplication });
+test.beforeEach(({ page }) => shutdownTerminals(page));
 
 const PANEL = `#${panelId('claude')}`;
 const NEW_BUTTON = 'button[title="New session in current folder"]';
@@ -321,6 +323,9 @@ test('two different branches open as two independent terminals', async ({
   await menu
     .locator('.lm-Menu-itemLabel', { hasText: 'Open Branched Conversation' })
     .hover();
+  // The submenu opens after the hover delay. Before it does, the last menu is
+  // the context menu, whose first two entries resume the same conversation.
+  await expect(page.locator('.lm-Menu')).toHaveCount(2);
   let submenu = page.locator('.lm-Menu').last();
   let entries = submenu.locator('.lm-Menu-item[data-type="command"]');
   await expect(entries.first()).toBeVisible({ timeout: 10000 });
@@ -334,6 +339,7 @@ test('two different branches open as two independent terminals', async ({
   await menu
     .locator('.lm-Menu-itemLabel', { hasText: 'Open Branched Conversation' })
     .hover();
+  await expect(page.locator('.lm-Menu')).toHaveCount(2);
   submenu = page.locator('.lm-Menu').last();
   entries = submenu.locator('.lm-Menu-item[data-type="command"]');
   await expect(entries.nth(1)).toBeVisible({ timeout: 10000 });

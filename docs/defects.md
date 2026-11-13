@@ -245,6 +245,13 @@ Session core shared by every provider - pins, deletion, colour bookkeeping, term
   - root-cause: 2026-10-30T14:00:29Z @kj routes.py SETTINGS_PLUGIN_ID left on the old name by b05404a
   - log: 2026-10-30T14:00:29Z @kj added
   - log: 2026-10-30T14:53:42Z @kj closed
+- [x] `DEF-SERV-388-CLOSED-TAB` **Resume starts a second process when the tab was closed** - MEDIUM; a terminal whose tab was closed keeps its assistant process; the browser reuse ladder sees only terminals with a tab, so the next row click launches a second process on the same conversation (ACC-LNCH-152 not kept); `core/routes.py` LaunchHandler
+  - evidence: launch route answers a held terminal on the conversation and project, else creates one; pytest tests/test_routes.py::test_a_resume_answers_the_terminal_already_on_the_conversation (2 cases) green, build_test 1.3.18: Jest 454, pytest 538, Galata 109
+  - repro: open a session row, close the terminal tab, click the row again; GET /api/terminals lists two terminals on the conversation
+  - test-tags: UNIT
+  - root-cause: 2026-11-13T18:16:00Z @kj LaunchHandler.post always called terminal_manager.create; only the browser looked for a running terminal, and it enumerates tab widgets, not the server's terminals
+  - log: 2026-11-13T18:16:00Z @kj added
+  - log: 2026-11-13T18:25:47Z @kj closed
 
 ## Providers `PROV`
 

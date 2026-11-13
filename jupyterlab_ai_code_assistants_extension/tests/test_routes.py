@@ -947,6 +947,41 @@ async def test_resuming_a_conversation_leaves_the_pin_alone(
     assert state.read_pin("kimi", encoded) == pinned
 
 
+@pytest.mark.parametrize("inside", [True, False])
+async def test_a_resume_answers_the_terminal_already_on_the_conversation(
+    jp_fetch, jp_serverapp, tmp_path, present, monkeypatch, inside
+):
+    """A terminal whose tab was closed keeps its process and the browser cannot
+    see it: the launch answers that terminal and starts no second process on
+    the conversation (ACC-LNCH-152). The same conversation running outside the
+    project is not this project's terminal (DEF-PANE-319), so a launch follows.
+    """
+    session = "session_11111111-2222-3333-4444-555555555555"
+    manager = _FakeTerminalManager()
+    manager.terminals["term-held"] = _FakePty(pid=UNUSED_PID)
+    monkeypatch.setitem(jp_serverapp.web_app.settings, "terminal_manager", manager)
+    monkeypatch.setattr(
+        routes, "_tree_assistant", lambda pid: (registry.get("kimi"), session)
+    )
+    cwd = tmp_path / "sub" if inside else tmp_path.parent
+    monkeypatch.setattr(routes, "_terminal_cwds", lambda pid: [os.path.realpath(cwd)])
+    response = await jp_fetch(
+        URL,
+        "providers",
+        "kimi",
+        "launch",
+        method="POST",
+        body=json.dumps({"project_path": str(tmp_path), "session_id": session}),
+    )
+    name = json.loads(response.body)["terminal_name"]
+    if inside:
+        assert name == "term-held"
+        assert manager.created == []
+    else:
+        assert name == "term-1"
+        assert len(manager.created) == 1
+
+
 async def test_the_argv_route_answers_the_store_argv_and_clears_the_pin(
     jp_fetch, tmp_path, present
 ):

@@ -193,6 +193,33 @@ def _tree_assistant(root_pid: int) -> tuple[registry.Provider | None, str | None
     return None, None
 
 
+def _terminal_on_session(
+    provider: registry.Provider,
+    session_id: str,
+    project_path: str,
+    terminals: list[tuple[str, int]],
+) -> str | None:
+    """The name of a held terminal that runs this provider's conversation
+    ``session_id`` in ``project_path`` or a folder under it, else None.
+
+    Executor-side: walks ``/proc`` per terminal. The browser's reuse ladder
+    sees only terminals that have a tab; a terminal whose tab was closed keeps
+    its process, and only the server can find it again (ACC-LNCH-152). The
+    folder rule is the browser's (DEF-PANE-319).
+    """
+    root = os.path.realpath(project_path).rstrip(os.sep)
+    for name, pid in terminals:
+        found, running_id = _tree_assistant(pid)
+        if found is None or found.id != provider.id or running_id != session_id:
+            continue
+        if any(
+            cwd == root or cwd.startswith(root + os.sep)
+            for cwd in _terminal_cwds(pid)
+        ):
+            return name
+    return None
+
+
 def _proc_pids() -> list[int]:
     """Every pid in ``/proc``; empty off Linux."""
     if sys.platform != "linux":
@@ -1440,6 +1467,27 @@ class LaunchHandler(_LaunchBase):
             self.set_status(503)
             self.finish(json.dumps({"error": "terminal_service_unavailable"}))
             return
+
+        if request.session_id:
+            # A terminal already on this conversation is answered instead of a
+            # second process on it. The registry is read on the loop, as the
+            # probe route reads it; the /proc walk runs in the executor.
+            held = [
+                (name, terminal.ptyproc.pid)
+                for name, terminal in terminal_manager.terminals.items()
+                if hasattr(getattr(terminal, "ptyproc", None), "pid")
+            ]
+            running = await asyncio.get_running_loop().run_in_executor(
+                None,
+                _terminal_on_session,
+                provider,
+                request.session_id,
+                request.project_path,
+                held,
+            )
+            if running is not None:
+                self.finish(json.dumps({"terminal_name": running}))
+                return
 
         model = terminal_manager.create(
             shell_command=_wrap_with_init(request.argv), cwd=request.project_path

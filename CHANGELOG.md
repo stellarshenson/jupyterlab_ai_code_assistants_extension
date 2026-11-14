@@ -2,6 +2,16 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.19] - 2026-11-14
+
+### Changed
+
+- Start the terminal-counting Galata specs with no terminal on the server
+
+### Fixed
+
+- Answer the terminal already on a conversation instead of starting a second process
+
 ## [1.3.17] - 2026-11-04
 
 ### Fixed

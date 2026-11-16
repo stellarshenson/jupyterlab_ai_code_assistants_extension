@@ -2,6 +2,21 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.33] - 2026-11-16
+
+### Added
+
+- Google Antigravity panel for the `agy` CLI with Antigravity's own mark: lists conversations from agy's summaries database, resumes by exact id, renames through agy's annotations, branches by copying the conversation under a new id, and offers skip-permissions as a launch mode
+- GitHub Copilot CLI panel with the Copilot mark: lists sessions copilot itself lists (named, or with a message), resumes and starts by `--session-id`, renames through `workspace.yaml`, branches by copying the session folder, and offers YOLO as a launch mode
+- `agy_title` command for agy's own `title` setting: the terminal tab shows `✳ <name>` when agy is idle and alternates `◐` and `◑` while it works
+- A Copilot started with `--resume`, `--continue` or switched inside its TUI is marked running from its `inuse.<pid>.lock`, and a click on its row reuses that terminal
+
+### Changed
+
+- Settings page text shortened: every setting description fits in one short line, and the generator note left the section description
+- Launcher tiles and the command line cover all seven assistants; moving a session works for every assistant except Copilot and Antigravity
+- Test fakes for agy and copilot write the store states measured on agy 1.5.9 and copilot 1.0.112
+
 ## [1.3.19] - 2026-11-14
 
 ### Changed

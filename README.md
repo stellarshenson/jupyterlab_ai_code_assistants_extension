@@ -8,7 +8,7 @@
 [![Brought To You By KOLOMOLO](https://img.shields.io/badge/Brought%20To%20You%20By-KOLOMOLO-00ffff?style=flat)](https://kolomolo.com)
 [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-blue?style=flat)](https://www.paypal.com/donate/?hosted_button_id=B4KPBJDLLXTSA)
 
-A full launcher and manager for every AI code assistant in JupyterLab - Claude Code, Codex, Kimi, Gemini and DeepSeek. Start, resume, fork, switch, and clean up CLI sessions from a side panel per assistant - one click lands you in the right terminal with the assistant already running, no duplicate tabs, no UUID hunting. One install replaces the separate `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension` packages and migrates their settings and favourites automatically.
+A full launcher and manager for every AI code assistant in JupyterLab - Claude Code, Codex, Kimi, Gemini, DeepSeek, Copilot and Antigravity. Start, resume, fork, switch, and clean up CLI sessions from a side panel per assistant - one click lands you in the right terminal with the assistant already running, no duplicate tabs, no UUID hunting. One install replaces the separate `jupyterlab_claude_code_extension`, `jupyterlab_codex_extension` and `jupyterlab_kimi_code_extension` packages and migrates their settings and favourites automatically.
 
 ![Claude Code panel](.resources/screenshot.png)
 
@@ -25,21 +25,22 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 
 ## Features
 
-- **One install, every assistant** - Claude Code, Codex, Kimi, Gemini and DeepSeek in one package, each with its own right-side panel and official mark
+- **One install, every assistant** - Claude Code, Codex, Kimi, Gemini, DeepSeek, Copilot and Antigravity in one package, each with its own right-side panel and official mark
 - **Provider registry** - assistant-specific behaviour lives in one module per assistant, so adding one changes no core file
 - **Joint settings page** - one settings section covers all assistants with a per-assistant toggle, all on by default; toggling takes effect without a JupyterLab reload
 - **Three-section side panel** - Favorites, Recent and All projects, each scrolling independently
-- **One-click resume** - click a row to resume its session in a terminal, reusing an open terminal for the project. A Kimi or DeepSeek conversation started with `+` opens a second terminal when its first is still open
+- **One-click resume** - click a row to resume its session in a terminal, reusing an open terminal for the project. A Kimi, DeepSeek or Antigravity conversation started with `+` opens a second terminal when its first is still open
 - **File browser follows the opened session** - opening a session moves the file browser to its project folder, a setting on by default; a right-click on a panel header toggles this and moves the panels between the left and right sidebars
 - **Launcher tiles** - each enabled assistant has a tile in the Launcher's AI Assistants section; a click opens the assistant in the file browser's current folder, resuming that folder's conversation when one exists
 - **Your terminal's `claude -c` follows the panel** (Claude) - selecting a conversation row makes plain `claude -c` in that project resume the same conversation, even one that has been compacted
 - **Conversation switcher** - a right-click "Switch and Manage Sessions" submenu lists a project's other conversations by name and short id. "Manage Sessions..." opens a searchable list with multi-select delete and copy-id
 - **Branch session** - fork the current conversation into a new named session from the right-click menu
 - **Rename session** - name a conversation from the right-click menu, and the panel shows the name the assistant itself kept
-- **Command line** - `jupyterlab-ai-code-assistants` lists, renames, moves, deletes, branches and switches the sessions of every assistant and refreshes the panels, from a terminal or an agent; every open panel shows the change at once
-- **Launch modes under each assistant's own name** - Claude's skip-permissions, Codex's approval bypass, Kimi's `--yolo` and Gemini's YOLO; unsafe variants carry a shield glyph
-- **Coloured terminal tabs** - each session's colour tints its terminal tab, and a branched session inherits its parent's colour. Claude's `/color` supplies a default and Kimi derives a stable one; Codex, Gemini and DeepSeek have no colour until you set one
-- **Your newest colour choice wins** - a colour set on a terminal tab is remembered for that conversation; a Kimi or DeepSeek conversation that has never been resumed, including one started with `+`, is the exception, because its id cannot be read yet. In Claude Code whichever of the tab colour and `/color` you used last wins, and Reset Tab Colour in the right-click menu hands back the colours you set by hand
+- **Command line** - `jupyterlab-ai-code-assistants` lists, renames, deletes, branches and switches the sessions of every assistant, moves those of every assistant except Copilot and Antigravity, and refreshes the panels, from a terminal or an agent; every open panel shows the change at once
+- **Launch modes under each assistant's own name** - Claude's skip-permissions, Codex's approval bypass, Kimi's `--yolo`, Gemini's and Copilot's YOLO, and Antigravity's skip-permissions; unsafe variants carry a shield glyph
+- **Coloured terminal tabs** - each session's colour tints its terminal tab, and a branched session inherits its parent's colour. Claude's `/color` supplies a default and Kimi derives a stable one; Codex, Gemini, DeepSeek, Copilot and Antigravity have no colour until you set one
+- **Your newest colour choice wins** - a colour set on a terminal tab is remembered for that conversation; a Kimi, DeepSeek or Antigravity conversation that has never been resumed, including one started with `+`, is the exception, because its id cannot be read yet. In Claude Code whichever of the tab colour and `/color` you used last wins, and Reset Tab Colour in the right-click menu hands back the colours you set by hand
+- **Antigravity titles its own tab** - agy sets a terminal title only through the `title` key of `~/.gemini/antigravity-cli/settings.json`, which is per user, not per launch. Add `"title": {"type": "command", "command": "/opt/conda/bin/python -I -m jupyterlab_ai_code_assistants_extension.agy_title"}` there, with the Python this package is installed in, and every agy, from the panel or by hand, shows `✳ <name>` when idle and alternates `◐` and `◑` while it works. The name is the panel's name for the conversation, else agy's own title, else `Antigravity`; a rename in the panel reaches the tab at agy's next state change. The extension never writes that file
 - **Favorites** - star projects from the right-click menu; favourites from the standalone extensions are migrated on first run
 - **Remove and clean up** - remove a project's history or its extra parallel sessions from the right-click menu, with a confirmation. Removed files honour JupyterLab's "move files to trash" setting
 - **Activity at a glance** - each row shows its last activity in an aligned column. Recent rows light up, stale rows dim, and parallel conversations show a branch icon and count
@@ -55,7 +56,7 @@ Chat-panel extensions re-implement the agent loop and trail the real tool. This 
 
 - JupyterLab >= 4.6.0
 - Python >= 3.12
-- At least one assistant CLI on `PATH`: `claude`, `codex`, `kimi`, `gemini`, or `dsh` (the DeepSeek Harness)
+- At least one assistant CLI on `PATH`: `claude`, `codex`, `kimi`, `gemini`, `dsh` (the DeepSeek Harness), `copilot`, or `agy` (Antigravity)
 - For DeepSeek: the community TUI bundle mounted as the `tui` profile, `dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui` - a DeepSeek launch without it is refused with these words before any terminal opens
 
 ## Install
@@ -100,7 +101,7 @@ jupyterlab-ai-code-assistants refresh                           # after installi
 
 ## Agent skill
 
-The wheel ships a session-operations skill for coding agents at `share/jupyter/agents/skills/jupyterlab-ai-code-assistants-extension/SKILL.md`. It covers finding, moving, splitting, renaming and promoting sessions, copying a session into another project under a fresh id, the task-list environment variables, and running Claude Code against Kimi K3 or DeepSeek, with two references for the rest - `claude-operations.md` for how `claude -c` and `--resume` choose a session and how to repair, promote and pin one, and `cross-assistant-sessions.md` for reading, inventorying, taking over and resuming sessions of Claude Code, Codex, Kimi, Gemini and DeepSeek.
+The wheel ships a session-operations skill for coding agents at `share/jupyter/agents/skills/jupyterlab-ai-code-assistants-extension/SKILL.md`. It covers finding, moving, splitting, renaming and promoting sessions, copying a session into another project under a fresh id, the task-list environment variables, and running Claude Code against Kimi K3 or DeepSeek, with two references for the rest - `claude-operations.md` for how `claude -c` and `--resume` choose a session and how to repair, promote and pin one, and `cross-assistant-sessions.md` for reading, inventorying, taking over and resuming sessions of Claude Code, Codex, Kimi, Gemini, DeepSeek, Copilot and Antigravity.
 
 After `pip install`, with the Python that runs the lab:
 

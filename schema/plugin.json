@@ -1,6 +1,7 @@
 {
   "title": "AI Code Assistants",
-  "description": "One settings section for every AI code assistant panel. Generated from the provider registry by `jlpm generate:schema` - edit the provider descriptors, not this file.",
+  "description": "Settings for every AI code assistant panel.",
+  "$comment": "Generated from the provider registry by `jlpm generate:schema` - edit the provider descriptors, not this file.",
   "type": "object",
   "jupyter.lab.setting-icon": "jupyterlab_ai_code_assistants_extension:assistants",
   "jupyter.lab.setting-icon-label": "AI Code Assistants",
@@ -8,7 +9,7 @@
     "presentationMode": {
       "type": "string",
       "title": "Presentation mode",
-      "description": "How session rows are labelled, in every assistant's panel. `name` (default) shows the session name the assistant records for the project; the initial name is the project folder name, then the path is walked up to disambiguate when two projects share a folder name. `path` shows the project path relative to the JupyterLab notebook root (absolute if outside it).",
+      "description": "Label session rows by the session `name` (default) or the project `path`.",
       "oneOf": [
         {
           "const": "name",
@@ -24,7 +25,7 @@
     "recentLimit": {
       "type": "integer",
       "title": "Recent items count",
-      "description": "Number of sessions listed in the Recent section, sorted by last activity (descending). The section displays up to 10 rows and scrolls for the rest.",
+      "description": "Number of sessions listed in the Recent section, sorted by last activity.",
       "default": 10,
       "minimum": 1,
       "maximum": 100
@@ -32,13 +33,13 @@
     "colouredTabs": {
       "type": "boolean",
       "title": "Coloured terminal tabs",
-      "description": "When enabled (default), a terminal running an assistant has its dock tab tinted with that conversation's colour. Turning it off clears the tint and stops it being applied. Requires `jupyterlab_colourful_tab_extension`, installed with this extension as a dependency.",
+      "description": "Tint each assistant terminal's dock tab with its conversation's colour.",
       "default": true
     },
     "sidebar": {
       "type": "string",
       "title": "Sidebar position",
-      "description": "Which JupyterLab sidebar to dock the assistant panels to. `right` (default) keeps them clear of the file browser. `left` puts them next to it.",
+      "description": "Dock the assistant panels in the `left` or `right` (default) sidebar.",
       "oneOf": [
         {
           "const": "left",
@@ -54,61 +55,85 @@
     "syncFileBrowser": {
       "type": "boolean",
       "title": "Sync file browser with opened session",
-      "description": "When enabled (default), opening a session moves the JupyterLab file browser to that session's project folder. A project folder outside the JupyterLab root leaves the file browser where it is. The context menu of each panel header also toggles this.",
+      "description": "Move the file browser to the project folder of each session you open.",
       "default": true
+    },
+    "providers.antigravity.enabled": {
+      "type": "boolean",
+      "title": "Antigravity: enabled",
+      "description": "Show the Antigravity panel.",
+      "default": true
+    },
+    "providers.antigravity.dangerouslySkipPermissions": {
+      "type": "boolean",
+      "title": "Antigravity: Dangerously skip permissions",
+      "description": "Launch new and resumed sessions with `--dangerously-skip-permissions`; tool calls run unasked.",
+      "default": false
     },
     "providers.claude.enabled": {
       "type": "boolean",
       "title": "Claude Code: enabled",
-      "description": "Show the Claude Code panel. A panel appears only when this is on AND the `claude` binary is on PATH.",
+      "description": "Show the Claude Code panel.",
       "default": true
     },
     "providers.claude.dangerouslySkipPermissions": {
       "type": "boolean",
       "title": "Claude Code: Dangerously skip permissions",
-      "description": "When enabled, newly spawned and resumed sessions are launched with `--dangerously-skip-permissions`. Bypasses every Claude Code permission prompt - only enable in sandboxes you trust.",
+      "description": "Launch new and resumed sessions with `--dangerously-skip-permissions`; tool calls run unasked.",
       "default": false
     },
     "providers.codex.enabled": {
       "type": "boolean",
       "title": "Codex: enabled",
-      "description": "Show the Codex panel. A panel appears only when this is on AND the `codex` binary is on PATH.",
+      "description": "Show the Codex panel.",
       "default": true
     },
     "providers.codex.dangerouslyBypassApprovalsAndSandbox": {
       "type": "boolean",
       "title": "Codex: Bypass Codex approvals and sandbox",
-      "description": "When enabled, newly spawned and resumed sessions are launched with `--dangerously-bypass-approvals-and-sandbox`. Bypasses every Codex approval prompt and sandbox - only enable in environments you trust.",
+      "description": "Launch new and resumed sessions with `--dangerously-bypass-approvals-and-sandbox`; tool calls run unasked, outside the sandbox.",
+      "default": false
+    },
+    "providers.copilot.enabled": {
+      "type": "boolean",
+      "title": "Copilot: enabled",
+      "description": "Show the Copilot panel.",
+      "default": true
+    },
+    "providers.copilot.yoloMode": {
+      "type": "boolean",
+      "title": "Copilot: YOLO mode",
+      "description": "Launch new and resumed sessions with `--yolo`; tool calls, paths and URLs are allowed unasked.",
       "default": false
     },
     "providers.deepseek.enabled": {
       "type": "boolean",
       "title": "DeepSeek: enabled",
-      "description": "Show the DeepSeek panel. A panel appears only when this is on AND the `dsh` binary is on PATH.",
+      "description": "Show the DeepSeek panel.",
       "default": true
     },
     "providers.gemini.enabled": {
       "type": "boolean",
       "title": "Gemini: enabled",
-      "description": "Show the Gemini panel. A panel appears only when this is on AND the `gemini` binary is on PATH.",
+      "description": "Show the Gemini panel.",
       "default": true
     },
     "providers.gemini.yoloMode": {
       "type": "boolean",
       "title": "Gemini: YOLO mode",
-      "description": "When enabled, newly spawned and resumed sessions are launched with `--yolo`. Gemini auto-approves every tool call without asking - only enable in workspaces you trust.",
+      "description": "Launch new and resumed sessions with `--yolo`; tool calls run unasked.",
       "default": false
     },
     "providers.kimi.enabled": {
       "type": "boolean",
       "title": "Kimi: enabled",
-      "description": "Show the Kimi Code panel. A panel appears only when this is on AND the `kimi` binary is on PATH.",
+      "description": "Show the Kimi Code panel.",
       "default": true
     },
     "providers.kimi.yoloMode": {
       "type": "boolean",
       "title": "Kimi: YOLO mode",
-      "description": "When enabled, newly spawned and resumed sessions are launched with `--yolo`. Kimi auto-approves regular tool calls without asking - only enable in workspaces you trust.",
+      "description": "Launch new and resumed sessions with `--yolo`; regular tool calls run unasked.",
       "default": false
     }
   }

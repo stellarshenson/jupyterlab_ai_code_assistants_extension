@@ -1,6 +1,6 @@
 ---
 name: jupyterlab-ai-code-assistants-extension
-description: Session operations for the assistant panels. Any assistant - list, rename, move, delete, branch or make current a session, and refresh the panels, with the `jupyterlab-ai-code-assistants` command; read, inventory, take over and resume sessions. Claude Code - find, split, copy a session to another project under a fresh id, promote a background job so `claude -c` resumes it, repair a compacted conversation, pin a default, clean up transcripts, enable the task list, run Claude Code against Kimi K3 or DeepSeek. Use when a session is missing, `claude -c` reports "No conversation found to continue", a session lists as an agent session, work must continue in another project, tasks do not appear, an assistant CLI was installed or removed, Claude Code must use another provider, or the user names `jupyterlab-ai-code-assistants` or says "take over", "read the other session", "where did the last agent stop", "list sessions across assistants", "resume the Gemini session" or "continue what Codex was doing".
+description: Session operations for the assistant panels. Any assistant - list, rename, move (not Copilot or Antigravity), delete, branch or switch a session, refresh panels, with the `jupyterlab-ai-code-assistants` command; read, inventory, take over and resume sessions. Claude Code - find, split, copy a session to another project under a fresh id, promote a background job so `claude -c` resumes it, repair a compacted conversation, pin a default, clean up transcripts, enable the task list, run Claude Code against Kimi K3 or DeepSeek. Use when a session is missing, `claude -c` reports "No conversation found to continue", a session lists as an agent session, work must continue in another project, tasks do not appear, an assistant CLI was installed or removed, Claude Code must use another provider, or the user names `jupyterlab-ai-code-assistants` or says "take over", "read the other session", "where did the last agent stop", "list sessions across assistants", "resume the Gemini session" or "continue what Codex was doing".
 ---
 
 # Session operations
@@ -51,9 +51,9 @@ Details: `references/session-operations.md`. Compaction repair, background jobs,
 
 ## Other assistants
 
-- Codex, Kimi, Gemini and DeepSeek (`dsh`): stores, transcript formats, read commands and resume commands in `references/cross-assistant-sessions.md`
+- Codex, Kimi, Gemini, DeepSeek (`dsh`), Copilot and Antigravity (`agy`): stores, transcript formats, read commands and resume commands in `references/cross-assistant-sessions.md`
 - Change their sessions with the command, as for Claude Code
-- Inventory: one project's sessions across all five assistants, newest first
+- Inventory: one project's sessions across all seven assistants, newest first
 - Take over: live state first, read the newest session in full, verify the stop point, report, stop
 
 ## Task list

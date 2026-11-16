@@ -585,6 +585,60 @@ Per-assistant store and descriptor modules - fork, resume, process detection and
   - root-cause: 2026-10-27T23:17:34Z @kj _move_is_live reads _proc_pids, which is empty off Linux; delete_branches keeps the store's own live set from sessions/<pid>.json, which answers on every platform since DEF-SERV-360, and ClaudeStore.move never consulted it
   - log: 2026-10-27T23:17:34Z @kj added
   - log: 2026-10-27T23:19:00Z @kj closed; reason: round-14 review plan change 3: the tests named pass, their mutation reddens them, and the cheap gates pass
+- [x] `DEF-PROV-389-QUOTED-URI` **Quoted file URI lists an agy conversation under an ancestor folder** - MAJOR; a quote or bracket before file:// in an agy db reads as a protobuf length, so the conversation lists under a parent folder (e.g. /home/lab/workspace/private) and resumes there
+  - evidence: _workspace_in tries the full match first (tmp/workflows/review-providers/patches/r1-1-quoted-uri.diff); test_acc_agy_244_a_quoted_uri_lists_under_the_workspace_not_an_ancestor green, red with insert(0) restored; pytest 576, jest 468 at v1.3.23
+  - repro: _workspace_in on {"uri":"file:///home/lab/workspace/private/jupyterlab/<project>"} returns /home/lab/workspace/private
+  - test-tags: UNIT
+  - root-cause: 2026-11-16T00:59:57Z @kj _workspace_in tries the length-prefix cut before the full match; byte 34 (quote) cuts the URI to 27 path characters, and every ancestor passes isdir
+  - log: 2026-11-16T00:59:57Z @kj added
+  - log: 2026-11-16T01:08:29Z @kj closed
+- [x] `DEF-PROV-390-COPILOT-MEMO` **Copilot poll re-parses every session past 512 sessions** - MEDIUM; past 512 Copilot sessions every 30 s poll re-parses every events.jsonl in every window; measured 0.76 s per poll at 520 sessions of 1 MB
+  - evidence: copilot.py splits _memo into _workspace_memo and _events_memo, rename drop on _workspace_memo (tmp/workflows/review-providers/patches/r1-2-copilot-memo.diff); test_copilot_store.py 14 green; pytest 576, jest 468 at v1.3.23
+  - repro: store with 520 session directories, two list_sessions calls; the second re-parses every events.jsonl
+  - test-tags: UNIT
+  - root-cause: 2026-11-16T00:59:57Z @kj one FileMemo holds two entries per session (workspace.yaml and events.jsonl) and clears itself when it reaches 1024 entries
+  - log: 2026-11-16T00:59:57Z @kj added
+  - log: 2026-11-16T01:08:29Z @kj closed
+- [x] `DEF-PROV-392-AGY-SUMMARIES` **Antigravity reader ignores agy's summaries database** - MAJOR; agy 1.5.9 keeps conversation_summaries.db with workspace_uris, title and parent_conversation_id per conversation; the reader scans bytes for file:// and falls back to a pending-launch guess, so rows can list under the wrong or a parent folder
+  - evidence: providers/antigravity.py reads conversation_summaries.db read-only, project from workspace_uris, label annotations/title/preview (tmp/workflows/agy-real/patches/store.diff); real store lists the owner's conversation as 'workspace' under /home/lab/workspace (tmp/workflows/agy-real/real.json); jest 475, pytest 578, Galata 119/119 at v1.3.26
+  - related: ACC-AGY-244-STORE-SCAN - the criterion whose mechanism this replaces
+  - repro: agy 1.5.9 installed: ~/.gemini/antigravity-cli/conversation_summaries.db exists; providers/antigravity.py never opens it
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-11-16T01:58:58Z @kj the provider was built from community reports before agy was installable; agy 1.5.9 keeps conversation_summaries.db (title, workspace_uris as a JSON list of file URIs, parent_conversation_id) and wraps each prompt in <USER_REQUEST> tags, which the reader shows as the label
+  - log: 2026-11-16T01:47:30Z @kj added
+  - log: 2026-11-16T01:58:57Z @kj Star Colonel reported on agy 1.5.9: the workspace-root conversation lists with the label <USER_REQUEST>; the reader takes the first prompt line, which agy wraps in that tag; agy's title 'workspace' is in conversation_summaries.title
+  - log: 2026-11-16T01:58:58Z @kj root-cause updated "2026-11-16T01:47:30Z @kj the provider was built from community reports before agy was installable; the real store keeps a SQLite summaries table that agy reconciles from conversations/" -> "the provider was built from community reports before agy was installable; agy 1.5.9 keeps conversation_summaries.db (title, workspace_uris as a JSON list of file URIs, parent_conversation_id) and wraps each prompt in <USER_REQUEST> tags, which the reader shows as the label"
+  - log: 2026-11-16T03:56:06Z @kj closed
+- [x] `DEF-PROV-393-AGY-TITLES` **Antigravity Rename and Branch write a titles file agy never reads** - MEDIUM; Rename and a Branch name write cache/conversations.json, a guessed file; agy 1.5.9 keeps titles in conversation_summaries.title, so a rename or branch name never shows in agy and the row keeps its old label when the file is absent
+  - evidence: rename writes annotations/<id>.pbtxt; on the real store the panel shows the name at once and agy's row adopts it on the next turn (tmp/workflows/agy-real/real.json step2); jest 475, pytest 578, Galata 119/119 at v1.3.26
+  - related: ACC-AGY-248-RENAME
+  - repro: agy 1.5.9 store holds no cache/conversations.json; titles live in conversation_summaries.db
+  - test-tags: UNIT
+  - root-cause: 2026-11-16T01:47:30Z @kj the titles file was guessed before agy was installable; agy derives conversation_summaries from its conversations/ store, so where a rename must be written is not yet measured
+  - log: 2026-11-16T01:47:30Z @kj added
+  - log: 2026-11-16T01:58:57Z @kj Star Colonel reported on agy 1.5.9: renaming the workspace-root conversation did not rename it; no cache/conversations.json exists, agy keeps the title in conversation_summaries.title and in the raw_summary blob
+  - log: 2026-11-16T03:56:06Z @kj closed
+- [x] `DEF-PROV-399-COPIL-EMPTY` **Empty Copilot session takes the project row** - MEDIUM; an unnamed session folder with no user message (a start closed before the first prompt, or plain copilot --resume) is listed and, being newest, becomes the project row with 0 messages; the real conversation drops to a branch; copilot hides such sessions; fake CLI start state is unreal
+  - evidence: test_copilot_lists_named_and_unnamed_sessions_in_two_projects red without the hide rule; Galata ACC-COPIL-255 red without it; real copilot 1.0.112 scratch home lists 2 of 8 folders, 6 unnamed empty hidden; pytest 589, jest 468, Galata 118/118 at v1.3.31
+  - repro: start copilot from the panel in a project, exit before any prompt; the project row shows the empty session with 0 messages
+  - test-tags: UNIT, FUNCTIONAL
+  - root-cause: 2026-11-16T07:16:47Z @kj providers/copilot.py _session lists every folder with a cwd; copilot 1.0.112 lists only named sessions or sessions with messages (copilot help sessions)
+  - log: 2026-11-16T07:16:47Z @kj added
+  - log: 2026-11-16T08:29:17Z @kj closed
+- [x] `DEF-PROV-400-COPIL-RUNNING` **Copilot running mark ignores in-use locks** - MEDIUM; a copilot started without --session-id (--resume, --continue, plain) is not marked running and its terminal is not reused, so a second process opens the same session; after an in-TUI /resume or /fork the old session stays marked; a fork of a running session copies its inuse lock files
+  - evidence: test_copilot_running_session_is_the_newest_inuse_lock_of_the_process and test_copilot_stale_inuse_lock_is_ignored red on 5 severs; Galata ACC-COPIL-265 red without lock lookup; real copilot --resume=<name> marked from its lock, cleared after /exit; fork copy has no inuse files; Galata 118/118 at v1.3.31
+  - repro: run copilot --resume=<name> in a terminal; the row is not marked running; clicking it opens a second copilot on the same session
+  - test-tags: UNIT, FUNCTIONAL
+  - root-cause: 2026-11-16T07:16:51Z @kj session_id_for_pid reads only --session-id from argv; copilot records the open session as session-state/<id>/inuse.<pid>.lock (pid of the native process) with a flocked .hold; fork copies inuse.* files
+  - log: 2026-11-16T07:16:51Z @kj added
+  - log: 2026-11-16T08:29:17Z @kj closed
+- [x] `DEF-PROV-401-COPIL-LEGACY` **Legacy flat Copilot sessions listed but not resumable** - MEDIUM; a pre-1.0.11 flat session-state/<uuid>.jsonl is listed and offered for resume and fork; copilot 1.0.112 refuses it: Session <id> uses a legacy flat JSONL transcript format that is no longer supported
+  - evidence: test_copilot_legacy_flat_file_produces_no_row red against the old copilot.py; flat <uuid>.jsonl in a copy of the real store gives no row, launch raises SessionNotFound, fork and rename None; pytest 589 at v1.3.31
+  - repro: put a flat session-state/<uuid>.jsonl whose session.start has a cwd; the panel lists it; opening it ends in the legacy-format error
+  - test-tags: UNIT
+  - root-cause: 2026-11-16T07:16:53Z @kj providers/copilot.py _session and fork accept LEGACY_SUFFIX files; 1.0.112 cli-main.js throws on them and reindex ignores them
+  - log: 2026-11-16T07:16:53Z @kj added
+  - log: 2026-11-16T08:29:18Z @kj closed
 
 ## Frontend / server contract `FRONT`
 
@@ -708,6 +762,13 @@ Package manifest, shared-package and template leftovers that decide whether the 
   - root-cause: 2026-10-25T04:51:58Z @kj the round-8 README rewrite narrowed 'a conversation that has never been resumed' to 'started with +', while the unreadable id covers every hand-started conversation
   - log: 2026-10-25T04:51:58Z @kj added
   - log: 2026-10-25T05:02:19Z @kj closed
+- [x] `DEF-PACK-391-MOVE-DOCS` **Docs say move works for every assistant and list five** - MINOR; README, package description and the session skill say sessions move for every assistant and name five assistants; Copilot and Antigravity declare no move
+  - evidence: README 39 and 103, package.json description and SKILL.md line 3 name seven assistants and exclude Copilot and Antigravity from move (tmp/workflows/review-providers/patches/r1-3-move-docs.diff); SKILL description 1023 chars, under the 1024 limit
+  - repro: README.md lines 39 and 103, package.json description, .agents/skills/jupyterlab-ai-code-assistants-extension/SKILL.md line 3
+  - test-tags: MANUAL
+  - root-cause: 2026-11-16T00:59:58Z @kj the provider build added two assistants without can_move and did not update these four texts
+  - log: 2026-11-16T00:59:58Z @kj added
+  - log: 2026-11-16T01:08:29Z @kj closed
 
 ## Retirement and migration `RETI`
 
@@ -1988,6 +2049,42 @@ Panel rendering, menus, popups, keyboard access and settings copy
   - root-cause: 2026-11-04T20:25:25Z @kj `.jp-AiAssistantsPanel-row` pads both sides with `--aica-inset` (4px); the workspace manager's row sets `padding: 0 10px 0 18px`.
   - log: 2026-11-04T20:25:25Z @kj added
   - log: 2026-11-04T20:49:51Z @kj closed: fixed; the row takes 10px on the right, the workspace manager's row inset
+- [x] `DEF-PANE-394-AGY-TABTITLE` **Antigravity terminal tab keeps its old title after a rename** - MINOR; after /rename inside agy, the terminal tab of that conversation keeps its previous title; reported by the Star Colonel on agy 1.5.9
+  - evidence: descriptor flag sendsNoTerminalTitle names the agy tab from the row label and follows renames; bare agy launches identified from presence/<id>.lock (tmp/workflows/agy-real/patches/tab.diff, fix-1.diff); terminals.spec.ts ACC-PANE-262-TAB-TITLE tests and Galata PANE-262 red when severed; jest 475, pytest 578, Galata 119/119 at v1.3.26
+  - related: DEF-PROV-393-AGY-TITLES - same rename, the panel side
+  - repro: start agy from the Antigravity panel, /rename the conversation, look at the terminal tab title
+  - test-tags: MANUAL
+  - root-cause: 2026-11-16T02:02:12Z @kj agy 1.5.9 sends no title escape (OSC 0, 1 or 2) at start or in its main screen, recorded under a pseudo-terminal; JupyterLab's terminal tab keeps its default label, and the extension labels no terminal tab from the session name, so a rename can never reach the tab
+  - root-cause: 2026-11-16T02:00:47Z @kj likely cause: JupyterLab's terminal sets the tab label from the title escape the running program sends (term.onTitleChange), agy sends none after /rename, and the extension sets no terminal tab titles for any assistant; to be confirmed by watching agy's title escapes
+  - log: 2026-11-16T02:00:47Z @kj added
+  - log: 2026-11-16T02:02:12Z @kj root-cause overridden; reason: cause confirmed by recording agy's output
+  - log: 2026-11-16T03:56:06Z @kj closed
+  - log: 2026-11-16T03:56:44Z @kj edited evidence "descriptor flag sendsNoTerminalTitle names the agy tab from the row label and follows renames; bare agy launches identified from presence/<id>.lock (tmp/workflows/agy-real/patches/tab.diff, fix-1.diff); terminals.spec.ts ACC-PANE-262 tests and Galata PANE-262 red when severed; jest 475, pytest 578, Galata 119/119 at v1.3.26" -> "descriptor flag sendsNoTerminalTitle names the agy tab from the row label and follows renames; bare agy launches identified from presence/<id>.lock (tmp/workflows/agy-real/patches/tab.diff, fix-1.diff); terminals.spec.ts ACC-PANE-262-TAB-TITLE tests and Galata PANE-262 red when severed; jest 475, pytest 578, Galata 119/119 at v1.3.26"
+  - log: 2026-11-16T05:32:24Z @kj the extension-side tab naming is being replaced by agy's own title setting (ACC-AGY-264-TITLE-ESCAPES), the Star Colonel's choice
+- [-] `DEF-PANE-395-TAB-OTHER` **Agy tab of a non-current conversation is not named** - MEDIUM; a tab running an agy conversation that is not its project's current one keeps Terminal N and misses renames; reached through Open Branched Conversation or two + launches in one project
+  - repro: two + launches in one Antigravity project; the older conversation's tab stays Terminal N
+  - test-tags: UNIT, E2E
+  - root-cause: 2026-11-16T05:01:28Z @kj _applyTabName looks the name up in the panel's project rows, and a row carries only the project's current conversation (terminals.ts _applyTabName, antigravity.py list_sessions)
+  - log: 2026-11-16T05:01:28Z @kj added
+  - log: 2026-11-16T05:32:34Z @kj rejected: superseded by the Star Colonel's choice of agy's own title setting (ACC-AGY-264-TITLE-ESCAPES); the extension's agy tab naming is removed
+- [-] `DEF-PANE-396-TAB-RELOAD` **Agy tab names lost after a page reload until the panel is shown** - MINOR; after a JupyterLab page reload, agy terminal tabs show Terminal N until the Antigravity panel is opened
+  - repro: name an agy tab, reload the page, keep the Antigravity panel closed
+  - test-tags: UNIT
+  - root-cause: 2026-11-16T05:01:28Z @kj the naming pass runs only from the panel's session poll, not from the terminal manager's own timer that the colour loop already arms
+  - log: 2026-11-16T05:01:28Z @kj added
+  - log: 2026-11-16T05:32:34Z @kj rejected: superseded by the Star Colonel's choice of agy's own title setting (ACC-AGY-264-TITLE-ESCAPES); the extension's agy tab naming is removed
+- [-] `DEF-PANE-397-TAB-EXIT` **Hand-started terminal keeps the agy name after agy exits** - MINOR; after agy exits in a terminal opened by hand, later titles set by the shell or another CLI are overwritten with the agy conversation name
+  - repro: run agy in a shell terminal, wait for the tab name, quit agy, run a program that sets its own title
+  - test-tags: UNIT
+  - root-cause: 2026-11-16T05:01:29Z @kj _nameRunningTabs ignores a probe answering running false, so the _tabSessions entry and the title.changed connection stay until the widget is disposed
+  - log: 2026-11-16T05:01:29Z @kj added
+  - log: 2026-11-16T05:32:34Z @kj rejected: superseded by the Star Colonel's choice of agy's own title setting (ACC-AGY-264-TITLE-ESCAPES); the extension's agy tab naming is removed
+- [-] `DEF-PANE-398-TAB-TOOLTIP` **Named agy tab has no tooltip** - MINOR; a long or shared agy conversation label is cut on the tab and has no tooltip to read it in full
+  - repro: open an agy conversation with a long title, hover its tab
+  - test-tags: UNIT
+  - root-cause: 2026-11-16T05:01:29Z @kj _applyTabName sets title.label only, never title.caption
+  - log: 2026-11-16T05:01:29Z @kj added
+  - log: 2026-11-16T05:32:35Z @kj rejected: superseded by the Star Colonel's choice of agy's own title setting (ACC-AGY-264-TITLE-ESCAPES); the extension's agy tab naming is removed
 
 ## Colour store `COLO`
 

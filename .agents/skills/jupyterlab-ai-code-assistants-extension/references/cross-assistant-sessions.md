@@ -1,6 +1,6 @@
 # Cross-assistant sessions
 
-Read, inventory, resume and take over the sessions of one project across the five assistants the panels list: Claude Code, Codex, Kimi, Gemini and DeepSeek (`dsh`). Claude Code storage mechanics beyond reading live in `session-operations.md` and `claude-operations.md`.
+Read, inventory, resume and take over the sessions of one project across the seven assistants the panels list: Claude Code, Codex, Kimi, Gemini, DeepSeek (`dsh`), Copilot and Antigravity (`agy`). Claude Code storage mechanics beyond reading live in `session-operations.md` and `claude-operations.md`.
 
 Contents:
 
@@ -12,7 +12,9 @@ Contents:
 - [Kimi](#kimi)
 - [Gemini](#gemini)
 - [DeepSeek and dsh](#deepseek-and-dsh)
-- [Inventory across all five](#inventory-across-all-five)
+- [Copilot](#copilot)
+- [Antigravity and agy](#antigravity-and-agy)
+- [Inventory across all seven](#inventory-across-all-seven)
 - [Take over another assistant's work](#take-over-another-assistants-work)
 - [Reading rules](#reading-rules)
 
@@ -38,10 +40,12 @@ rd() { case "$1" in *.zst|*.zstd) zstd -dc -- "$1" ;; *) cat -- "$1" ;; esac; }
 | Kimi        | `~/.kimi-code` (`KIMI_CODE_HOME`) | `workspaces.json` `wd_id` | `sessions/<wd_id>/session_<uuid>/`                    | `session_<uuid>` | later of `updatedAt` and `state.json` mtime                                                                                   |
 | Gemini      | `~/.gemini` (follows `HOME`)      | `projects.json` short id  | `tmp/<short id>/chats/session-*.jsonl` or `.json`     | UUID             | chat file mtime                                                                                                               |
 | DeepSeek    | `~/.dsh` (`DSH_HOME`)             | header `cwd`              | `sessions/--<key>--/<id>/session.v<N>.jsonl.zstd`     | `session-<uuid>` | log mtime                                                                                                                     |
+| Copilot | `~/.copilot` (`COPILOT_HOME`) | `workspace.yaml` `cwd` | `session-state/<uuid>/events.jsonl` | UUID | `events.jsonl` mtime |
+| Antigravity | `~/.gemini/antigravity-cli` (follows `HOME`) | first `file://` URI in `workspace_uris` of `conversation_summaries.db` | `conversations/<uuid>.db`, plus `brain/<uuid>/` | UUID | `last_modified_time` in `conversation_summaries.db` |
 
 - A panel switch stamps a Claude transcript's mtime 30 days ahead so `claude -c` selects it; the mtime is then not activity
-- A panel switch touches the Kimi `state.json`, Gemini chat file or DeepSeek log to the switch time
-- A panel rename of a Claude, Kimi, Gemini or DeepSeek conversation puts the mtime back
+- A panel switch touches the Kimi `state.json`, Gemini chat file, DeepSeek log or Copilot `events.jsonl` to the switch time; an Antigravity switch writes nothing
+- A panel rename of a Claude, Kimi, Gemini, DeepSeek or Copilot conversation puts the mtime back; an Antigravity rename writes only `annotations/<uuid>.pbtxt`
 - Panel pins and favourites live in the extension's own state, never in an assistant's store
 
 ## Resume as the extension launches
@@ -53,6 +57,8 @@ rd() { case "$1" in *.zst|*.zstd) zstd -dc -- "$1" ;; *) cat -- "$1" ;; esac; }
 | Kimi        | `kimi -S <session_id>`          | `kimi`                       | `--yolo`                                     |
 | Gemini      | `gemini --resume <id>`          | `gemini --session-id <uuid>` | `--yolo`                                     |
 | DeepSeek    | `dsh tui --resume <session-id>` | `dsh tui`                    | none                                         |
+| Copilot | `copilot --session-id <uuid>` | `copilot --session-id <uuid>` | `--yolo` |
+| Antigravity | `agy --conversation <id>` | `agy` | `--dangerously-skip-permissions` |
 
 - Claude: a live background agent holding the conversation refuses `--resume`
 - Claude: the extension stops that agent with `claude stop <short id>`, then resumes; it runs `claude attach <short id>` only when the stop fails
@@ -70,6 +76,10 @@ rd() { case "$1" in *.zst|*.zstd) zstd -dc -- "$1" ;; *) cat -- "$1" ;; esac; }
 - DeepSeek: `dsh tui` needs the `tui` profile, a directory `profiles/tui` under `$DSH_HOME` (default `~/.dsh`)
 - DeepSeek: mount the profile with `dsh plugin --profile tui add @deepseek-harness-tui/dsh-tui`
 - DeepSeek: `dsh tui` boots the TUI in the project directory; the TUI mints a new conversation's id
+- Copilot: `--session-id` with an unknown UUID starts a new session under it, so the extension refuses a resume whose session is gone
+- Copilot: `--resume` and `--continue` match by id prefix, name or recency; the extension never uses them
+- Antigravity: `--continue` picks the most recent conversation; the extension never uses it
+- Antigravity: `agy` takes no id for a new conversation; agy records the folder it runs in as the conversation's `workspace_uris`
 
 ## Claude Code
 
@@ -295,9 +305,59 @@ jq -r '[.record.identity.createdAt, .record.identity.cwd, (.record.rows.title.va
 - The log can be empty when the TUI closed before flushing while the projection still names the session; report the title, the last prompt and `narratedText`, and state that the message text is missing
 - `~/.dsh-tui/history.jsonl` - typed prompts as `{"text", "ts", "project"}`; the last prompt, no replies
 
-## Inventory across all five
+## Copilot
 
-Each block appends `<epoch s> <agent> <id> <path>` rows for this project to one file; run all five after [Setup](#setup).
+- Layout measured on copilot 1.0.112
+- Home: `$COPILOT_HOME`, else `~/.copilot`; it also holds `session-store.db`, an SQLite index the CLI rebuilds with `/chronicle reindex`; the extension never opens it
+- One session: `session-state/<uuid>/` holding `workspace.yaml` from the start and `events.jsonl` from the first persisted event; an unnamed session with no message is listed by neither copilot nor the panel
+- A flat pre-1.0.11 `session-state/<uuid>.jsonl` is refused by copilot 1.0.112; the panel lists none
+- `workspace.yaml`: flat `key: value` lines; `cwd` is the project, `name` the title `/resume` shows
+- `events.jsonl`: one event per line with `type`, `data`, `id`, `parentId`, `timestamp` (ISO 8601); `session.start` carries `data.sessionId` and `data.context.cwd`; `user.message` and `assistant.message` carry `data.content`
+
+Per session directory `D`:
+
+```bash
+# Project and name
+grep -E '^(cwd|name):' "$D/workspace.yaml"
+# Event types
+jq -rR 'fromjson? | .type' "$D/events.jsonl" | sort | uniq -c
+# User messages
+jq -rR 'fromjson? | select(.type=="user.message") | .data.content' "$D/events.jsonl" | cut -c1-400
+# Last answer
+jq -rR 'fromjson? | select(.type=="assistant.message") | .data.content' "$D/events.jsonl" | tail -n 1
+```
+
+## Antigravity and agy
+
+- Layout measured on agy 1.5.9; `jupyterlab-ai-code-assistants sessions list -a antigravity -p "$REAL"` lists the same rows through the running server
+- Root: `~/.gemini/antigravity-cli/`, beside Gemini's `tmp/` and `projects.json`; `HOME` moves it, `ANTIGRAVITY_GEMINI_DIR` does not
+- `conversation_summaries.db` (SQLite, WAL), table `conversation_summaries`, one row per conversation: `title` (empty until named), `preview` (the first prompt, or the `/rename` name), `workspace_uris` (a JSON array of `file://` URIs; the first is the folder agy ran in), `step_count`, `last_modified_time`
+- agy rebuilds that table from the files below on every start; open it read-only, because a write is lost
+- `conversations/<uuid>.db` is the conversation; a row whose db is gone is a deleted conversation, which agy hides
+- `annotations/<uuid>.pbtxt` holds the `/rename` title as `title:"<name>"`; until agy next starts, it is newer than the row's `title`
+- Label: the annotations title, else `title`, else `preview`; never the transcript's first prompt, which agy wraps in `<USER_REQUEST>` tags
+- `brain/<uuid>/.system_generated/logs/transcript.jsonl`: one step per line with `type` (`USER_INPUT`, `PLANNER_RESPONSE`, `GENERIC`), `source`, `content`, `created_at`
+- A panel branch has no row until agy first opens it; until then the extension lists it from `antigravity-forks.json` in its own state directory
+- Terminal title: agy sets one only through the `title` key of `~/.gemini/antigravity-cli/settings.json`, which is per user, not per launch, so it covers every agy, from the panel or by hand. The extension ships the command and never writes the file: `"title": {"type": "command", "command": "/opt/conda/bin/python -I -m jupyterlab_ai_code_assistants_extension.agy_title"}`
+- agy runs that command on each state change with a JSON payload on stdin (`agent_state` is `authenticating`, `idle` or `working`; `conversation_id`; `conversation_title` once set) and writes its stdout as OSC 2. The command prints `✳ <label>`, or `◐ <label>` while working, and a detached loop alternates `◐` and `◑` every 960 ms until the next run that is not `working`. Label: the annotations title, else `conversation_title`, else `Antigravity`
+
+Per conversation id `ID`:
+
+```bash
+AG="$HOME/.gemini/antigravity-cli"
+# Row: title, preview, steps, last activity, folders
+python3 -c 'import sqlite3, sys; print(*sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True).execute("SELECT title, preview, step_count, last_modified_time, workspace_uris FROM conversation_summaries WHERE conversation_id = ?", (sys.argv[2],)).fetchone() or (), sep="\t")' "$AG/conversation_summaries.db" "$ID"
+# Title from /rename
+cat "$AG/annotations/$ID.pbtxt" 2>/dev/null
+# Step types
+jq -rR 'fromjson? | .type' "$AG/brain/$ID/.system_generated/logs/transcript.jsonl" | sort | uniq -c
+# User prompts
+jq -rR 'fromjson? | select(.type=="USER_INPUT") | .content' "$AG/brain/$ID/.system_generated/logs/transcript.jsonl" | cut -c1-400
+```
+
+## Inventory across all seven
+
+Each block appends `<epoch s> <agent> <id> <path>` rows for this project to one file; run all seven after [Setup](#setup).
 
 ```bash
 : > "$OUT/inventory.tsv"
@@ -343,6 +403,33 @@ for d in "$DS"/sessions/--*--/session-*/; do
   printf '%s\tdeepseek\t%s\t%s\n' "$(stat -c %Y "$d$f")" "$(basename "$d")" "$d$f"
 done >> "$OUT/inventory.tsv"
 
+CP="${COPILOT_HOME:-$HOME/.copilot}"
+for p in "$CP"/session-state/*; do
+  [ -d "$p" ] || continue; e="$p/events.jsonl"
+  c=$(sed -n 's/^cwd:[[:space:]]*//p' "$p/workspace.yaml" 2>/dev/null | tr -d "\"'")
+  [ -n "$c" ] || c=$(jq -rR 'fromjson? | select(.type=="session.start") | .data.context.cwd // empty' "$e" 2>/dev/null | head -n 1)
+  under "$c" || continue
+  printf '%s\tcopilot\t%s\t%s\n' "$(stat -c %Y "$e" 2>/dev/null || stat -c %Y "$p")" "$(basename "$p")" "$p"
+done >> "$OUT/inventory.tsv"
+
+AG="$HOME/.gemini/antigravity-cli"
+python3 - "$AG" "$REAL" <<'PY' >> "$OUT/inventory.tsv"
+import json, os, sqlite3, sys
+from datetime import datetime
+from urllib.parse import unquote, urlparse
+ag, real = sys.argv[1:3]
+try:
+    rows = sqlite3.connect(f"file:{ag}/conversation_summaries.db?mode=ro", uri=True).execute(
+        "SELECT conversation_id, workspace_uris, last_modified_time FROM conversation_summaries").fetchall()
+except sqlite3.Error:
+    rows = []
+for sid, uris, modified in rows:
+    db = f"{ag}/conversations/{sid}.db"
+    folder = next((unquote(urlparse(u).path).rstrip("/") for u in json.loads(uris) if u.startswith("file://")), "")
+    if os.path.isfile(db) and (folder == real or folder.startswith(real + "/")):
+        print(int(datetime.fromisoformat(modified).timestamp()), "antigravity", sid, db, sep="\t")
+PY
+
 # Newest first
 sort -rn "$OUT/inventory.tsv" | while IFS=$'\t' read -r t a id p; do printf '%s\t%s\t%s\t%s\n' "$(date -d "@$t" '+%F %T')" "$a" "$id" "$p"; done
 ```
@@ -364,7 +451,7 @@ sort -rn "$OUT/inventory.tsv" | while IFS=$'\t' read -r t a id p; do printf '%s\
 
    - Read any handoff document the last agent left
 
-2. Inventory every store, newest first ([Inventory across all five](#inventory-across-all-five))
+2. Inventory every store, newest first ([Inventory across all seven](#inventory-across-all-seven))
 
 3. Read oldest to newest so decisions accumulate in the order they were made; read the newest session end to end, not sampled. In full means:
 
@@ -379,12 +466,14 @@ sort -rn "$OUT/inventory.tsv" | while IFS=$'\t' read -r t a id p; do printf '%s\
 
    - `git status --short` and `git log` again; compare with what the last agent said it left
    - background work the transcript names: `pgrep -af '<pid or command>'`, its output file, its log
-   - assistant processes: list candidates with `pgrep -af 'claude|codex|kimi|gemini|dsh'`, then confirm each by the rules below
+   - assistant processes: list candidates with `pgrep -af 'claude|codex|kimi|gemini|dsh|copilot|agy'`, then confirm each by the rules below
    - Claude processes: a `~/.claude/sessions/<pid>.json` whose `pid` is alive names the `sessionId` it runs; `claude agents --json` lists live background workers
    - Codex writes no per-process record; a live `codex` process whose `/proc/<pid>/cwd` is the project is the only signal
    - Kimi: process name `kimi` or `kimi-code`; argv `-S <id>` or `--session <id>` names the conversation
    - Gemini: a node process with an argv element whose last path segment is `gemini` or `gemini.js`; argv `--resume <id>` or `--session-id <id>` names the conversation; each launch shows two, the CLI relaunched under `--max-old-space-size`; a `--session-file <path>` process runs a copy under an id the CLI minted, which no argument carries, and writes its turns to that copy, not to `<path>`
    - DeepSeek: a node process with an argv element `dsh` or ending `/dsh/lib/bin.js`; argv `--resume <id>`
+   - Copilot: a node process with an argv element `copilot` or under `node_modules/@github/copilot/`; the native child writes `session-state/<id>/inuse.<pid>.lock` into every session it opens and keeps them until it exits, the newest naming the last opened; argv `--session-id <uuid>` names only the first
+   - Antigravity: process name `agy`; argv `--conversation <id>` names the conversation; a bare `agy` runs one whose id no argument carries
    - Claude task records: `~/.claude/tasks/<session-id>/*.json`
    - the newest files under the project's `logs/`, and the trackers the project keeps
    - report anything that died, anything that finished after the transcript's last line, anything changed since
@@ -412,8 +501,8 @@ Common shapes:
 
 - The first user message is a compaction summary: read it first, then the messages after it
 - Two sessions with the same title and summary are branches: prefer the later last activity with more lines; do not double count
-- A panel branch copies the parent's history under a fresh id: Kimi copies the session directory, Gemini the chat file, DeepSeek the log; Claude and Codex fork through their own CLI
-- A Kimi, Gemini or DeepSeek branch made without a name is titled `Fork of <title>`
+- A panel branch copies the parent's history under a fresh id: Kimi and Copilot copy the session directory, Gemini the chat file, DeepSeek the log, Antigravity the db and brain directory; Claude and Codex fork through their own CLI
+- A Kimi, Gemini, DeepSeek, Copilot or Antigravity branch made without a name is titled `Fork of <title>`
 - A Gemini chat holding an `info` record `import-<epoch ms>` is a `--session-file` copy of the chat that record names
 - Ended on a usage limit: the work state is the turn before the limit notice plus any background task notification
 - Subagent transcripts: list them; read only those the main transcript cites as carrying a result

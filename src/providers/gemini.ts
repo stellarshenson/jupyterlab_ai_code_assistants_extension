@@ -53,7 +53,7 @@ export const descriptor: IProviderDescriptor = {
       id: YOLO_MODE,
       title: 'YOLO mode',
       description:
-        'When enabled, newly spawned and resumed sessions are launched with `--yolo`. Gemini auto-approves every tool call without asking - only enable in workspaces you trust.',
+        'Launch new and resumed sessions with `--yolo`; tool calls run unasked.',
       default: false,
       menuLabel: 'YOLO'
     }

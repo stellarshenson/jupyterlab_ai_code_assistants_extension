@@ -1210,7 +1210,7 @@ def test_the_shallowest_assistant_in_the_tree_wins(monkeypatch):
     resumes someone else's conversation on the next click.
     """
     tree = {10: [20], 20: []}
-    monkeypatch.setattr(routes, "_process_children", lambda pid: tree.get(pid, []))
+    monkeypatch.setattr(routes, "process_children", lambda pid: tree.get(pid, []))
 
     claude = registry.get("claude")
     codex = registry.get("codex")

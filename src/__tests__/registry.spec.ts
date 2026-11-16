@@ -13,7 +13,15 @@ import { PROVIDERS } from '../providers';
 
 // Every assistant shipped today. A provider added without reaching the barrel
 // fails here rather than silently costing the user a panel.
-const EXPECTED_IDS = ['claude', 'codex', 'deepseek', 'kimi', 'gemini'];
+const EXPECTED_IDS = [
+  'claude',
+  'codex',
+  'deepseek',
+  'kimi',
+  'gemini',
+  'copilot',
+  'antigravity'
+];
 
 const FORK_STRATEGIES = ['server-copy', 'server-native'];
 const COLOUR_SOURCES = ['native', 'derived', 'none'];

@@ -315,6 +315,20 @@ One settings section for all assistants, replacing the three separate sections. 
   - test-tags: UNIT
   - log: 2026-10-09T07:48:21Z @kj added
   - log: 2026-10-09T10:30:30Z @kj closed
+- [x] `ACC-SETT-260-TERSE-TEXT` **Terse setting descriptions** - MEDIUM; every setting description on the settings page is one sentence of at most 15 words saying what the setting changes, with its flag or values; no 'When enabled' lead, no restated title, no reasoning or dependency notes; unsafe modes still say tool calls run unasked
+  - evidence: test_acc_sett_260_261 green, red on 5 schema breaks; 19 descriptions of 4-15 words, flags unchanged; settings-light/dark.png show the new text; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - related: ACC-PANE-232-TITLE - its settings-description clause must stay true
+  - test: pytest over schema/plugin.json: every description at most 15 words, none starting 'When enabled'; Galata screenshot of the settings page
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-11-15T22:29:01Z @kj text lives in scripts/generate-schema.mjs and each provider descriptor's launchModes; make install regenerates schema/plugin.json
+  - log: 2026-11-15T22:29:01Z @kj added
+  - log: 2026-11-16T00:28:33Z @kj closed
+- [x] `ACC-SETT-261-BUILD-NOTE` **No build note on the settings page** - LOW; the section description says what the section holds in at most 10 words; how the schema is generated is a JSON $comment in schema/plugin.json, never text the settings page shows
+  - evidence: section description 7 words; generator note in $comment; pytest red when either is broken; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: pytest: top-level description at most 10 words and free of generate:schema; $comment carries the generator note
+  - test-tags: UNIT
+  - log: 2026-11-15T22:29:05Z @kj added
+  - log: 2026-11-16T00:28:33Z @kj closed
 
 ## Panel `PANE`
 
@@ -732,6 +746,15 @@ Each enabled provider renders its own side panel. Layout and interaction are sha
   - mechanism: 2026-11-04T20:25:25Z @kj `.jp-AiAssistantsPanel-row` sets `padding: 0 10px 0 var(--aica-inset)`.
   - log: 2026-11-04T20:25:25Z @kj added
   - log: 2026-11-04T20:49:53Z @kj closed: met; the row time ends 10px from the panel edge
+- [x] `ACC-PANE-262-TAB-TITLE` **Terminal tab named after the conversation** - MEDIUM; for an assistant whose CLI sends no terminal title (Antigravity), the terminal tab running a conversation shows the conversation's title and follows a rename within one poll; an assistant whose CLI sets its own title keeps it
+  - evidence: Galata PANE-262 green (tab label equals row label, follows a panel rename), red with the flag off; jest terminals.spec.ts 6 tests red per sever; jest 475, pytest 578, Galata 119/119 at v1.3.26
+  - related: DEF-PANE-394-AGY-TABTITLE - the defect this answers
+  - overridden-by: ACC-AGY-264-TITLE-ESCAPES
+  - test: Galata: open an agy row, assert the tab label equals the row title; rename in the store, assert the tab follows
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-11-16T02:04:53Z @kj a descriptor capability flag read by the core terminal code; the core names no assistant (ACC-PROV-4)
+  - log: 2026-11-16T02:04:53Z @kj added
+  - log: 2026-11-16T03:56:08Z @kj closed
 
 ## Sessions `SESS`
 
@@ -1748,6 +1771,15 @@ Three tiers - pytest for the server core and each provider module, Jest for fron
   - log: 2026-11-04T12:47:24Z @kj added
   - log: 2026-11-04T12:56:56Z @kj closed: fixed in the lint-warnings workflow
   - log: 2026-11-04T18:06:26Z @kj edited text "`jlpm run lint:check` exits 0 with 0 warnings and 0 errors; the 37 warnings at 1.3.13 are fixed at the site, exempting only the callback URL placeholder and the build-time provider descriptors" -> "`jlpm run lint:check` exits 0 with 0 warnings and 0 errors; the 37 warnings at 1.3.13 are fixed at the site, with three exemptions: the callback URL placeholder, the build-time provider descriptors, and the four activation imports named in prefer-lazy-imports ignoreImports"
+- [x] `ACC-TEST-259-FAKE-CLIS` **Fake agy and copilot in the suites** - HIGH; pytest and Galata run both providers from a fake binary on the test server's PATH and a sample store in the layout measured on agy 1.5.9 and copilot 1.0.112; a fake start writes what the real start writes; the real stores under ~ are never read or written
+  - evidence: fake copilot start writes the 9 measured workspace.yaml keys in copilot order, the inuse lock and hold, no events.jsonl; ~/.copilot untouched by the suites; pytest 589, jest 468, Galata 118/118 at v1.3.31
+  - test: make test and Galata green on a host with no agy or copilot on PATH
+  - test-tags: UNIT, E2E
+  - log: 2026-11-15T22:08:31Z @kj added
+  - log: 2026-11-16T00:28:32Z @kj closed
+  - log: 2026-11-16T07:17:30Z @kj amended text "neither CLI is installed, so pytest and Galata run both providers from a fake binary on the test server's PATH and a sample store in the documented layout; the real stores under ~ are never read or written" -> "HIGH; pytest and Galata run both providers from a fake binary on the test server's PATH and a sample store in the layout measured on agy 1.5.9 and copilot 1.0.112; a fake start writes what the real start writes; the real stores under ~ are never read or written"
+  - log: 2026-11-16T07:17:30Z @kj reopened: fake copilot start state differs from copilot 1.0.112; DEF-PROV-399-COPIL-EMPTY; evidence retired: which agy copilot exits 1; suites green on stub agy and copilot with sample stores; ~/.copilot and ~/.gemini/antigravity-cli untouched; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - log: 2026-11-16T08:29:25Z @kj closed
 
 ## API `API`
 
@@ -1925,7 +1957,7 @@ Launcher tiles that open an assistant in the file browser's current folder
   - log: 2026-08-27T22:06:26Z @kj glyph changed on the user's word from the electronic brain to a filled robot head (Material style, evenodd cut-outs); the launcherTileIcon mechanism is unchanged
   - log: 2026-08-27T22:09:30Z @kj re-verified in v1.1.12 with the robot head: launcher-section-joint-icon.png shows it in the header after Other, Galata 41/41, Jest 159/159
   - log: 2026-09-17T17:26:05Z @kj edited importance
-- [x] `ACC-LNCH-215-TILE-GLYPH` **Smaller assistant glyphs in the tiles** - LOW; in the Launcher AI Assistants tiles each of the five assistant glyphs renders at 75% of the Terminal tile glyph, within 1px, the five equal within 1px and centred in the tile icon area; only the tiles change - section header icon, sidebar tabs, panel header, menus keep their size
+- [x] `ACC-LNCH-215-TILE-GLYPH` **Smaller assistant glyphs in the tiles** - LOW; in the Launcher AI Assistants tiles every assistant glyph renders at 75% of the Terminal tile glyph, within 1px, all equal within 1px and centred in the tile icon area; only the tiles change - section header icon, sidebar tabs, panel header, menus keep their size
   - evidence: ui-tests/tests/launcher-tiles.spec.ts glyph-size test (line 218) green, Galata 84/84 at v1.2.171; glyphs 32.499-32.502px against Terminal 43.333px, sidebar tabs 16.666-16.668px against File Browser 16.667px
   - related: DEF-PANE-332-ICON-SIZE - the earlier rule, every assistant glyph at the Terminal glyph size, which this narrows for the Launcher tiles
   - test: open the Launcher, compare each tile's drawn glyph box with the Terminal tile's: 0.75 within 1px, five within 1px, centre within 1px of the icon area centre; sidebar tab glyphs within 1px of the File Browser tab glyph
@@ -1934,6 +1966,8 @@ Launcher tiles that open an assistant in the file browser's current folder
   - log: 2026-10-20T11:54:39Z @kj added
   - log: 2026-10-20T12:19:22Z @kj closed: verified in v1.2.171
   - log: 2026-10-20T12:19:38Z @kj edited evidence "ui-tests/tests/launcher-tiles.spec.ts 'DEF-PANE-332 and ACC-LNCH-215 - every assistant glyph renders at 75% of the Terminal card glyph in the Launcher tiles only' green, Galata 84/84 at v1.2.171; glyphs 32.499-32.502px against Terminal 43.333px, sidebar tabs 16.666-16.668px against File Browser 16.667px" -> "ui-tests/tests/launcher-tiles.spec.ts glyph-size test (line 218) green, Galata 84/84 at v1.2.171; glyphs 32.499-32.502px against Terminal 43.333px, sidebar tabs 16.666-16.668px against File Browser 16.667px"
+  - log: 2026-11-15T22:08:31Z @kj amended text "in the Launcher AI Assistants tiles each of the five assistant glyphs renders at 75% of the Terminal tile glyph, within 1px, the five equal within 1px and centred in the tile icon area; only the tiles change - section header icon, sidebar tabs, panel header, menus keep their size" -> "LOW; in the Launcher AI Assistants tiles every assistant glyph renders at 75% of the Terminal tile glyph, within 1px, all equal within 1px and centred in the tile icon area; only the tiles change - section header icon, sidebar tabs, panel header, menus keep their size"
+  - log: 2026-11-16T00:28:33Z @kj re-verified with seven assistants: launcher-tiles glyph test green, Antigravity glyph sever red (40.75px against 32.5px); Galata 115/115 at v1.3.22
 
 ## DeepSeek Provider `DEEP`
 
@@ -2074,7 +2108,7 @@ The jupyterlab-ai-code-assistants command: session operations for each assistant
   - test-tags: UNIT
   - log: 2026-10-27T12:41:31Z @kj added
   - log: 2026-10-27T22:31:10Z @kj closed: the command renames, deletes, branches and makes current a session of every assistant through the server routes; a session a live terminal runs and a project's current session are refused with exit 4, and an operation an assistant does not offer exits 4 naming the assistant; reason: the line names the tests, the mutations that redden them, build 1.2.283 and the gate counts, as the close stage requires
-- [x] `ACC-CLI-226-MOVE` **Move a session to another project** - HIGH; sessions move moves a session of any assistant to another project: afterwards it lists under the target project and no longer under the source, and its assistant resumes it in the target folder. A session a live terminal runs is refused. A Codex session is forked into the target and its source retired, so its id changes and the command prints it.
+- [x] `ACC-CLI-226-MOVE` **Move a session to another project** - HIGH; sessions move moves a session of Claude, Codex, Kimi, Gemini or DeepSeek to another project: afterwards it lists under the target project and no longer under the source, and its assistant resumes it in the target folder. Copilot and Antigravity sessions do not move. A session a live terminal runs is refused. A Codex session is forked into the target and its source retired, so its id changes and the command prints it.
   - evidence: test_session_push.py test_claude_, test_kimi_, test_gemini_ and test_deepseek_move_lists_under_the_target_only, test_codex_move_forks_into_the_target_and_retires_the_source[True] and [False], test_a_move_of_a_live_conversation_is_refused for all five; test_cli.py test_move_lists_the_session_under_the_target_only and test_to_and_project_are_made_absolute_on_the_client; mutations redden them: the live-id check, the Claude cwd record, the Kimi re-root, the Gemini projectHash, the DeepSeek header cwd, the Codex fork cwd and source retirement, to_trash passed to the Codex source disposal, the move line naming the old id; server-verify-3 moved all five on a scratch server, Codex with the real codex 0.163.0 with trash on and off, and Codex read the fork's turns back in the target; no model-backed resume was run; build 1.2.283 (make install): Jest 437/437, pytest 512 passed 0 failed, Galata 98 of 99 with the one failure, ACC-PANE-182 in the unchanged panel-layout.spec.ts, passing 1 of 1 on rerun; pm-tools check 0 errors; round 14 (DEF-PROV-367-MOVE-ENCODE): test_session_push.py test_claude_move_files_the_transcript_where_claude_code_looks moves a Claude session into '@my utils' and finds it under the directory Claude Code's rule [^a-zA-Z0-9] -> - names, beside that folder's own conversation, in one row; restoring the old _encode_path and _encode_segment bodies reddens it
   - test: pytest per assistant against a scratch store: the moved session lists under the target only; a live session is refused
   - test-tags: UNIT
@@ -2082,6 +2116,7 @@ The jupyterlab-ai-code-assistants command: session operations for each assistant
   - log: 2026-10-27T19:03:01Z @kj edited text "sessions move moves a session of any assistant to another project: afterwards it lists under the target project and no longer under the source, and its assistant resumes it in the target folder. A session a live terminal runs is refused." -> "sessions move moves a session of any assistant to another project: afterwards it lists under the target project and no longer under the source, and its assistant resumes it in the target folder. A session a live terminal runs is refused. A Codex session is forked into the target and its source retired, so its id changes and the command prints it."; reason: owner ruling 2026-10-27: Codex has no interface to change a session's folder; fork through Codex's app-server, then archive or delete the source
   - log: 2026-10-27T22:31:10Z @kj closed: sessions move moves a session of each of the five assistants: it lists under the target project only and the assistant's resume records name the target; a live session is refused with 409 session_live; a Codex session is forked into the target and its source archived, and the command prints the new id; reason: the line names the tests, the mutations that redden them, build 1.2.283 and the gate counts, as the close stage requires
   - log: 2026-10-27T23:14:06Z @kj edited evidence "test_session_push.py test_claude_, test_kimi_, test_gemini_ and test_deepseek_move_lists_under_the_target_only, test_codex_move_forks_into_the_target_and_retires_the_source[True] and [False], test_a_move_of_a_live_conversation_is_refused for all five; test_cli.py test_move_lists_the_session_under_the_target_only and test_to_and_project_are_made_absolute_on_the_client; mutations redden them: the live-id check, the Claude cwd record, the Kimi re-root, the Gemini projectHash, the DeepSeek header cwd, the Codex fork cwd and source retirement, to_trash passed to the Codex source disposal, the move line naming the old id; server-verify-3 moved all five on a scratch server, Codex with the real codex 0.163.0 with trash on and off, and Codex read the fork's turns back in the target; no model-backed resume was run; build 1.2.283 (make install): Jest 437/437, pytest 512 passed 0 failed, Galata 98 of 99 with the one failure, ACC-PANE-182 in the unchanged panel-layout.spec.ts, passing 1 of 1 on rerun; pm-tools check 0 errors" -> "test_session_push.py test_claude_, test_kimi_, test_gemini_ and test_deepseek_move_lists_under_the_target_only, test_codex_move_forks_into_the_target_and_retires_the_source[True] and [False], test_a_move_of_a_live_conversation_is_refused for all five; test_cli.py test_move_lists_the_session_under_the_target_only and test_to_and_project_are_made_absolute_on_the_client; mutations redden them: the live-id check, the Claude cwd record, the Kimi re-root, the Gemini projectHash, the DeepSeek header cwd, the Codex fork cwd and source retirement, to_trash passed to the Codex source disposal, the move line naming the old id; server-verify-3 moved all five on a scratch server, Codex with the real codex 0.163.0 with trash on and off, and Codex read the fork's turns back in the target; no model-backed resume was run; build 1.2.283 (make install): Jest 437/437, pytest 512 passed 0 failed, Galata 98 of 99 with the one failure, ACC-PANE-182 in the unchanged panel-layout.spec.ts, passing 1 of 1 on rerun; pm-tools check 0 errors; round 14 (DEF-PROV-367-MOVE-ENCODE): test_session_push.py test_claude_move_files_the_transcript_where_claude_code_looks moves a Claude session into '@my utils' and finds it under the directory Claude Code's rule [^a-zA-Z0-9] -> - names, beside that folder's own conversation, in one row; restoring the old _encode_path and _encode_segment bodies reddens it"; reason: round-14 review plan change 1: the Claude move now encodes the target with Claude Code's own rule, and the evidence names its test and mutation
+  - log: 2026-11-16T00:59:58Z @kj amended text "sessions move moves a session of any assistant to another project: afterwards it lists under the target project and no longer under the source, and its assistant resumes it in the target folder. A session a live terminal runs is refused. A Codex session is forked into the target and its source retired, so its id changes and the command prints it." -> "HIGH; sessions move moves a session of Claude, Codex, Kimi, Gemini or DeepSeek to another project: afterwards it lists under the target project and no longer under the source, and its assistant resumes it in the target folder. Copilot and Antigravity sessions do not move. A session a live terminal runs is refused. A Codex session is forked into the target and its source retired, so its id changes and the command prints it."; reason: full criterion text kept, only the assistant list changes
 - [x] `ACC-CLI-227-SYNC` **Panels show a command's change at once** - HIGH; After the command changes a session, every open panel of that assistant, in every window on that server, shows the change at once, without a browser reload and without waiting for the panel's next poll.
   - evidence: Galata session-cli.spec.ts 'ACC-CLI-227 - a rename made with the command shows in the open panel within a second, with no reload' passed with the 30 s poll swallowed (screenshot acc-cli-227.png); Jest index.spec.ts 'ACC-CLI-227 - a sessions-changed push re-reads only its own panel, with no status request', panel.spec.ts 'waits for the row context menu to close, then reads once' and 'pushed during a read in flight, reads exactly once more after it'; pytest test_every_changing_route_pushes_sessions_changed for 8 routes; mutations redden them: the push re-reads every panel, a read under an open menu, the menu-close re-run removed, no read after the one in flight, each of the 7 server push flags; build 1.2.283 (make install): Jest 437/437, pytest 512 passed 0 failed, Galata 98 of 99 with the one failure, ACC-PANE-182 in the unchanged panel-layout.spec.ts, passing 1 of 1 on rerun; pm-tools check 0 errors
   - test: Galata: rename a session with the command and see the new name in the open panel within a second
@@ -2100,4 +2135,172 @@ The jupyterlab-ai-code-assistants command: session operations for each assistant
   - test-tags: FUNCTIONAL
   - log: 2026-10-27T12:41:32Z @kj added
   - log: 2026-10-27T22:31:10Z @kj closed: the shipped skill tells an agent to list, rename, move, delete, branch and switch sessions with the command and to run refresh after installing or removing an assistant CLI; a hand stamp is taught only for when no server answers; reason: the line names the tests, the mutations that redden them, build 1.2.283 and the gate counts, as the close stage requires
+
+## Antigravity Provider `AGY`
+
+New provider - no extension to port from. Google Antigravity CLI agy, the Gemini CLI's successor, installed to ~/.local/bin/agy by antigravity.google/cli/install.sh; the lab installer will offer it. Store under ~/.gemini/antigravity-cli/, layout from community guides, unconfirmed on a real install. Resume by --conversation <id>; launch mode --dangerously-skip-permissions
+
+- log: 2026-11-15T22:08:25Z @kj category created
+
+- [x] `ACC-AGY-243-GLYPH` **Antigravity's own mark** - MEDIUM; the Antigravity sidebar tab and Launcher tile show the arch of Antigravity's own logo (antigravity.google/favicon.svg), one monochrome jp-icon3 path, told apart from the Gemini spark at 16px in light and dark themes; the panel header stays text only, as for every assistant (ACC-PANE-232-TITLE)
+  - evidence: Galata ACC-AGY-243-GLYPH green, red when the bundle path is swapped for the Gemini spark; tab and tile screenshots show the arch, light and dark; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: Galata screenshot of sidebar tab and Launcher tile, light and dark
+  - test-tags: E2E
+  - log: 2026-11-15T22:08:25Z @kj added
+  - log: 2026-11-15T22:27:39Z @kj amended title "Gemini spark with a subglyph" -> "Antigravity's own mark"; text "the Antigravity sidebar tab, panel header and Launcher tile show the Gemini spark plus the subglyph the Star Colonel picks from the glyph proposal page; one monochrome jp-icon3 glyph, told apart from Gemini at 16px in light and dark themes" -> "MEDIUM; the Antigravity sidebar tab, panel header and Launcher tile show the arch of Antigravity's own logo (antigravity.google/favicon.svg), one monochrome jp-icon3 path, told apart from the Gemini spark at 16px in light and dark themes"
+  - log: 2026-11-15T22:27:39Z @kj Star Colonel picked candidate F, Antigravity's own mark, over five Gemini-spark variants on the glyph proposal page
+  - log: 2026-11-16T00:08:36Z @kj amended text "the Antigravity sidebar tab, panel header and Launcher tile show the arch of Antigravity's own logo (antigravity.google/favicon.svg), one monochrome jp-icon3 path, told apart from the Gemini spark at 16px in light and dark themes" -> "MEDIUM; the Antigravity sidebar tab and Launcher tile show the arch of Antigravity's own logo (antigravity.google/favicon.svg), one monochrome jp-icon3 path, told apart from the Gemini spark at 16px in light and dark themes; the panel header stays text only, as for every assistant (ACC-PANE-232)"
+  - log: 2026-11-16T00:08:36Z @kj edited test "Galata screenshot of tab, header and tile beside the Gemini ones, light and dark" -> "Galata screenshot of sidebar tab and Launcher tile, light and dark"
+  - log: 2026-11-16T00:08:43Z @kj amended text "the Antigravity sidebar tab and Launcher tile show the arch of Antigravity's own logo (antigravity.google/favicon.svg), one monochrome jp-icon3 path, told apart from the Gemini spark at 16px in light and dark themes; the panel header stays text only, as for every assistant (ACC-PANE-232)" -> "MEDIUM; the Antigravity sidebar tab and Launcher tile show the arch of Antigravity's own logo (antigravity.google/favicon.svg), one monochrome jp-icon3 path, told apart from the Gemini spark at 16px in light and dark themes; the panel header stays text only, as for every assistant (ACC-PANE-232-TITLE)"
+  - log: 2026-11-16T00:28:27Z @kj closed
+- [x] `ACC-AGY-244-STORE-SCAN` **Store scan** - HIGH; conversations are read in place from the agy store under ~/.gemini/antigravity-cli/, never via a CLI listing; each lists under the project directory it ran in, titled by its name, else its first prompt line; a conversation with no known directory produces no row
+  - evidence: test_antigravity_store.py on the real schema green, 22 severs red; real store: owner row 'workspace' under /home/lab/workspace, trashed test rows hidden (tmp/workflows/agy-real/real.json); jest 475, pytest 578, Galata 119/119 at v1.3.26
+  - mechanism: 2026-11-16T02:09:47Z @kj rows from conversation_summaries.db read-only; project = first file URI in workspace_uris (JSON list); label = annotations/<id>.pbtxt title, else title, else preview; measured on agy 1.5.9 (tmp/workflows/agy-real/findings.md)
+  - test: pytest on a sample agy store: two projects, a named and an unnamed conversation, one with no directory
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:25Z @kj added
+  - log: 2026-11-16T00:28:27Z @kj closed
+  - log: 2026-11-16T00:59:59Z @kj review round 1 deferred to a real agy install: whether the db records the workspace URI; the pending-launch fallback misfiles after an abandoned + launch and swaps two close launches
+  - log: 2026-11-16T01:15:18Z @kj review round 2 SHIP; 3 MINOR deferred to a real agy install: full-match-first misreads a quoted file URI placed before the workspace URI, and a protobuf URI followed by tag byte 2 when a sibling folder named project2 exists
+  - log: 2026-11-16T01:47:39Z @kj reopened; evidence retired: test_antigravity_store.py green; red on title, first-prompt, workspace file:// read and no-directory filter severs; no subprocess import; pytest 575, jest 468, Galata 115/115 green at v1.3.22; reason: not met on the real agy 1.5.9 store: it keeps conversation_summaries.db, which the reader ignores (DEF-PROV-392-AGY-SUMMARIES, DEF-PROV-393-AGY-TITLES)
+  - log: 2026-11-16T02:09:47Z @kj mechanism recorded; reason: replaces the community-report design
+  - log: 2026-11-16T03:56:07Z @kj closed
+  - log: 2026-11-16T05:01:29Z @kj review round 3: the read-only WAL open leaves SQLite's empty -shm and -wal side files in agy's store; immaterial, agy accepts them; immutable=1 would skip uncheckpointed rows, so kept as is
+- [x] `ACC-AGY-245-RESUME` **Resume by id** - HIGH; clicking a row resumes that conversation in the project directory with agy --conversation <id>, never --continue, which picks the most recent
+  - evidence: test_acc_agy_245 and Galata ACC-AGY-245-RESUME green; both red when --conversation <id> becomes --continue; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: pytest launch argv for a stored id; Galata row click spawns the fake agy with --conversation <id>
+  - test-tags: UNIT, E2E
+  - log: 2026-11-15T22:08:26Z @kj added
+  - log: 2026-11-16T00:28:28Z @kj closed
+- [x] `ACC-AGY-246-NEW-SESSION` **New conversation** - HIGH; the header button starts plain agy in the project directory; agy takes no id for a new conversation, so its row appears on the first poll after agy writes it
+  - evidence: Galata ACC-AGY-246-NEW-SESSION green (argv [], row shown); red when the pending launch record is skipped; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: Galata: new session spawns the fake agy without --conversation; its stored conversation shows as a row
+  - test-tags: E2E
+  - log: 2026-11-15T22:08:26Z @kj added
+  - log: 2026-11-16T00:28:28Z @kj closed
+  - log: 2026-11-16T03:56:08Z @kj re-verified: plain agy writes workspace_uris for its folder, the row lists there; pending-launch record removed; jest 475, pytest 578, Galata 119/119 at v1.3.26
+- [x] `ACC-AGY-247-FORK` **Branch copies the conversation** - HIGH; agy has no fork flag (/fork works only inside the TUI), so Branch copies the conversation under a fresh id with the given name and opens the copy; the parent is untouched
+  - mechanism: 2026-11-16T02:09:48Z @kj SQLite backup of conversations/<id>.db, the 36-character id replaced in every column that holds it, brain/<id> copied, annotations/<new>.pbtxt carries the name; agy 1.5.9 resumes such a copy
+  - evidence: test_acc_agy_247 green; red on id swap removed, parent overwritten, title write removed, raw db copy instead of SQLite backup; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: pytest fork on the sample store: new id listed, parent bytes unchanged
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:26Z @kj added
+  - log: 2026-11-16T00:28:28Z @kj closed
+  - log: 2026-11-16T02:09:48Z @kj mechanism recorded; reason: measured on agy 1.5.9
+  - log: 2026-11-16T03:56:08Z @kj re-verified on the real agy 1.5.9 store: id-rewriting copy resumes with --conversation, parent db sha256 unchanged, name from annotations (tmp/workflows/agy-real/real.json step3); jest 475, pytest 578, Galata 119/119 at v1.3.26
+- [x] `ACC-AGY-248-RENAME` **Rename** - MEDIUM; renaming sets the title agy stores for the conversation, so the panel row and the agy /resume list show the same name
+  - evidence: annotations/<id>.pbtxt written with escaping; real store: panel shows 'real-rename-1' at once, agy row adopts it on the next turn (tmp/workflows/agy-real/real.json); jest 475, pytest 578, Galata 119/119 at v1.3.26
+  - mechanism: 2026-11-16T02:09:47Z @kj rename writes annotations/<id>.pbtxt as title:"<name>", the file agy's /rename writes and reads back on start; the summaries table is rebuilt on every agy start
+  - test: pytest rename on the sample store, re-read the title
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:27Z @kj added
+  - log: 2026-11-16T00:28:29Z @kj closed
+  - log: 2026-11-16T00:59:59Z @kj review round 1 deferred to a real agy install: where agy keeps titles; cache/conversations.json is a guess, so Rename and a branch name may not persist
+  - log: 2026-11-16T01:47:39Z @kj reopened; evidence retired: test_acc_agy_248 green; red when the title write is removed; agy /resume reading cache/conversations.json unconfirmed without agy; pytest 575, jest 468, Galata 115/115 green at v1.3.22; reason: not met on the real agy 1.5.9 store: it keeps conversation_summaries.db, which the reader ignores (DEF-PROV-392-AGY-SUMMARIES, DEF-PROV-393-AGY-TITLES)
+  - log: 2026-11-16T02:09:47Z @kj mechanism recorded; reason: replaces the guessed cache/conversations.json
+  - log: 2026-11-16T03:56:07Z @kj closed
+- [x] `ACC-AGY-249-SKIP-PERMS` **Skip-permissions launch mode** - HIGH; one boolean setting, off by default, adds --dangerously-skip-permissions to new and resumed launches, with the shield menu entries the other assistants use
+  - evidence: test_acc_agy_249 green; red when the flag append is removed or the schema default flips to true; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: pytest launch argv with the mode on and off; settings schema default false
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:27Z @kj added
+  - log: 2026-11-16T00:28:29Z @kj closed
+- [x] `ACC-AGY-250-SHARED-HOME` **Edge: Gemini and agy share ~/.gemini** - MEDIUM; the Gemini panel never lists agy conversations and the Antigravity panel never lists Gemini chats, though both stores sit under ~/.gemini
+  - evidence: test_acc_agy_250 green; red when agy_home becomes ~/.gemini; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: pytest with both layouts under one ~/.gemini; each provider lists only its own
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:27Z @kj added
+  - log: 2026-11-16T00:28:29Z @kj closed
+- [x] `ACC-AGY-263-GONE-FILE` **Edge: deleted conversation is not listed** - MEDIUM; a conversation_summaries row whose conversations/<id>.db is gone produces no row; agy keeps such rows after a delete and hides them itself
+  - evidence: summaries rows without conversations/<id>.db list nothing (pytest green, red when the check is removed); real store hides 3 trashed conversations; jest 475, pytest 578, Galata 119/119 at v1.3.26
+  - test: pytest on a sample store: a summaries row without its conversation file lists nothing
+  - test-tags: UNIT
+  - log: 2026-11-16T02:09:47Z @kj added
+  - log: 2026-11-16T03:56:07Z @kj closed
+- [x] `ACC-AGY-264-TITLE-ESCAPES` **agy titles its own terminal tab** - MEDIUM; every agy, launched from the panel or by hand, sets its tab title itself through agy's title setting in ~/.gemini/antigravity-cli/settings.json, which runs the extension's title command: U+2733 plus the label when idle, U+25D0 and U+25D1 alternating every 960 ms plus the label while working (Claude Code's style); label = the annotations title, else agy's title, else 'Antigravity'
+  - evidence: real agy 1.5.9, title key in settings.json, one turn under a pty: U+2733 Antigravity, then U+25D0/U+25D1 about every 960 ms while working, then U+2733 plus agy's title; no loop left; test_agy_title.py 10 tests mutation-checked; pytest 588, jest 468, Galata 117/117 at v1.3.30
+  - related: ACC-PANE-262-TAB-TITLE - the extension-side naming this may replace for agy
+  - overrides: ACC-PANE-262-TAB-TITLE
+  - test: pytest drives the title command with agy payloads: idle and working output, one busy loop per agy alternating the two half-circle marks on a pty, loop ends on idle and when agy exits; real agy under a pty shows the OSC 2 sequences
+  - test-tags: INTEGRATION, E2E
+  - log: 2026-11-16T05:11:39Z @kj added; reason: states both the visible behaviour and the no-settings-write constraint
+  - log: 2026-11-16T05:32:23Z @kj edited test "pty capture of a panel-launched agy turn shows OSC 0/2 with the label, spinner frames during the turn and the plain label after; ~/.gemini/antigravity-cli/settings.json unchanged" -> "pytest drives the title command with agy payloads: idle and working output, one busy loop per agy writing ◐/◑ to a pty, loop ends on idle and when agy exits; real agy under a pty shows the OSC 2 sequence"
+  - log: 2026-11-16T05:32:33Z @kj amended title "agy terminal title and busy marker by escape sequences" -> "agy titles its own terminal tab"; text "an agy terminal launched from the panel sets its own tab title through OSC escape sequences, like other CLIs: the conversation label when idle, an animated busy marker plus the label while agy works; through agy's own flag or setting if one exists, else hooks injected for that launch only, never written to the owner's agy settings" -> "MEDIUM; every agy, launched from the panel or by hand, sets its tab title itself through agy's title setting in ~/.gemini/antigravity-cli/settings.json, which runs the extension's title command: U+2733 plus the label when idle, U+25D0 and U+25D1 alternating every 960 ms plus the label while working (Claude Code's style); label = the annotations title, else agy's title, else 'Antigravity'"; reason: Star Colonel chose the global agy setting and the Claude Code style
+  - log: 2026-11-16T05:32:33Z @kj edited test "pytest drives the title command with agy payloads: idle and working output, one busy loop per agy writing ◐/◑ to a pty, loop ends on idle and when agy exits; real agy under a pty shows the OSC 2 sequence" -> "pytest drives the title command with agy payloads: idle and working output, one busy loop per agy alternating the two half-circle marks on a pty, loop ends on idle and when agy exits; real agy under a pty shows the OSC 2 sequences"
+  - log: 2026-11-16T06:15:28Z @kj closed
+  - log: 2026-11-16T06:22:48Z @kj review round 4 SHIP; 2 MINOR deferred: agy_title.py repeats the annotations constants and parse of providers/antigravity.py to stay stdlib-only; a finished agy tab is blank because agy itself sends an empty title on exit, as Claude Code does
+  - log: 2026-11-16T06:29:05Z @kj Star Colonel accepted SHIP and rejected both round 4 MINORs: no harm today; the blank finished tab is agy's own exit title, as with Claude Code
+
+## Copilot Provider `COPIL`
+
+New provider - no extension to port from. GitHub Copilot CLI copilot (npm @github/copilot); the lab installer does not offer it. Store: $COPILOT_HOME or ~/.copilot, session-state/<uuid>/ holding events.jsonl and workspace.yaml. New and resumed by --session-id <uuid>; no fork flag; launch mode --yolo
+
+- log: 2026-11-15T22:08:28Z @kj category created
+
+- [x] `ACC-COPIL-251-GLYPH` **Copilot glyph** - MEDIUM; the Copilot sidebar tab and Launcher tile show GitHub's Copilot mark (Octicons copilot-16, MIT) as one monochrome jp-icon3 glyph, legible at 16px in light and dark themes; the panel header stays text only, as for every assistant (ACC-PANE-232-TITLE)
+  - evidence: Galata ACC-COPIL-251-GLYPH green, red when jp-icon3 is removed from the bundle path; tab and tile screenshots, light and dark; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: Galata screenshot of sidebar tab and Launcher tile, light and dark
+  - test-tags: E2E
+  - log: 2026-11-15T22:08:28Z @kj added
+  - log: 2026-11-16T00:08:36Z @kj amended text "the Copilot sidebar tab, panel header and Launcher tile show GitHub's Copilot mark (Octicons copilot-16, MIT) as one monochrome jp-icon3 glyph, legible at 16px in light and dark themes" -> "MEDIUM; the Copilot sidebar tab and Launcher tile show GitHub's Copilot mark (Octicons copilot-16, MIT) as one monochrome jp-icon3 glyph, legible at 16px in light and dark themes; the panel header stays text only, as for every assistant (ACC-PANE-232)"
+  - log: 2026-11-16T00:08:37Z @kj edited test "Galata screenshot of tab, header and tile, light and dark" -> "Galata screenshot of sidebar tab and Launcher tile, light and dark"
+  - log: 2026-11-16T00:08:44Z @kj amended text "the Copilot sidebar tab and Launcher tile show GitHub's Copilot mark (Octicons copilot-16, MIT) as one monochrome jp-icon3 glyph, legible at 16px in light and dark themes; the panel header stays text only, as for every assistant (ACC-PANE-232)" -> "MEDIUM; the Copilot sidebar tab and Launcher tile show GitHub's Copilot mark (Octicons copilot-16, MIT) as one monochrome jp-icon3 glyph, legible at 16px in light and dark themes; the panel header stays text only, as for every assistant (ACC-PANE-232-TITLE)"
+  - log: 2026-11-16T00:28:30Z @kj closed
+- [x] `ACC-COPIL-252-STORE-SCAN` **Store scan** - HIGH; sessions are read in place from session-state/<uuid>/ under $COPILOT_HOME, else ~/.copilot; the project is cwd in workspace.yaml; the title is the session name, else the first user.message line; an unnamed session with no user message is not listed, as copilot 1.0.112 does; session-store.db is never read or written
+  - evidence: test_copilot_lists_named_and_unnamed_sessions_in_two_projects green, red without the hide rule and when a name stops listing; real copilot 1.0.112 scratch home: named and messaged sessions listed, 6 unnamed empty hidden; pytest 589, jest 468, Galata 118/118 at v1.3.31
+  - test: pytest on a sample store: named and unnamed sessions in two projects
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:28Z @kj added
+  - log: 2026-11-16T00:28:30Z @kj closed
+  - log: 2026-11-16T07:17:13Z @kj amended text "sessions are read in place from session-state/<uuid>/ under $COPILOT_HOME, else ~/.copilot; the project is cwd in workspace.yaml; the title is the session name, else the first user.message line; session-store.db is never read or written" -> "HIGH; sessions are read in place from session-state/<uuid>/ under $COPILOT_HOME, else ~/.copilot; the project is cwd in workspace.yaml; the title is the session name, else the first user.message line; an unnamed session with no user message is not listed, as copilot 1.0.112 does; session-store.db is never read or written"
+  - log: 2026-11-16T07:17:13Z @kj reopened: real copilot 1.0.112 hides unnamed empty sessions; DEF-PROV-399-COPIL-EMPTY; evidence retired: test_copilot_lists_named_and_unnamed_sessions_in_two_projects green; red on workspace.yaml cwd, name, first-prompt and COPILOT_HOME severs; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - log: 2026-11-16T08:29:23Z @kj closed
+- [x] `ACC-COPIL-253-LEGACY-FILE` **Edge: legacy flat session file** - MEDIUM; a pre-1.0.11 flat session-state/<uuid>.jsonl produces no row and is never resumed or forked, because copilot 1.0.112 refuses that format
+  - evidence: test_copilot_legacy_flat_file_produces_no_row green, red against the old reader; flat file in a copy of the real store: no row, launch refused; pytest 589 at v1.3.31
+  - test: pytest on a sample store holding one flat <uuid>.jsonl with and one without a cwd
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:29Z @kj added
+  - log: 2026-11-16T00:28:30Z @kj closed
+  - log: 2026-11-16T07:17:19Z @kj amended text "a pre-1.0.11 session stored as session-state/<uuid>.jsonl lists under the cwd its session.start event records, and produces no row when it records none" -> "MEDIUM; a pre-1.0.11 flat session-state/<uuid>.jsonl produces no row and is never resumed or forked, because copilot 1.0.112 refuses that format"
+  - log: 2026-11-16T07:17:19Z @kj reopened: real copilot 1.0.112 refuses flat sessions; DEF-PROV-401-COPIL-LEGACY; evidence retired: test_copilot_legacy_flat_file_lists_under_its_start_event_cwd green; red when the legacy branch or the no-cwd guard is removed; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - log: 2026-11-16T08:29:24Z @kj closed
+- [x] `ACC-COPIL-254-RESUME` **Resume by id** - HIGH; clicking a row resumes with copilot --session-id <uuid> in the project directory, never --resume or --continue, which match by id prefix, name or recency
+  - evidence: launch test and Galata ACC-COPIL-254-RESUME green; both red when --session-id becomes --resume; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: pytest launch argv for a stored id; Galata row click spawns the fake copilot with --session-id <uuid>
+  - test-tags: UNIT, E2E
+  - log: 2026-11-15T22:08:29Z @kj added
+  - log: 2026-11-16T00:28:31Z @kj closed
+- [x] `ACC-COPIL-255-NEW-SESSION` **New session under a minted id** - HIGH; a new session launches with --session-id <uuid> minted by the extension, so its row is tracked from the first poll
+  - evidence: launch test and Galata ACC-COPIL-255-NEW-SESSION green; red when the minted --session-id branch is removed; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: Galata: new session spawns the fake copilot with a fresh --session-id; the row carries that id
+  - test-tags: UNIT, E2E
+  - log: 2026-11-15T22:08:29Z @kj added
+  - log: 2026-11-16T00:28:31Z @kj closed
+- [x] `ACC-COPIL-256-FORK` **Branch copies the session** - HIGH; Copilot has no fork flag (/fork works only inside the TUI), so Branch copies the session directory under a fresh uuid without its inuse lock files, writes that id into workspace.yaml and the session.start event, names it and opens it; the parent is untouched
+  - evidence: test_copilot_fork_copies_the_session_under_a_fresh_id green, red without the inuse skip; real copilot holding the parent open: copy has no inuse files, new id in workspace.yaml and session.start; pytest 589 at v1.3.31
+  - test: pytest fork on the sample store: new directory and ids, parent bytes unchanged
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:30Z @kj added
+  - log: 2026-11-16T00:28:31Z @kj closed
+  - log: 2026-11-16T07:17:19Z @kj amended text "Copilot has no fork flag (/fork works only inside the TUI), so Branch copies the session directory under a fresh uuid, writes that id into workspace.yaml and the session.start event, names it and opens it; the parent is untouched" -> "HIGH; Copilot has no fork flag (/fork works only inside the TUI), so Branch copies the session directory under a fresh uuid without its inuse lock files, writes that id into workspace.yaml and the session.start event, names it and opens it; the parent is untouched"
+  - log: 2026-11-16T07:17:20Z @kj reopened: fork copied the running parent's inuse locks; DEF-PROV-400-COPIL-RUNNING; evidence retired: test_copilot_fork_copies_the_session_under_a_fresh_id green; red on session.start id, workspace.yaml id, parent overwrite and name severs; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - log: 2026-11-16T08:29:24Z @kj closed
+- [x] `ACC-COPIL-257-RENAME` **Rename** - MEDIUM; renaming sets name in the session's workspace.yaml, the name copilot --resume and /resume match on
+  - evidence: test_copilot_rename_sets_name_in_workspace_yaml green; red when os.replace is removed; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: pytest rename on the sample store, re-read workspace.yaml
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:30Z @kj added
+  - log: 2026-11-16T00:28:32Z @kj closed
+- [x] `ACC-COPIL-258-YOLO` **YOLO mode** - HIGH; one boolean yoloMode setting, off by default, adds --yolo to new and resumed launches, with the shield menu entries the other assistants use
+  - evidence: launch test green; red when the --yolo append is removed or the schema default flips to true; pytest 575, jest 468, Galata 115/115 green at v1.3.22
+  - test: pytest launch argv with the mode on and off; settings schema default false
+  - test-tags: UNIT
+  - log: 2026-11-15T22:08:30Z @kj added
+  - log: 2026-11-16T00:28:32Z @kj closed
+- [x] `ACC-COPIL-265-RUNNING` **Running session from the in-use lock** - HIGH; a copilot terminal is matched to the session it has open through the lock copilot writes, session-state/<id>/inuse.<pid>.lock, so a session opened with --resume, --continue or switched inside the TUI is marked running and its terminal is reused
+  - evidence: running and stale-lock pytests green, red on 5 severs; Galata ACC-COPIL-265 green, red without the lock lookup; real copilot --resume=<name> matched to its session for loader and native pid, cleared after /exit; Galata 118/118 at v1.3.31
+  - test: pytest on a sample store with inuse locks and argv without --session-id; Galata row of a running fake copilot is marked and reused
+  - test-tags: UNIT, E2E
+  - log: 2026-11-16T07:17:26Z @kj added
+  - log: 2026-11-16T08:29:24Z @kj closed
 

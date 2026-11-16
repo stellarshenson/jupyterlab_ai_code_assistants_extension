@@ -57,7 +57,7 @@ export const descriptor: IProviderDescriptor = {
       id: 'yoloMode',
       title: 'YOLO mode',
       description:
-        'When enabled, newly spawned and resumed sessions are launched with `--yolo`. Kimi auto-approves regular tool calls without asking - only enable in workspaces you trust.',
+        'Launch new and resumed sessions with `--yolo`; regular tool calls run unasked.',
       default: false,
       menuLabel: 'YOLO'
     }

@@ -1,2 +1,4 @@
 - [make build side effects](make-build-side-effects.md) — make build uninstalls the installed extension and may pip-install tools; report it when make install is not allowed
+- [galata stale venv bind](galata-stale-venv-bind.md) — ui-tests/.venv lags make install; bind repo package + labextension over it when pip is forbidden
 - [mutation restore keeps mtime](mutation-restore-keeps-mtime.md) — restore mutated src/ files with cp -p so the pytest lib guard needs no rebuild; schema test mutates through the generator
+- [before-copies get collected](before-copies-get-collected.md) — jest and pytest collect test copies under tmp/; suffix them .before

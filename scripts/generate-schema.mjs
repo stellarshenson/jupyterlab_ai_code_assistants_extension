@@ -29,7 +29,7 @@ const SHARED = {
     type: 'string',
     title: 'Presentation mode',
     description:
-      "How session rows are labelled, in every assistant's panel. `name` (default) shows the session name the assistant records for the project; the initial name is the project folder name, then the path is walked up to disambiguate when two projects share a folder name. `path` shows the project path relative to the JupyterLab notebook root (absolute if outside it).",
+      'Label session rows by the session `name` (default) or the project `path`.',
     oneOf: [
       { const: 'name', title: 'Name' },
       { const: 'path', title: 'Path' }
@@ -40,7 +40,7 @@ const SHARED = {
     type: 'integer',
     title: 'Recent items count',
     description:
-      'Number of sessions listed in the Recent section, sorted by last activity (descending). The section displays up to 10 rows and scrolls for the rest.',
+      'Number of sessions listed in the Recent section, sorted by last activity.',
     default: DEFAULT_RECENT_LIMIT,
     minimum: MIN_RECENT_LIMIT,
     maximum: MAX_RECENT_LIMIT
@@ -49,14 +49,14 @@ const SHARED = {
     type: 'boolean',
     title: 'Coloured terminal tabs',
     description:
-      "When enabled (default), a terminal running an assistant has its dock tab tinted with that conversation's colour. Turning it off clears the tint and stops it being applied. Requires `jupyterlab_colourful_tab_extension`, installed with this extension as a dependency.",
+      "Tint each assistant terminal's dock tab with its conversation's colour.",
     default: true
   },
   sidebar: {
     type: 'string',
     title: 'Sidebar position',
     description:
-      'Which JupyterLab sidebar to dock the assistant panels to. `right` (default) keeps them clear of the file browser. `left` puts them next to it.',
+      'Dock the assistant panels in the `left` or `right` (default) sidebar.',
     oneOf: [
       { const: 'left', title: 'Left' },
       { const: 'right', title: 'Right' }
@@ -67,7 +67,7 @@ const SHARED = {
     type: 'boolean',
     title: 'Sync file browser with opened session',
     description:
-      "When enabled (default), opening a session moves the JupyterLab file browser to that session's project folder. A project folder outside the JupyterLab root leaves the file browser where it is. The context menu of each panel header also toggles this.",
+      'Move the file browser to the project folder of each session you open.',
     default: true
   }
 };
@@ -77,7 +77,7 @@ function providerProperties(descriptor) {
   props[`providers.${descriptor.id}.enabled`] = {
     type: 'boolean',
     title: `${descriptor.label}: enabled`,
-    description: `Show the ${descriptor.panelTitle} panel. A panel appears only when this is on AND the \`${descriptor.cliBinary}\` binary is on PATH.`,
+    description: `Show the ${descriptor.panelTitle} panel.`,
     default: true
   };
   for (const mode of descriptor.launchModes ?? []) {
@@ -125,8 +125,9 @@ if (exported.size !== PROVIDERS.length) {
 
 const schema = {
   title: 'AI Code Assistants',
-  description:
-    'One settings section for every AI code assistant panel. Generated from the provider registry by `jlpm generate:schema` - edit the provider descriptors, not this file.',
+  description: 'Settings for every AI code assistant panel.',
+  $comment:
+    'Generated from the provider registry by `jlpm generate:schema` - edit the provider descriptors, not this file.',
   type: 'object',
   'jupyter.lab.setting-icon':
     'jupyterlab_ai_code_assistants_extension:assistants',

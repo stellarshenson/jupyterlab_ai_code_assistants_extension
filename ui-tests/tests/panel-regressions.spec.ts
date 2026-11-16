@@ -695,7 +695,7 @@ test('DEF-132 - a failed activation probe does not cost the sidebar its panel', 
   }
 
   // How this fails: read a failed probe as "nothing installed" and nothing
-  // docks - `0 of 4 assistant panel(s) docked`. The `waitForApplication`
+  // docks - `0 of 6 assistant panel(s) docked`. The `waitForApplication`
   // fixture then reds inside `page.goto()` at 30 s waiting for the claude
   // tab; the ABSENT loop above is the only assertion the fixture does not
   // already make.

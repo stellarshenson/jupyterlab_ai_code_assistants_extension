@@ -7,7 +7,6 @@ except ImportError:
     import warnings
     warnings.warn("Importing 'jupyterlab_ai_code_assistants_extension' outside a proper installation.")
     __version__ = "dev"
-from .core.routes import setup_route_handlers
 
 
 def _jupyter_labextension_paths():
@@ -31,6 +30,10 @@ def _load_jupyter_server_extension(server_app):
     server_app: jupyterlab.labapp.LabApp
         JupyterLab application instance
     """
+    # Imported here: `python -m <package>.agy_title` runs on every agy state
+    # change and must not pay for the server modules.
+    from .core.routes import setup_route_handlers
+
     setup_route_handlers(server_app.web_app)
     name = "jupyterlab_ai_code_assistants_extension"
     server_app.log.info(f"Registered {name} server extension")

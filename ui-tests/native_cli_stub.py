@@ -86,6 +86,50 @@ def _flag_value(argv, flag):
     return None
 
 
+if assistant == "copilot":
+    # copilot 1.0.112 writes the session folder as it starts: workspace.yaml
+    # with these keys, and inuse.<pid>.lock (the pid as text) beside a held
+    # inuse.<pid>.hold. events.jsonl waits for the first persisted event, so
+    # a new unnamed session is not listed until a prompt. `--session-id` with
+    # an unknown UUID and a plain start begin a session; `--resume=<id>` opens one.
+    session_id = (
+        _flag_value(args, "--session-id") or _flag_value(args, "--resume") or str(uuid.uuid4())
+    )
+    session = Path(os.environ["COPILOT_HOME"]) / "session-state" / session_id
+    if not session.exists():
+        session.mkdir(parents=True)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        (session / "workspace.yaml").write_text(
+            f"id: {session_id}\ncwd: {os.getcwd()}\nclient_name: github/cli\n"
+            "last_client_name: github/cli\nuser_named: false\nsummary_count: 0\n"
+            f"fork_count: 0\ncreated_at: {now}\nupdated_at: {now}\n",
+            encoding="utf-8",
+        )
+    (session / f"inuse.{os.getpid()}.lock").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    hold = (session / f"inuse.{os.getpid()}.hold").open("a")
+
+if assistant == "agy":
+    # agy holds presence/<id>.lock open for the conversation it runs, the only
+    # place a plain launch's id can be read from. A plain launch starts a
+    # conversation under an id only agy knows: agy writes its db and a
+    # summaries row whose workspace_uris names the folder it runs in.
+    # `--conversation <id>` resumes and writes nothing else here.
+    root = Path.home() / ".gemini" / "antigravity-cli"
+    conversation = _flag_value(args, "--conversation") or str(uuid.uuid4())
+    (root / "presence").mkdir(parents=True, exist_ok=True)
+    presence = (root / "presence" / f"{conversation}.lock").open("a")
+    if "--conversation" not in args:
+        (root / "conversations" / f"{conversation}.db").touch()
+        now = time.strftime("%Y-%m-%d %H:%M:%S+00:00", time.gmtime())
+        summaries = sqlite3.connect(root / "conversation_summaries.db")
+        summaries.execute(
+            "INSERT INTO conversation_summaries (conversation_id, preview, last_modified_time,"
+            " workspace_uris, last_user_input_time) VALUES (?, 'seed', ?, ?, ?)",
+            (conversation, now, json.dumps([Path.cwd().as_uri()]), now),
+        )
+        summaries.commit()
+        summaries.close()
+
 print(f"stub {assistant} running", flush=True)
 if assistant != "claude":
     while True:

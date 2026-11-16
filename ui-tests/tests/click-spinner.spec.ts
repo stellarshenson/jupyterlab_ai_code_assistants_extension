@@ -130,9 +130,15 @@ async function paintedColour(page: any, token: string): Promise<string> {
 }
 
 /** Every title the extension gives the spinner dialog. */
-const TITLES = ['Claude Code', 'Codex', 'Kimi', 'Gemini', 'DeepSeek'].flatMap(
-  label => [`Opening ${label}`, `Branching ${label} session`]
-);
+const TITLES = [
+  'Claude Code',
+  'Codex',
+  'Kimi',
+  'Gemini',
+  'DeepSeek',
+  'Copilot',
+  'Antigravity'
+].flatMap(label => [`Opening ${label}`, `Branching ${label} session`]);
 
 /** How far the spinner dialog's body and content overflow, at worst, over
  * one second of the ring turning, with the header cycling through every

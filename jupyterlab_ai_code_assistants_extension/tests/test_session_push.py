@@ -279,7 +279,10 @@ async def test_refresh_pushes_the_status_to_every_window(jp_fetch, jp_ws_fetch):
 
 # ------------------------------------------------- live sessions: delete
 
-PROVIDERS = ["claude", "codex", "deepseek", "gemini", "kimi"]
+PROVIDERS = ["antigravity", "claude", "codex", "copilot", "deepseek", "gemini", "kimi"]
+# Copilot and Antigravity declare no move, so the route refuses theirs before
+# it asks whether the conversation is live.
+MOVABLE = ["claude", "codex", "deepseek", "gemini", "kimi"]
 
 
 @pytest.fixture
@@ -725,7 +728,7 @@ def claude_project(scratch_stores, tmp_path):
     return claude_provider._encode_path(str(source)), session, source, target
 
 
-@pytest.mark.parametrize("provider_id", PROVIDERS)
+@pytest.mark.parametrize("provider_id", MOVABLE)
 async def test_a_move_of_a_live_conversation_is_refused(
     jp_fetch, present, running, monkeypatch, provider_id  # noqa: F811
 ):

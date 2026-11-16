@@ -206,3 +206,17 @@ def test_def_pane_331_every_key_the_frontend_reads_by_name_is_declared(propertie
     read = set(re.findall(r"(?:setting<\w+>|saveSetting)\(\s*'([^']+)'", source))
     assert read, "no settings key found in src/index.ts - check the pattern"
     assert read - set(properties) == set()
+
+
+def test_acc_sett_260_261_the_settings_page_text_is_terse(schema, properties):
+    """ACC-SETT-260 / ACC-SETT-261 - each setting is described in at most 15
+    words with no "When enabled" lead; the section description is at most 10
+    words, and the note on how the file is generated is a ``$comment``, which
+    the settings page does not show."""
+    for key, entry in properties.items():
+        words = entry["description"].split()
+        assert len(words) <= 15, f"{key}: {len(words)} words"
+        assert not entry["description"].startswith("When enabled"), key
+    assert len(schema["description"].split()) <= 10
+    assert "generate:schema" not in schema["description"]
+    assert "generate:schema" in schema["$comment"]

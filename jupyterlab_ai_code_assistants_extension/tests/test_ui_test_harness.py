@@ -116,8 +116,8 @@ def test_every_assistant_store_is_redirected_out_of_the_developer_history(
 ):
     """No test reads or writes the real assistant history.
 
-    Four assistants take an explicit root variable; Gemini derives its own from
-    ``Path.home()``, which the fake HOME already covers - and that HOME is set
+    Five assistants take an explicit root variable; Gemini and Antigravity
+    derive theirs from ``Path.home()``, which the fake HOME already covers - and that HOME is set
     in the spawn environment rather than here, because every Jupyter search path
     is resolved before this file runs.
     """
@@ -126,6 +126,7 @@ def test_every_assistant_store_is_redirected_out_of_the_developer_history(
         "CODEX_HOME",
         "KIMI_CODE_HOME",
         "DSH_HOME",
+        "COPILOT_HOME",
         "JUPYTERLAB_AI_CODE_ASSISTANTS_STATE_DIR",
     ):
         # The ASSIGNMENT, and its right-hand side. Matching the name alone

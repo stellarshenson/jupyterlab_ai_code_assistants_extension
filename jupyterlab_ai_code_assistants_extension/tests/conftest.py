@@ -4,9 +4,9 @@ Two invariants hold for every test in this package:
 
 * no test reads or writes a real assistant store - each one gets a scratch
   tree, pointed at through the same environment overrides the UI suite uses
-  (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``KIMI_CODE_HOME``, ``DSH_HOME``, and
-  ``HOME`` for Gemini, which resolves its root from the home directory like
-  the CLI does)
+  (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, ``KIMI_CODE_HOME``, ``DSH_HOME``,
+  ``COPILOT_HOME``, and ``HOME`` for Gemini and Antigravity, which resolve
+  their roots from the home directory like their CLIs do)
 * no test spawns an assistant CLI - the one listing path that would
   (``claude agents --json``, on every sessions poll) is stubbed out, so a
   wedged or absent binary cannot slow or fail the suite
@@ -55,6 +55,7 @@ def scratch_stores(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(scratch / "codex"))
     monkeypatch.setenv("KIMI_CODE_HOME", str(scratch / "kimi"))
     monkeypatch.setenv("DSH_HOME", str(scratch / "dsh"))
+    monkeypatch.setenv("COPILOT_HOME", str(scratch / "copilot"))
     # The DeepSeek launch preflights `$DSH_HOME/profiles/tui` and refuses
     # without it, so the scratch harness stands provisioned the way the UI
     # suite's does; the refusal test unmounts it itself.

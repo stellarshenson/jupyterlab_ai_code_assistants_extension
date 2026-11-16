@@ -2887,7 +2887,7 @@ def test_claude_a_pin_from_an_earlier_version_is_honoured(claude, scratch_stores
 
 def test_kimi_a_conversation_created_after_the_pin_supersedes_it(kimi):
     """The same rule through the core's ``pick_current``, which the stores of
-    Codex, Gemini, Kimi and DeepSeek share."""
+    Codex, Gemini, Kimi, DeepSeek, Copilot and Antigravity share."""
     store, root = kimi
     clicked = f"session_{new_uuid()}"
     new = f"session_{new_uuid()}"

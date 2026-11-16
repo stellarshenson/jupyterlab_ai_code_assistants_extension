@@ -16,13 +16,17 @@ import * as codex from './codex';
 import * as deepseek from './deepseek';
 import * as kimi from './kimi';
 import * as gemini from './gemini';
+import * as copilot from './copilot';
+import * as antigravity from './antigravity';
 
 export const PROVIDERS: IProviderModule[] = [
   claude,
   codex,
   deepseek,
   kimi,
-  gemini
+  gemini,
+  copilot,
+  antigravity
 ];
 
 export default PROVIDERS;

@@ -52,7 +52,7 @@ export const descriptor: IProviderDescriptor = {
       id: BYPASS_MODE,
       title: 'Bypass Codex approvals and sandbox',
       description:
-        'When enabled, newly spawned and resumed sessions are launched with `--dangerously-bypass-approvals-and-sandbox`. Bypasses every Codex approval prompt and sandbox - only enable in environments you trust.',
+        'Launch new and resumed sessions with `--dangerously-bypass-approvals-and-sandbox`; tool calls run unasked, outside the sandbox.',
       default: false,
       menuLabel: 'Bypass Approvals'
     }

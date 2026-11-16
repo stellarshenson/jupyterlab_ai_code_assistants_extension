@@ -1119,8 +1119,10 @@ describe('ACC-PROV - the activation contract', () => {
 
     it('ACC-PANE-232 - each panel is titled by its assistant name alone, and its Refresh command keeps Sessions', async () => {
       const names: Record<string, string> = {
+        antigravity: 'Antigravity',
         claude: 'Claude Code',
         codex: 'Codex',
+        copilot: 'Copilot',
         deepseek: 'DeepSeek',
         gemini: 'Gemini',
         kimi: 'Kimi Code'

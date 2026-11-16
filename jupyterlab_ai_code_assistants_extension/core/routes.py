@@ -34,6 +34,7 @@ from .store import (
     SessionNotFound,
     git_branch,
     load_jsonc,
+    process_children,
 )
 
 
@@ -106,16 +107,6 @@ def _wrap_with_init(argv: list[str]) -> list[str]:
     return ["/bin/bash", "-c", _INIT_WAITER, "ai-assistant-terminal-init", *argv]
 
 
-def _process_children(pid: int) -> list[int]:
-    if sys.platform != "linux":
-        return []
-    try:
-        with open(f"/proc/{pid}/task/{pid}/children", "r") as fh:
-            return [int(x) for x in fh.read().split() if x.isdigit()]
-    except OSError:
-        return []
-
-
 def _process_cwd_link(pid: int) -> str | None:
     try:
         return os.readlink(f"/proc/{pid}/cwd")
@@ -153,7 +144,7 @@ def _terminal_cwds(root_pid: int) -> list[str]:
             if resolved not in seen and os.path.isdir(resolved):
                 seen.add(resolved)
                 out.append(resolved)
-        queue.extend(_process_children(pid))
+        queue.extend(process_children(pid))
     return out
 
 
@@ -189,7 +180,7 @@ def _tree_assistant(root_pid: int) -> tuple[registry.Provider | None, str | None
         for provider in candidates:
             if provider.store.owns_pid(pid):
                 return provider, provider.store.session_id_for_pid(pid)
-        queue.extend(_process_children(pid))
+        queue.extend(process_children(pid))
     return None, None
 
 

@@ -39,11 +39,12 @@ PORT = os.environ.get("JUPYTER_TEST_PORT") or os.environ.get("JLAB_TEST_PORT") o
 SCRATCH = Path(os.environ.get("JLAB_TEST_SCRATCH") or (HERE / ".scratch" / PORT))
 
 # Binaries stubbed onto PATH, so their providers appear in the shell: the
-# claude, codex, kimi and deepseek (``dsh``) assistants; gemini has none. The
+# claude, codex, kimi, deepseek (``dsh``), copilot and antigravity (``agy``)
+# assistants; gemini has none. The
 # specs assert against the same split (`tests/shared.ts`), and cross-check it
 # against the server's own status roster so config and specs cannot drift
 # apart silently.
-STUBBED = ("claude", "codex", "kimi", "dsh")
+STUBBED = ("claude", "codex", "kimi", "dsh", "copilot", "agy")
 
 # The ONE background agent the stubbed roster answers with, and the
 # conversation it owns (DEF-88). Without it the roster was empty, so the "bg"
@@ -94,6 +95,7 @@ os.environ["CLAUDE_CONFIG_DIR"] = str(_home / ".claude")
 os.environ["CODEX_HOME"] = str(_home / ".codex")
 os.environ["KIMI_CODE_HOME"] = str(_home / ".kimi-code")
 os.environ["DSH_HOME"] = str(_home / ".dsh")
+os.environ["COPILOT_HOME"] = str(_home / ".copilot")
 # Favourites and pins this extension writes itself.
 os.environ["JUPYTERLAB_AI_CODE_ASSISTANTS_STATE_DIR"] = str(SCRATCH / "state")
 # The directory Jupyter serves, so seeded projects sit inside the served root
@@ -136,7 +138,7 @@ sleep infinity
 )
 for _name in STUBBED:
     _path = _stub_bin / _name
-    if _name in ("claude", "codex"):
+    if _name in ("claude", "codex", "copilot", "agy"):
         _path.write_text(
             f"#!{sys.executable}\n" + (HERE / "native_cli_stub.py").read_text(),
             encoding="utf-8",
@@ -494,6 +496,80 @@ _dsh_session.mkdir(parents=True, exist_ok=True)
 # its own run and makes it again in a `finally`, restoring the fixture for any
 # spec that runs after it.
 (Path(os.environ["DSH_HOME"]) / "profiles" / "tui").mkdir(parents=True, exist_ok=True)
+
+# One Copilot project holding one named session, in the 1.0.11+ directory
+# layout the provider reads: ``workspace.yaml`` carries the cwd and the name,
+# ``events.jsonl`` the start event and one prompt.
+_copilot_cwd = _root / "copilot-demo"
+_copilot_cwd.mkdir()
+_copilot_id = "33333333-3333-4333-8333-333333333333"
+_copilot_session = Path(os.environ["COPILOT_HOME"]) / "session-state" / _copilot_id
+_copilot_session.mkdir(parents=True)
+(_copilot_session / "workspace.yaml").write_text(
+    f"id: {_copilot_id}\ncwd: {_copilot_cwd}\nname: Copilot demo\n", encoding="utf-8"
+)
+(_copilot_session / "events.jsonl").write_text(
+    "".join(
+        json.dumps(r, separators=(",", ":")) + "\n"
+        for r in (
+            {"type": "session.start", "data": {"sessionId": _copilot_id, "context": {"cwd": str(_copilot_cwd)}}},
+            {"type": "user.message", "data": {"content": "seed"}},
+        )
+    ),
+    encoding="utf-8",
+)
+
+# Two Antigravity projects holding one named conversation each, in agy
+# 1.5.9's layout: a row in ``conversation_summaries.db`` (agy's own table, WAL
+# mode) whose ``workspace_uris`` names the folder, the conversation's
+# ``conversations/<id>.db``, and a transcript that wraps the prompt in
+# ``<USER_REQUEST>`` tags as agy does, which no row label may show
+# (DEF-PROV-392). ``agy-branchable`` exists for the spec that branches, so
+# ``agy-demo`` keeps its name. The stub agy adds a row the same way when it
+# starts a new conversation.
+_agy_root = _home / ".gemini" / "antigravity-cli"
+_agy_seeds = (
+    ("44444444-4444-4444-8444-444444444444", "agy-demo", "Antigravity demo"),
+    ("66666666-6666-4666-8666-666666666666", "agy-branchable", "Antigravity branchable"),
+)
+(_agy_root / "conversations").mkdir(parents=True)
+for _agy_id, _agy_folder, _ in _agy_seeds:
+    (_root / _agy_folder).mkdir()
+    (_agy_root / "conversations" / f"{_agy_id}.db").touch()
+    _agy_transcript = _agy_root / "brain" / _agy_id / ".system_generated" / "logs" / "transcript.jsonl"
+    _agy_transcript.parent.mkdir(parents=True)
+    _agy_transcript.write_text(
+        json.dumps({"type": "USER_INPUT", "userInput": {"userResponse": "<USER_REQUEST>\nseed\n</USER_REQUEST>"}})
+        + "\n",
+        encoding="utf-8",
+    )
+_agy_time = "2026-11-16 02:02:00.121729540+00:00"
+with sqlite3.connect(_agy_root / "conversation_summaries.db") as _connection:
+    _connection.execute("PRAGMA journal_mode=WAL")
+    _connection.execute(
+        "CREATE TABLE `conversation_summaries` (`conversation_id` text,"
+        '`title` text NOT NULL DEFAULT "",`preview` text NOT NULL DEFAULT "",'
+        "`step_count` integer NOT NULL DEFAULT 0,`last_modified_time` datetime NOT NULL,"
+        '`workspace_uris` text NOT NULL,`status` text NOT NULL DEFAULT "",'
+        '`source` text NOT NULL DEFAULT "",`project_id` text NOT NULL DEFAULT "",'
+        '`agent_name` text NOT NULL DEFAULT "",`parent_conversation_id` text NOT NULL DEFAULT "",'
+        '`nesting_depth` integer NOT NULL DEFAULT 0,`battle_id` text NOT NULL DEFAULT "",'
+        '`winning_conversation_id` text NOT NULL DEFAULT "",'
+        "`not_fully_idle` numeric NOT NULL DEFAULT false,`killed` numeric NOT NULL DEFAULT false,"
+        "`last_user_input_time` datetime NOT NULL,"
+        "`last_user_input_step_index` integer NOT NULL DEFAULT -1,"
+        '`app_data_dir` text NOT NULL DEFAULT "",`raw_summary` blob,'
+        '`group_id` text NOT NULL DEFAULT "",PRIMARY KEY (`conversation_id`))'
+    )
+    _connection.executemany(
+        "INSERT INTO conversation_summaries (conversation_id, title, preview,"
+        " last_modified_time, workspace_uris, last_user_input_time) VALUES (?, ?, 'seed', ?, ?, ?)",
+        [
+            (_agy_id, _agy_title, _agy_time, json.dumps([(_root / _agy_folder).as_uri()]), _agy_time)
+            for _agy_id, _agy_folder, _agy_title in _agy_seeds
+        ],
+    )
+_connection.close()
 
 from jupyterlab.galata import configure_jupyter_server  # noqa: E402
 

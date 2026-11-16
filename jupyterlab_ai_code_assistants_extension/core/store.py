@@ -165,6 +165,17 @@ def process_cmdline(pid: int) -> bytes | None:
         return None
 
 
+def process_children(pid: int) -> list[int]:
+    """The pids of a process's direct children; empty off Linux."""
+    if sys.platform != "linux":
+        return []
+    try:
+        with open(f"/proc/{pid}/task/{pid}/children", "r") as fh:
+            return [int(x) for x in fh.read().split() if x.isdigit()]
+    except OSError:
+        return []
+
+
 def cmdline_args(cmdline: bytes) -> list[str]:
     """A NUL-separated ``/proc`` cmdline as its argument list."""
     return [part.decode("utf-8", "replace") for part in cmdline.split(b"\x00") if part]

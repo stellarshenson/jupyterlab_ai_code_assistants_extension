@@ -1,0 +1,4 @@
+- [agy store mechanics](agy-store-mechanics.md) — titles in annotations/<id>.pbtxt; rows rebuilt on start; forks need an own record until agy opens them
+- [agy title setting](agy-title-setting.md) — global `title` key runs agy_title.py; light package init; tty before setsid; fake-agy comm trap
+- [copilot store mechanics](copilot-store-mechanics.md) — folders + workspace.yaml name authoritative; locks per opened session, never moved; 403 on turns; sessions import makes events
+- [workflow baselines](workflow-baselines.md) — before/ copies of test files take a .before suffix, or make test collects them

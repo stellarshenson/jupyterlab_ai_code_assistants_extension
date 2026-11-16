@@ -172,8 +172,10 @@ test('ACC-PANE-232 - each panel header reads the assistant name alone', async ({
   page
 }) => {
   const names: Record<string, string> = {
+    antigravity: 'Antigravity',
     claude: 'Claude Code',
     codex: 'Codex',
+    copilot: 'Copilot',
     deepseek: 'DeepSeek',
     kimi: 'Kimi Code'
   };

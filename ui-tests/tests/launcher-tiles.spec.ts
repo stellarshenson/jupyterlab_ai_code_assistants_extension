@@ -156,11 +156,12 @@ test('ACC-LNCH-143 - one tile per available assistant, under AI Assistants', asy
   await expect(page.locator(SECTION_TITLE, { hasText: CATEGORY })).toHaveCount(
     1
   );
-  // Label for label, in the roster's order. This is NOT a proof of the tile
-  // RANK (ACC-LNCH-158): the three available assistants happen to read the
-  // same alphabetically as they do in the registry barrel, so the unit tier
-  // owns that claim and this one only says the right tiles are here.
-  expect(await tileLabels(page)).toEqual(available.map(p => p.label));
+  // Label for label, in any order. The tile RANK (ACC-LNCH-158) follows the
+  // registry barrel while the roster is alphabetical, and the unit tier owns
+  // that claim; this one only says the right tiles are here.
+  expect((await tileLabels(page)).sort()).toEqual(
+    available.map(p => p.label).sort()
+  );
 
   // Each tile carries the provider icon the descriptor names - the Launcher
   // renders a LabIcon into the card, so an unresolved icon leaves no svg.
